@@ -51,5 +51,5 @@ export async function POST(req: Request) {
   const publicUrl = `https://pub-14794881d3f446c2b026b4c2d9715c0a.r2.dev/${fileName}`;
 
   return Response.json({ url: publicUrl });
-
+ }  
 }
