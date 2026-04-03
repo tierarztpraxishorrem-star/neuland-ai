@@ -20,11 +20,14 @@ export async function POST(req: NextRequest) {
     const mimeType = file.type;
 
     const response = await openai.responses.create({
-      model: "gpt-4.1",
-      input: [
+  model: "gpt-4.1",
+  input: [
+    {
+      role: "user",
+      content: [
         {
-          role: "system",
-          content: `
+          type: "input_text",
+          text: `
 Du bist ein erfahrener Tierarzt.
 
 Analysiere medizinische Bilder oder Dokumente und gib eine strukturierte, fachlich korrekte Einschätzung.
@@ -37,23 +40,16 @@ Struktur:
 `
         },
         {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: "Bitte analysiere diese Datei:"
-            },
-            {
-              type: "input_image",
-              image_url: `data:${mimeType};base64,${base64}`
-            }
-          ]
+          type: "input_image",
+          image_url: `data:${mimeType};base64,${base64}`,
+          detail: "auto"
         }
-      ],
-      max_output_tokens: 1000,
-    });
+      ]
+    }
+  ]
+});
 
-    const result = response.output_text;
+const result = response.output_text;
 
     return NextResponse.json({ result });
 
