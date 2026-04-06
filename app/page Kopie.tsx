@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 
 export default function Home() {
@@ -200,7 +200,9 @@ const downloadReport = () => {
 
   URL.revokeObjectURL(url);
 };
-
+  const [chatMessages,setChatMessages] = useState<any[]>([]);
+const [chatInput,setChatInput] = useState("");
+const [chatLoading,setChatLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [progress, setProgress] = useState(0);
   const [patientLetter, setPatientLetter] = useState('');
@@ -820,7 +822,46 @@ const copyResult = async () => {
     console.error("Kopieren fehlgeschlagen", err);
   }
 };
+  const sendChat = async () => {
 
+  if(!chatInput.trim()) return;
+
+  const newMessages = [
+    ...chatMessages,
+    { role:"user", content:chatInput }
+  ];
+
+  setChatMessages(newMessages);
+  setChatInput("");
+  setChatLoading(true);
+
+  try{
+
+    const response = await fetch("/api/chat",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        messages:newMessages,
+        context:result
+      })
+    });
+
+    const data = await response.json();
+
+    setChatMessages([
+      ...newMessages,
+      { role:"assistant", content:data.answer }
+    ]);
+
+  }catch(err){
+    console.error(err);
+  }
+
+  setChatLoading(false);
+
+};
 
 const changePractice = (value: "TZN" | "TPH" | "TPW") => {
   setPractice(value);
@@ -1501,34 +1542,7 @@ fontSize: isMobile ? '22px' : '28px',  }}
     whiteSpace: 'pre-wrap',
   }}
 />
-<button
-  onClick={() => {
-    localStorage.setItem(
-      "activeCase",
-      JSON.stringify({
-        patient_name: patientName,
-        species,
-        age,
-        breed,
-        result
-      })
-    );
 
-    window.location.href = "/vetmind";
-  }}
-  style={{
-    marginTop: "12px",
-    padding: "12px 18px",
-    borderRadius: "10px",
-    background: brand.primary,
-    color: "#fff",
-    border: "none",
-    cursor: "pointer",
-    fontWeight: 600
-  }}
->
-  🧠 In VetMind analysieren
-</button>
 </div>
 )}
 
@@ -1536,296 +1550,352 @@ fontSize: isMobile ? '22px' : '28px',  }}
 {/* danach kommt dein Patientenbrief Bereich */}
 
 {patientLetter && (
-  <div
-    style={{
-      marginTop: '20px',
-      padding: '20px',
-      border: '1px solid #e5e7eb',
-      borderRadius: '12px',
-    }}
-  >
-    <h2 style={{ color: brand.primary }}>Patientenbrief</h2>
+  <div style={{
+    marginTop:'20px',
+    padding:'20px',
+    border:'1px solid #e5e7eb',
+    borderRadius:'12px'
+  }}>
 
-    <textarea
-      value={patientLetter}
-      onChange={(e) => setPatientLetter(e.target.value)}
-      style={{
-        width: '100%',
-        minHeight: '200px',
-        padding: '12px',
-        borderRadius: '8px',
-        border: '1px solid #ccc',
-        fontFamily: 'Arial',
-      }}
-    />
+<h2 style={{color:brand.primary}}>Patientenbrief</h2>
 
-    <div style={{ marginTop: '20px' }}>
-      <label
-        style={{
-          fontWeight: 700,
-          color: brand.primary,
-          display: 'block',
-          marginBottom: '6px',
-        }}
-      >
-        Medikamente
-      </label>
+<textarea
+value={patientLetter}
+onChange={(e)=>setPatientLetter(e.target.value)}
+style={{
+width:'100%',
+minHeight:'200px',
+padding:'12px',
+borderRadius:'8px',
+border:'1px solid #ccc',
+fontFamily:'Arial'
+}}
+/>
 
-      <textarea
-        value={medication}
-        onChange={(e) => setMedication(e.target.value)}
-        placeholder="z.B. Prednisolon 5 mg – 1x täglich"
-        style={{
-          width: '100%',
-          minHeight: '90px',
-          padding: '12px',
-          borderRadius: '8px',
-          border: '1px solid #ccc',
-          fontFamily: 'Arial',
-        }}
-      />
-    </div>
+<div style={{marginTop:'20px'}}>
 
-    <div style={{ marginTop: '16px' }}>
-      <label
-        style={{
-          fontWeight: 700,
-          color: brand.primary,
-          display: 'block',
-          marginBottom: '6px',
-        }}
-      >
-        Empfohlene Kontrolle
-      </label>
+<label style={{
+fontWeight:700,
+color:brand.primary,
+display:'block',
+marginBottom:'6px'
+}}>
+Medikamente
+</label>
 
-      <input
-        value={followUp}
-        onChange={(e) => setFollowUp(e.target.value)}
-        placeholder="z.B. Kontrolle in 7 Tagen"
-        style={{
-          width: '100%',
-          padding: '12px',
-          borderRadius: '8px',
-          border: '1px solid #ccc',
-        }}
-      />
-    </div>
-  </div>
+<textarea
+value={medication}
+onChange={(e)=>setMedication(e.target.value)}
+placeholder="z.B. Prednisolon 5 mg – 1x täglich"
+style={{
+width:'100%',
+minHeight:'90px',
+padding:'12px',
+borderRadius:'8px',
+border:'1px solid #ccc',
+fontFamily:'Arial'
+}}
+/>
+
+</div>
+
+<div style={{marginTop:'16px'}}>
+
+<label style={{
+fontWeight:700,
+color:brand.primary,
+display:'block',
+marginBottom:'6px'
+}}>
+Empfohlene Kontrolle
+</label>
+
+<input
+value={followUp}
+onChange={(e)=>setFollowUp(e.target.value)}
+placeholder="z.B. Kontrolle in 7 Tagen"
+style={{
+width:'100%',
+padding:'12px',
+borderRadius:'8px',
+border:'1px solid #ccc'
+}}
+/>
+
+</div>
+
+</div>
 )}
 
 <div
-  style={{
-    display: 'flex',
-    gap: '12px',
-    marginTop: '16px',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  }}
+style={{
+display:'flex',
+gap:'12px',
+marginTop:'16px',
+alignItems:'center',
+flexWrap:'wrap'
+}}
 >
-  <button
-    onClick={copyResult}
-    style={{
-      ...buttonStyle(brand.primary, 'white', false),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Bericht kopieren
-  </button>
 
-  <button
-    onClick={extractPatientLetter}
-    style={{
-      ...buttonStyle(brand.primary, 'white', false),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Patientenbrief erstellen
-  </button>
+<button
+onClick={copyResult}
+style={{
+...buttonStyle(brand.primary,'white',false),
+width:isMobile?'100%':'auto'
+}}
+>
+Bericht kopieren
+</button>
 
-  {patientLetter && (
-    <button
-      onClick={printPatientLetter}
-      style={{
-        ...buttonStyle('#0F6B74', 'white', false),
-        width: isMobile ? '100%' : 'auto',
-      }}
-    >
-      Patientenbrief drucken
-    </button>
-  )}
+<button
+onClick={extractPatientLetter}
+style={{
+...buttonStyle(brand.primary,'white',false),
+width:isMobile?'100%':'auto'
+}}
+>
+Patientenbrief erstellen
+</button>
 
-  <button
-    onClick={shareResult}
-    style={{
-      ...buttonStyle(brand.primary, 'white', false),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Bericht teilen
-  </button>
+{patientLetter && (
+<button
+onClick={printPatientLetter}
+style={{
+...buttonStyle('#0F6B74','white',false),
+width:isMobile?'100%':'auto'
+}}
+>
+Patientenbrief drucken
+</button>
+)}
 
-  <button
-    onClick={downloadReport}
-    style={{
-      ...buttonStyle('#fff', brand.primary, false, true),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Als Datei speichern
-  </button>
+<button
+onClick={shareResult}
+style={{
+...buttonStyle(brand.primary,'white',false),
+width:isMobile?'100%':'auto'
+}}
+>
+Bericht teilen
+</button>
 
-  {copied && (
-    <span style={{ color: '#1f7a1f', fontSize: '14px' }}>
-      In Zwischenablage kopiert
-    </span>
-  )}
+<button
+onClick={downloadReport}
+style={{
+...buttonStyle('#fff',brand.primary,false,true),
+width:isMobile?'100%':'auto'
+}}
+>
+Als Datei speichern
+</button>
+
+
+{copied && (
+<span style={{color:'#1f7a1f',fontSize:'14px'}}>
+In Zwischenablage kopiert
+</span>
+)}
+<div style={{marginTop:"30px"}}>
+
+<h3 style={{color:brand.primary}}>KI-Diskussion zum Fall</h3>
+
+<div
+style={{
+border:"1px solid #e5e7eb",
+borderRadius:"10px",
+padding:"14px",
+maxHeight:"300px",
+overflowY:"auto",
+background:"#fff",
+marginBottom:"12px"
+}}
+>
+
+{chatMessages.map((m,i)=>(
+<div key={i} style={{marginBottom:"10px"}}>
+<b>{m.role==="user"?"Du":"KI"}:</b>
+<div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
+</div>
+))}
+
+{chatLoading && <div>KI denkt nach...</div>}
+
 </div>
 
+<textarea
+value={chatInput}
+onChange={(e)=>setChatInput(e.target.value)}
+placeholder="Frage zum Fall stellen..."
+style={{
+width:"100%",
+minHeight:"70px",
+padding:"10px",
+borderRadius:"8px",
+border:"1px solid #ccc"
+}}
+/>
+
+<button
+onClick={sendChat}
+style={{
+marginTop:"10px",
+padding:"10px 18px",
+borderRadius:"8px",
+background:brand.primary,
+color:"#fff",
+border:"none",
+cursor:"pointer"
+}}
+>
+Frage stellen
+</button>
+
+</div>
+</div>
+
+</div>
 {selectedCase && (
-  <div
-    style={{
-      marginTop: '20px',
-      marginBottom: '20px',
-      padding: '20px',
-      border: '2px solid #0F6B74',
-      borderRadius: '12px',
-      background: '#f0f9fa',
-    }}
-  >
-    <h2 style={{ color: brand.primary }}>Aktiver Fall</h2>
+  <div style={{
+    marginBottom: "20px",
+    padding: "20px",
+    border: "2px solid #0F6B74",
+    borderRadius: "12px",
+    background: "#f0f9fa"
+  }}>
+
+    <h2 style={{ color: brand.primary }}>
+      Aktiver Fall
+    </h2>
 
     <div><b>Patient:</b> {selectedCase.patient_name}</div>
     <div><b>Tierart:</b> {selectedCase.species}</div>
     <div><b>Tierarzt:</b> {selectedCase.vet}</div>
     <div><b>Praxis:</b> {selectedCase.practice}</div>
 
-    <div style={{ marginTop: '10px' }}>
+    <div style={{ marginTop: "10px" }}>
       <b>Ergebnis:</b>
-
-      <textarea
-        value={selectedCase.result || ''}
-        onChange={(e) =>
-          setSelectedCase({ ...selectedCase, result: e.target.value })
-        }
+     <textarea
+  value={selectedCase.result || ""}
+  onChange={(e) =>
+    setSelectedCase({ ...selectedCase, result: e.target.value })
+  }
         style={{
-          width: '100%',
-          minHeight: '150px',
-          marginTop: '6px',
-          padding: '10px',
+          width: "100%",
+          minHeight: "150px",
+          marginTop: "6px",
+          padding: "10px"
         }}
       />
+<button
+  onClick={async () => {
+    const { error } = await supabase
+      .from("cases")
+      .update({
+        result: selectedCase.result
+      })
+      .eq("id", selectedCase.id);
 
-      <button
-        onClick={async () => {
-          const { error } = await supabase
-            .from('cases')
-            .update({
-              result: selectedCase.result,
-            })
-            .eq('id', selectedCase.id);
-
-          if (error) {
-            console.error('❌ Fehler beim Speichern', error);
-          } else {
-            alert('✅ Gespeichert');
-          }
-        }}
-        style={{
-          marginTop: '10px',
-          padding: '10px 16px',
-          background: brand.primary,
-          color: '#fff',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-        }}
-      >
-        Änderungen speichern
-      </button>
+    if (error) {
+      console.error("❌ Fehler beim Speichern", error);
+    } else {
+      alert("✅ Gespeichert");
+    }
+  }}
+  style={{
+    marginTop: "10px",
+    padding: "10px 16px",
+    background: brand.primary,
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer"
+  }}
+>
+  Änderungen speichern
+</button>
     </div>
+
+  </div>
+)}
+<div style={{
+  marginTop: "30px",
+  padding: "20px",
+  border: "1px solid #e5e7eb",
+  borderRadius: "12px"
+}}>
+
+<input
+  type="text"
+  placeholder="Fall suchen (Name, Tierart, Tierarzt...)"
+  value={search}
+  onChange={(e) => setSearch(e.target.value)}
+  style={{
+    width: "100%",
+    padding: "10px",
+    marginBottom: "12px",
+    borderRadius: "8px",
+    border: "1px solid #ccc"
+  }}
+/>
+
+<h2 style={{ color: brand.primary }}>Letzte Fälle</h2>
+<div style={{ marginBottom: "12px" }}>
+  <label style={{ cursor: "pointer", fontSize: "14px" }}>
+    <input
+      type="checkbox"
+      checked={showAllCases}
+      onChange={(e) => setShowAllCases(e.target.checked)}
+      style={{ marginRight: "6px" }}
+    />
+    Alle Fälle der Praxis anzeigen
+  </label>
+</div>
+
+{loadingCases && <div>Lade Fälle...</div>}
+
+{!loadingCases && (!cases || cases.length === 0) && (
+  <div style={{ color: brand.muted }}>
+    Noch keine Fälle vorhanden
   </div>
 )}
 
-<div
-  style={{
-    marginTop: '30px',
-    padding: '20px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '12px',
-  }}
->
-  <input
-    type="text"
-    placeholder="Fall suchen (Name, Tierart, Tierarzt...)"
-    value={search}
-    onChange={(e) => setSearch(e.target.value)}
+
+{cases
+  .filter((c) => {
+    const s = search.toLowerCase();
+
+    return (
+      c.patient_name?.toLowerCase().includes(s) ||
+      c.species?.toLowerCase().includes(s) ||
+      c.vet?.toLowerCase().includes(s)
+    );
+  })
+  .map((c, i) => (
+  <div
+    key={i}
+    onClick={() => setSelectedCase(c)}
     style={{
-      width: '100%',
-      padding: '10px',
-      marginBottom: '12px',
-      borderRadius: '8px',
-      border: '1px solid #ccc',
+      cursor: "pointer",
+      padding: "12px",
+      borderBottom: "1px solid #eee",
+      marginBottom: "8px"
     }}
-  />
+  >
+    <b>{c.patient_name || "Unbekannt"}</b> – {c.species || "—"}
 
-  <h2 style={{ color: brand.primary }}>Letzte Fälle</h2>
-
-  <div style={{ marginBottom: '12px' }}>
-    <label style={{ cursor: 'pointer', fontSize: '14px' }}>
-      <input
-        type="checkbox"
-        checked={showAllCases}
-        onChange={(e) => setShowAllCases(e.target.checked)}
-        style={{ marginRight: '6px' }}
-      />
-      Alle Fälle der Praxis anzeigen
-    </label>
-  </div>
-
-  {loadingCases && <div>Lade Fälle...</div>}
-
-  {!loadingCases && (!cases || cases.length === 0) && (
-    <div style={{ color: brand.muted }}>
-      Noch keine Fälle vorhanden
+    <div style={{ fontSize: "13px", color: brand.muted }}>
+      {c.vet || "—"} · {c.practice || "—"}
     </div>
-  )}
 
-  {cases
-    .filter((c) => {
-      const s = search.toLowerCase();
+    <div style={{ fontSize: "12px", color: "#999" }}>
+      {new Date(c.created_at).toLocaleString("de-DE")}
+    </div>
+  </div>
+))}
 
-      return (
-        c.patient_name?.toLowerCase().includes(s) ||
-        c.species?.toLowerCase().includes(s) ||
-        c.vet?.toLowerCase().includes(s)
-      );
-    })
-    .map((c, i) => (
-      <div
-        key={i}
-        onClick={() => setSelectedCase(c)}
-        style={{
-          cursor: 'pointer',
-          padding: '12px',
-          borderBottom: '1px solid #eee',
-          marginBottom: '8px',
-        }}
-      >
-        <b>{c.patient_name || 'Unbekannt'}</b> – {c.species || '—'}
-
-        <div style={{ fontSize: '13px', color: brand.muted }}>
-          {c.vet || '—'} · {c.practice || '—'}
-        </div>
-
-        <div style={{ fontSize: '12px', color: '#999' }}>
-          {new Date(c.created_at).toLocaleString('de-DE')}
-        </div>
-      </div>
-    ))}
 </div>
 
-      </div>
-    </div>
-  </main>
+</div>
+</main>
 );
 }

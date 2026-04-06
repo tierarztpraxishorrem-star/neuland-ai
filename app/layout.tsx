@@ -1,4 +1,4 @@
-import Sidebar from "@/components/Sidebar";
+import SidebarWrapper from "@/components/SidebarWrapper";
 import "./globals.css";
 
 export default function RootLayout({
@@ -8,11 +8,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="de">
-      <body style={{ display: "flex" }}>
-        <Sidebar />
-        <main style={{ flex: 1, padding: "20px" }}>
+      <body style={{ margin: 0 }}>
+        <SidebarWrapper>
           {children}
-        </main>
+        </SidebarWrapper>
       </body>
     </html>
   );
