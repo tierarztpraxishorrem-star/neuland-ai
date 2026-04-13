@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const getOpenAI = () => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+  return new OpenAI({ apiKey });
+};
 
 export async function POST(req: NextRequest) {
   try {
+    const openai = getOpenAI();
     const formData = await req.formData();
     const file = formData.get("file") as File;
 
@@ -55,6 +60,9 @@ const result = response.output_text;
 
   } catch (error) {
     console.error(error);
+    if (error instanceof Error && error.message.includes("OPENAI_API_KEY")) {
+      return NextResponse.json({ error: "OPENAI_API_KEY fehlt" }, { status: 500 });
+    }
     return NextResponse.json({ error: "Fehler bei Analyse" }, { status: 500 });
   }
 }

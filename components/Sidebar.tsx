@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { motion } from "framer-motion";
+import { isPersonalDiamondEnabled } from "@/lib/features";
 
 import {
   LayoutDashboard,
@@ -16,6 +17,7 @@ import {
   HelpCircle,
   Settings,
   History,
+  Gem,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen
@@ -24,9 +26,14 @@ import {
 export default function Sidebar() {
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [navigationHint, setNavigationHint] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebar_collapsed") === "1";
+  });
   const expandedWidth = 260;
   const collapsedWidth = 86;
+  const diamondEnabled = isPersonalDiamondEnabled();
 
   useEffect(() => {
     const getUser = async () => {
@@ -36,21 +43,42 @@ export default function Sidebar() {
     getUser();
   }, []);
 
-  useEffect(() => {
-    const stored = localStorage.getItem("sidebar_collapsed");
-    if (stored === "1") {
-      setCollapsed(true);
-    }
-  }, []);
-
   const toggleCollapsed = () => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem("sidebar_collapsed", next ? "1" : "0");
-      window.dispatchEvent(new CustomEvent("sidebar-collapse-change", { detail: { collapsed: next } }));
-      return next;
-    });
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem("sidebar_collapsed", next ? "1" : "0");
+    window.dispatchEvent(new CustomEvent("sidebar-collapse-change", { detail: { collapsed: next } }));
   };
+
+  const handleNavGuard = (href: string, event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (href !== "/konsultation/last") return;
+
+    const storedLastCaseId = localStorage.getItem("last_consultation_case_id") || localStorage.getItem("current_case_id");
+    let snapshotCaseId = "";
+
+    const snapshotRaw = localStorage.getItem("last_consultation_snapshot");
+    if (snapshotRaw) {
+      try {
+        const snapshot = JSON.parse(snapshotRaw);
+        if (typeof snapshot?.caseId === "string") {
+          snapshotCaseId = snapshot.caseId;
+        }
+      } catch {
+        snapshotCaseId = "";
+      }
+    }
+
+    if (storedLastCaseId || snapshotCaseId) return;
+
+    event.preventDefault();
+    setNavigationHint("Keine letzte Konsultation vorhanden. Bitte starte zuerst eine neue Konsultation.");
+  };
+
+  useEffect(() => {
+    if (!navigationHint) return;
+    const timeout = window.setTimeout(() => setNavigationHint(null), 4500);
+    return () => window.clearTimeout(timeout);
+  }, [navigationHint]);
 
   const sections = [
     {
@@ -62,6 +90,7 @@ export default function Sidebar() {
         { name: "Kommunikation", href: "/kommunikation", icon: MessageCircle },
         { name: "Patienten", href: "/patienten", icon: PawPrint },
         { name: "Vorlagen", href: "/vorlagen", icon: FileText },
+        ...(diamondEnabled ? [{ name: "Persönlicher Diamant", href: "/diamant", icon: Gem }] : []),
         { name: "VetMind", href: "/vetmind", icon: Bot, highlight: true },
       ],
     },
@@ -126,6 +155,22 @@ export default function Sidebar() {
             {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </button>
         </div>
+
+        {!collapsed && navigationHint ? (
+          <div
+            style={{
+              marginTop: "10px",
+              fontSize: "12px",
+              color: "#fecaca",
+              background: "rgba(127, 29, 29, 0.25)",
+              border: "1px solid rgba(248, 113, 113, 0.45)",
+              borderRadius: "8px",
+              padding: "8px",
+            }}
+          >
+            {navigationHint}
+          </div>
+        ) : null}
       </div>
 
       {/* NAV */}
@@ -153,6 +198,7 @@ export default function Sidebar() {
                 <Link
                   key={j}
                   href={link.href}
+                  onClick={(event) => handleNavGuard(link.href, event)}
                   title={collapsed ? link.name : ""}
                   style={{
                     display: "flex",

@@ -23,6 +23,29 @@ const sanitizeText = (value: unknown) => {
   return value.trim();
 };
 
+async function transcribeWithOpenAI(file: File, apiKey: string) {
+  const body = new FormData();
+  body.append("file", file, file.name || `live-${Date.now()}.webm`);
+  body.append("model", "gpt-4o-mini-transcribe");
+  body.append("language", "de");
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`OpenAI live transcription failed: ${detail || res.statusText}`);
+  }
+
+  const json = await res.json();
+  return sanitizeText(json?.text);
+}
+
 async function uploadToAssembly(file: File, apiKey: string) {
   const uploadRes = await fetch(`${ASSEMBLY_API_URL}/upload`, {
     method: "POST",
@@ -177,24 +200,43 @@ async function maybeCorrectTranscript(rawText: string) {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.ASSEMBLYAI_API_KEY;
-    if (!apiKey) {
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+    const mode = sanitizeText(formData.get("mode"));
+    const isLiveMode = mode.toLowerCase() === "live";
+
+    if (!file) {
+      return Response.json({ error: "No file uploaded" }, { status: 400 });
+    }
+
+    const openAiKey = process.env.OPENAI_API_KEY;
+
+    // Fast path for live mode to avoid queue backlog and delayed transcript updates.
+    if (isLiveMode && openAiKey) {
+      try {
+        const text = await transcribeWithOpenAI(file, openAiKey);
+        return Response.json({
+          text,
+          rawText: text,
+          corrected: false,
+          provider: "openai-live",
+        });
+      } catch (error) {
+        console.warn("OpenAI live transcription failed, falling back to AssemblyAI", error);
+      }
+    }
+
+    const assemblyKey = process.env.ASSEMBLYAI_API_KEY;
+    if (!assemblyKey) {
       return Response.json(
         { error: "ASSEMBLYAI_API_KEY is not configured" },
         { status: 500 }
       );
     }
 
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-
-    if (!file) {
-      return Response.json({ error: "No file uploaded" }, { status: 400 });
-    }
-
-    const uploadUrl = await uploadToAssembly(file, apiKey);
-    const transcriptId = await createAssemblyTranscript(uploadUrl, apiKey);
-    const rawText = await pollAssemblyTranscript(transcriptId, apiKey);
+    const uploadUrl = await uploadToAssembly(file, assemblyKey);
+    const transcriptId = await createAssemblyTranscript(uploadUrl, assemblyKey);
+    const rawText = await pollAssemblyTranscript(transcriptId, assemblyKey);
 
     const { text, corrected } = await maybeCorrectTranscript(rawText);
 
@@ -204,10 +246,11 @@ export async function POST(req: Request) {
       corrected,
       provider: "assemblyai"
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Transcription pipeline error:", error);
+    const message = error instanceof Error ? error.message : "Transcription failed";
     return Response.json(
-      { error: error?.message || "Transcription failed" },
+      { error: message },
       { status: 500 }
     );
   }

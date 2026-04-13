@@ -20,6 +20,41 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Supabase Deployment Workflow
+
+This repository includes helper scripts so database migration rollout can be done in one command.
+
+1. Check current Supabase readiness:
+
+```bash
+npm run supabase:status
+```
+
+2. Run full migration deploy flow:
+
+```bash
+npm run supabase:deploy
+```
+
+What `supabase:deploy` does:
+
+- Uses global `supabase` CLI if available, otherwise falls back to `npx -y supabase`
+- Links the project automatically if `SUPABASE_PROJECT_REF` is set
+- Runs `supabase db push --include-all`
+- Prints `supabase migration list` as a post-check
+
+Required environment variables for a fully automated run:
+
+- `SUPABASE_PROJECT_REF`
+- `SUPABASE_ACCESS_TOKEN` (after `supabase login`)
+- `SUPABASE_DB_PASSWORD` (when required by your Supabase setup)
+
+Application runtime variables:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

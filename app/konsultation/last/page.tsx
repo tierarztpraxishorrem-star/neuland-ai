@@ -49,7 +49,7 @@ export default function LastConsultationPage() {
       return;
     }
 
-    router.replace('/konsultation/start');
+    router.replace('/konsultation/start?notice=no-last-consultation');
   }, [router]);
 
   return (

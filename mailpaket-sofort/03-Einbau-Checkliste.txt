@@ -1,0 +1,34 @@
+Einbau-Checkliste für Schlömer
+
+A) Vorab
+
+[ ] Datenschutzhinweis intern freigegeben
+[ ] Consent-Einordnung intern freigegeben
+[ ] Integrationsweg entschieden (empfohlen: iframe)
+
+B) Technisch
+
+[ ] Embed-URL erreichbar: https://chat.tzn-bergheim.de/embed
+[ ] Einbau auf Testseite vorgenommen
+[ ] Mobile Darstellung geprüft
+[ ] Plugin-/Theme-Konflikte geprüft
+[ ] Cache/Minify getestet
+
+C) Funktional
+
+[ ] Chat öffnet/schließt korrekt
+[ ] Nachrichtenversand funktioniert
+[ ] Antworten werden angezeigt
+[ ] Links/CTAs funktionieren
+
+D) Qualität
+
+[ ] Keine JS-Fehler in Browser-Console
+[ ] Keine Layout-Verschiebung (CLS)
+[ ] Ladezeit akzeptabel
+
+E) Go-live
+
+[ ] Integration in Produktion übernommen
+[ ] Nachkontrolle nach 24h
+[ ] Verantwortliche Kontaktperson benannt

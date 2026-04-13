@@ -1,0 +1,54 @@
+Anlage 2 - WordPress-Integration via Script (Fallback)
+
+Ziel
+- Schnelle Einbindung ohne eigenes Plugin
+- Nutzbar, wenn kurzfristig keine Plugin-Loesung bereitsteht
+
+Einordnung
+- Technisch moeglich, aber anfaelliger fuer Theme- oder Plugin-Konflikte
+- Sollte als Fallback oder Uebergangsloesung behandelt werden
+
+Technisches Muster
+- Chatbot-Container im Seiteninhalt oder Footer
+- Script-Snippet wird ueber Theme, Header/Footer-Plugin oder Tag-Manager eingebunden
+- Initialisierung nur nach erteilter Consent-Freigabe
+
+WordPress-Umsetzung (Kurzablauf)
+1. Container platzieren:
+   <div id="tzn-chatbot-root" data-channel="public-chat"></div>
+2. Script nicht sofort hart ausfuehren
+3. Consent-Event des CMP abwarten
+4. Erst dann Chat-Script dynamisch nachladen
+5. Fehlerfall absichern (kein Consent -> kein Start)
+
+Beispielhafte Lade-Logik (Prinzip)
+- Bei Consent TRUE:
+  - script.src = "https://deine-domain/chatbot/embed.js"
+  - script.async = true
+  - document.head.appendChild(script)
+- Danach Init am Container ausfuehren
+
+Cookie-Consent-Einordnung
+- Script darf vor Einwilligung nicht ausgefuehrt werden, wenn es nicht strikt notwendig ist
+- Consent-Kategorie und Zweckbeschreibung muessen mit Datenschutzerklaerung konsistent sein
+- Bei Entzug der Einwilligung sollte Script-Nachladung gestoppt und ggf. Session beendet werden
+
+DSGVO-Hinweise fuer diesen Weg
+- Gleiche Datenschutzhinweise wie bei Plugin-Weg erforderlich
+- Erhoehte Sorgfalt bei Dritt-Scripts, da Abhaengigkeiten schlechter kontrollierbar sein koennen
+- Saubere Dokumentation von Ladezeitpunkt und Consent-Trigger notwendig
+
+Vorteile
+- Sehr schnell umsetzbar
+- Kein eigenes Plugin noetig
+
+Nachteile
+- Hoeheres Risiko fuer Wartung/Kompatibilitaet
+- Schwaechere Struktur bei langfristigen Aenderungen
+
+Freigabeempfehlung
+- Nur nutzen, wenn Plugin/Widget kurzfristig nicht verfuegbar ist oder als temporaerer Rollout-Pfad.
+
+Empfohlene Entscheidung
+- Produktion: Plugin/Widget
+- Zeitkritischer Interim: Script-Fallback mit klarer Consent-Gate-Logik

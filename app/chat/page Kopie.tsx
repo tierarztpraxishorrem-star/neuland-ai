@@ -44,7 +44,7 @@ setMessages([
 
 setMessages([
 ...newMessages,
-{role:"assistant",content:"Fehler bei der KI Verbindung"}
+{role:"assistant",content:"Fehler bei der VetMind-Verbindung"}
 ])
 
 }
@@ -83,7 +83,7 @@ color:'#0F6B74',
 marginBottom:'20px'
 }}
 >
-Tiermedizinischer KI Assistent
+Tiermedizinischer VetMind Assistent
 </h1>
 
 <div
@@ -105,7 +105,7 @@ background:m.role==="user" ? "#eef6f7" : "#f7f7f7"
 }}
 >
 
-<b>{m.role==="user"?"Du":"KI"}:</b>
+<b>{m.role==="user"?"Du":"VetMind"}:</b>
 
 <div
 style={{
@@ -119,7 +119,7 @@ whiteSpace:'pre-wrap'
 </div>
 ))}
 
-{loading && <div>KI schreibt…</div>}
+{loading && <div>VetMind schreibt…</div>}
 
 </div>
 

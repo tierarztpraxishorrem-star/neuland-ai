@@ -1,0 +1,61 @@
+Betreff: Verbindliche Umsetzung Chatbot in WordPress (direkt umsetzbar)
+
+Hallo Alex,
+
+hiermit geben wir die Umsetzung fuer die WordPress-Integration verbindlich frei.
+Bitte setze den folgenden Weg direkt um.
+
+Verbindliche technische Entscheidung
+1. Produktionsweg: WordPress-Plugin/Widget-Integration mit Shortcode und Consent-Gate.
+2. Script-Integration nur als Fallback, falls der Plugin-Weg kurzfristig blockiert ist.
+
+Zielzustand (Definition of Done)
+1. Der Chatbot wird vor Consent nicht geladen und nicht initialisiert.
+2. Ohne Consent gibt es keine externen Chatbot-Requests.
+3. Nach Consent startet der Chatbot stabil auf Desktop und Mobile.
+4. Bei Widerruf erfolgt keine erneute Initialisierung.
+5. Darstellung und Funktion sind mit bestehendem Theme und Kern-Plugins kompatibel.
+6. Datenschutzhinweis, Consent-Text und technisches Verhalten sind konsistent.
+
+Exakte Umsetzungsanweisung
+1. Integration als Plugin/Widget aufsetzen.
+2. Shortcode bereitstellen: [tzn_chatbot].
+3. Ausgabe ueber Container, z. B. <div id="tzn-chatbot-root" data-channel="public-chat"></div>.
+4. Chatbot-Script nur nach Consent-Kategorie laden.
+5. Initialisierung nur nach Consent-Event des CMP.
+6. Rollout zuerst in Staging, danach Produktion.
+
+Finale Vorgaben von uns (Chatbot-seitig)
+1. API-Endpoint fuer Chat-Anfragen: https://nextjs-boilerplate-neuland-ai.vercel.app/api/chat
+2. Kanalname: public-chat
+3. Sichtbarkeit: nur auf Home und Kontakt (WordPress-Slugs: / und /kontakt)
+4. Position: unten rechts als Floating-Widget
+5. Consent-Regel: vor Einwilligung kein Script-Load, keine Chat-Requests, keine Initialisierung
+6. Datenschutzgrundlage: Vercel-Angaben unter https://vercel.com/legal beruecksichtigen
+7. Kein weiterer Zugang oder zusaetzliche Einbettungsdaten von unserer Seite erforderlich
+
+DSGVO-Einordnung (kurz)
+1. Vercel-Angaben koennen als Grundlage genutzt werden: https://vercel.com/legal
+2. Umsetzung erfolgt consent-gesteuert (kein Load vor Zustimmung).
+3. Datenminimierung und pseudonymisierte Insights sind vorgesehen.
+4. Restrisiko ist bekannt und wird nach Abwaegung bewusst getragen.
+
+Test- und Abnahmeprotokoll (bitte nach Umsetzung kurz beantworten)
+1. Vor Consent geprueft: kein Script-Load, keine Requests.
+2. Nach Consent geprueft: Chat startet, Antworten funktionieren.
+3. Widerruf geprueft: keine Re-Initialisierung.
+4. Mobile/Tablet/Desktop geprueft.
+5. Konfliktfrei mit Cache/Security/CMP getestet.
+6. Datenschutztext und Consent-Label final abgeglichen.
+
+Gewuenschtes Ergebnis von dir
+- Bitte sende nach Umsetzung kurz:
+1. Welche Variante umgesetzt wurde (Plugin/Fallback).
+2. Produktions-URL mit aktivem Chatbot.
+3. Kurzprotokoll der 6 Abnahmepunkte.
+4. Offene Restpunkte (falls vorhanden) mit Aufwandseinschaetzung.
+
+Danke dir.
+
+Viele Gruesse
+Lennart

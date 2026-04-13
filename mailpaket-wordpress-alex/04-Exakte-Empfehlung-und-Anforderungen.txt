@@ -1,0 +1,63 @@
+Anlage 4 - Exakte Empfehlung und benoetigte Angaben fuer die WordPress-Integration
+
+Verbindliche Empfehlung (Best Solution)
+- Produktionsweg: WordPress-Plugin/Widget-Integration mit Shortcode und Consent-Gate.
+- Fallback nur bei Zeitdruck: Script-Integration.
+- Zielbild: Der Chatbot wird erst nach aktiver Einwilligung geladen und initialisiert.
+
+Warum dieser Weg der beste ist
+1. Hoechste Kompatibilitaet mit WordPress-Theme und anderen Plugins.
+2. Stabiler Betrieb bei Updates (Theme/Plugin/Core).
+3. Consent-Logik sauber zentral steuerbar.
+4. Niedrigeres Wartungs- und Ausfallrisiko gegenueber reinem Script-Snippet.
+
+Was Alex fuer die Umsetzung exakt von euch braucht
+
+A) Zugaenge und Rahmen
+1. Temporaerer Admin-Zugang zu WordPress (Staging bevorzugt).
+2. Info, ob Staging und Produktion getrennt sind (URLs benoetigt).
+3. Ansprechpartner fuer Freigabe (technisch + rechtlich).
+
+B) WordPress-Technikdaten
+1. WordPress-Version.
+2. Aktives Theme + Child-Theme ja/nein.
+3. Liste aktiver Plugins (insb. Cache, Security, CMP, Header/Footer, Performance).
+4. Eingesetztes Consent-Tool (z. B. Borlabs, Complianz, Cookiebot, Usercentrics).
+
+C) Chatbot-Integrationsdaten
+1. Embed-Script-URL (oder Widget-Bundle-URL) fuer WordPress.
+2. Ziel-API-Endpoint fuer Chatanfragen.
+3. Gewuenschter Kanalname (z. B. public-chat).
+4. Seiten/Template, auf denen der Chatbot erscheinen soll.
+5. Gewuenschte Position (Floating rechts unten, feste Sektion, nur Kontaktseite etc.).
+
+D) Datenschutz und Consent
+1. Finaler Zwecktext fuer Consent-Banner.
+2. Kategorie im CMP (empfohlen: funktional/kommunikation; Analyse immer separat zustimmungspflichtig).
+3. Textbaustein fuer Datenschutzerklaerung inkl. Empfaenger und Speicherlogik.
+4. Entscheidung, ob Insights aktiv sein sollen (ja/nein).
+
+E) Sicherheit und Betrieb
+1. CSP-Regeln falls aktiv (script-src, connect-src, frame-src).
+2. Falls vorhanden: WAF/Firewall-Ausnahmen fuer Chat-Endpoint.
+3. Monitoring-Email fuer Fehlermeldungen.
+4. Rollback-Weg (Feature Toggle oder Deaktivierung per Plugin-Option).
+
+Exakter Umsetzungsablauf (empfohlen)
+1. Staging: Plugin/Shortcode einbauen, Chatbot nur auf Testseite aktivieren.
+2. Consent-Gate aktivieren: vor Zustimmung kein Script-Load, keine Requests.
+3. Funktionstest: Start, Antwort, Widerruf, erneute Zustimmung.
+4. Kompatibilitaetstest: Cache-Plugin, Lazy-Load, Security-Plugin.
+5. Datenschutztext final gegen CMP-Eintrag und Datenschutzerklaerung abgleichen.
+6. Produktion: kontrollierter Rollout und Monitoring fuer 24-72h.
+
+Abnahmekriterien (Definition of Done)
+1. Chatbot startet nur nach Consent.
+2. Ohne Consent keine externen Chatbot-Requests.
+3. Widerruf stoppt weitere Initialisierung.
+4. Darstellung funktioniert auf Desktop und Mobile.
+5. Keine Konflikte mit aktiven Kern-Plugins.
+6. Datenschutzhinweise und Consent-Texte sind konsistent.
+
+Kompakter Mail-Satz an Alex (copy/paste)
+- "Bitte setzt die Integration in WordPress ueber den Plugin/Widget-Weg mit Consent-Gate um. Script-Fallback nur als Uebergang. Fuer die Umsetzung benoetigt ihr von uns Admin-Zugang (Staging), Theme/Plugin-Liste, CMP-Tool inkl. Consent-Kategorie, Embed-URL/API-Endpoint, Zielseiten/Position und finalen Datenschutztext."

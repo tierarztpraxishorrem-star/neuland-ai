@@ -1,427 +1,483 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-// @ts-ignore
-import * as pdfjsLib from 'pdfjs-dist/build/pdf';
-import * as mammoth from 'mammoth';
 import { supabase } from '../../lib/supabase';
+import { uiTokens } from '../../components/ui/System';
+
+const SUPERADMIN_EMAIL = 'info@tierarztpraxis-horrem.de';
 
 export default function VorlagenPage() {
-
   const [templates, setTemplates] = useState<any[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const [editCategory, setEditCategory] = useState("clinical");
-  const [editUntersuchung, setEditUntersuchung] = useState("");
-  const [name, setName] = useState("");
-  const [content, setContent] = useState("");
-  const [category, setCategory] = useState("clinical");
+    const [hiddenTemplateIds, setHiddenTemplateIds] = useState<string[]>([]);
+    const [editingId, setEditingId] = useState<string | null>(null);
 
-  const [untersuchung, setUntersuchung] = useState("");
+    const [userEmail, setUserEmail] = useState('');
+    const [userId, setUserId] = useState('');
+    const [activePracticeId, setActivePracticeId] = useState<string | null>(null);
 
-  // 📥 LADEN
-  const loadTemplates = async () => {
-    await supabase
-      .from("templates")
-      .update({ category: "internal" })
-      .eq("category", "admin");
+    const [assistantLoading, setAssistantLoading] = useState(false);
+    const [assistantMessage, setAssistantMessage] = useState<string | null>(null);
 
-    const { data } = await supabase
-      .from("templates")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    setTemplates(data || []);
-  };
-
-  useEffect(() => {
-    loadTemplates();
-  }, []);
-
-    // 📤 UPLOAD
-    const [uploadContent, setUploadContent] = useState("");
-    const [uploadName, setUploadName] = useState("");
-    const [showUpload, setShowUpload] = useState(false);
-    const [uploadCategory, setUploadCategory] = useState("clinical");
-    const [uploadUntersuchung, setUploadUntersuchung] = useState("");
-
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      setUploadName(file.name.replace(/\.[^.]+$/, ""));
-      try {
-        if (ext === 'txt') {
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const text = ev.target?.result as string;
-            setUploadContent(text || "");
-            setShowUpload(true);
-          };
-          reader.readAsText(file);
-        } else if (ext === 'pdf') {
-          const reader = new FileReader();
-          reader.onload = async (ev) => {
-            const typedarray = new Uint8Array(ev.target?.result as ArrayBuffer);
-            pdfjsLib.GlobalWorkerOptions.workerSrc =
-              '//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
-            let text = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const content = await page.getTextContent();
-              text += content.items.map((item: any) => item.str).join(' ') + '\n';
-            }
-            setUploadContent(text.trim());
-            setShowUpload(true);
-          };
-          reader.readAsArrayBuffer(file);
-        } else if (ext === 'docx') {
-          const reader = new FileReader();
-          reader.onload = async (ev) => {
-            const arrayBuffer = ev.target?.result as ArrayBuffer;
-            const result = await mammoth.extractRawText({ arrayBuffer });
-            setUploadContent(result.value || "");
-            setShowUpload(true);
-          };
-          reader.readAsArrayBuffer(file);
-        } else {
-          alert('Nur .txt, .pdf oder .docx werden unterstützt.');
-        }
-      } catch (err) {
-        alert('Fehler beim Auslesen der Datei.');
-      }
-    };
-
-    const saveUploadedTemplate = async () => {
-      const struktur = {
-        untersuchung: uploadUntersuchung
-          .split("\n")
-          .map(s => s.trim())
-          .filter(Boolean)
-      };
-      const { error } = await supabase.from("templates").insert({
-        name: uploadName,
-        content: uploadContent,
-        category: uploadCategory,
-        structure: struktur
-      });
-      if (error) {
-        alert("Fehler beim Speichern");
-        return;
-      }
-      setUploadContent("");
-      setUploadName("");
-      setUploadUntersuchung("");
-      setShowUpload(false);
-      loadTemplates();
-    };
-
-  // 💾 SPEICHERN
-  const saveTemplate = async () => {
-    const struktur = {
-      untersuchung: untersuchung
-        .split("\n")
-        .map(s => s.trim())
-        .filter(Boolean)
-    };
-
-    const { error } = await supabase.from("templates").insert({
-      name,
-      content,
-      category,
-      structure: struktur
+    const [name, setName] = useState('');
+    const [category, setCategory] = useState('clinical');
+    const [scope, setScope] = useState<'private' | 'practice'>('private');
+    const [wizardStep, setWizardStep] = useState(1);
+    const [wizardAnswers, setWizardAnswers] = useState({
+      ziel: '',
+      zielgruppe: '',
+      tonalitaet: '',
+      abschnitte: '',
+      mussEnthalten: '',
+      vermeiden: '',
+      outputFormat: ''
     });
 
-    if (error) {
-      alert("Fehler beim Speichern");
-      return;
-    }
+    // Expert mode (owner only)
+    const [content, setContent] = useState('');
+    const [untersuchung, setUntersuchung] = useState('');
 
-    setName("");
-    setContent("");
-    setUntersuchung("");
+    // Edit state
+    const [editName, setEditName] = useState('');
+    const [editCategory, setEditCategory] = useState('clinical');
+    const [editScope, setEditScope] = useState<'private' | 'practice'>('private');
+    const [editInstruction, setEditInstruction] = useState('');
+    const [editContent, setEditContent] = useState('');
+    const [editUntersuchung, setEditUntersuchung] = useState('');
 
-    loadTemplates();
-  };
+    const isSuperadmin = userEmail.toLowerCase() === SUPERADMIN_EMAIL;
 
-  // 🗑️ LÖSCHEN
-  const deleteTemplate = async (id: string) => {
-    await supabase.from("templates").delete().eq("id", id);
-    loadTemplates();
-  };
+    const loadTemplates = async () => {
+      await supabase.from('templates').update({ category: 'internal' }).eq('category', 'admin');
 
-  const startEditTemplate = (t: any) => {
-    setEditingId(t.id);
-    setEditName(t.name || "");
-    setEditContent(t.content || "");
-    setEditCategory(t.category || "clinical");
-    setEditUntersuchung((t.structure?.untersuchung || []).join("\n"));
-  };
+      const { data } = await supabase
+        .from('templates')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-  const cancelEditTemplate = () => {
-    setEditingId(null);
-    setEditName("");
-    setEditContent("");
-    setEditCategory("clinical");
-    setEditUntersuchung("");
-  };
-
-  const saveEditedTemplate = async () => {
-    if (!editingId) return;
-
-    const struktur = {
-      untersuchung: editUntersuchung
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean)
+      const hidden = new Set(hiddenTemplateIds);
+      setTemplates(((data || []) as any[]).filter((t) => !hidden.has(t.id)));
     };
 
-    const { error } = await supabase
-      .from("templates")
-      .update({
-        name: editName,
-        content: editContent,
-        category: editCategory,
-        structure: struktur
-      })
-      .eq("id", editingId);
+    const getAccessToken = async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session?.access_token || null;
+    };
 
-    if (error) {
-      alert("Fehler beim Aktualisieren");
-      return;
-    }
+    useEffect(() => {
+      const bootstrap = async () => {
+        const { data: userData } = await supabase.auth.getUser();
+        setUserEmail(userData.user?.email || '');
+        setUserId(userData.user?.id || '');
 
-    cancelEditTemplate();
-    loadTemplates();
-  };
+        const { data: hiddenData } = await supabase.from('template_visibility_prefs').select('template_id');
+        setHiddenTemplateIds((hiddenData || []).map((row: any) => row.template_id));
 
-  return (
-    <main style={{
-      padding: "40px",
-      background: "#f4f7f8",
-      minHeight: "100vh"
-    }}>
+        const { data: memberships } = await supabase
+          .from('practice_memberships')
+          .select('practice_id, role, created_at')
+          .order('created_at', { ascending: true });
 
-      <h1 style={{ color: "#0F6B74", marginBottom: "20px" }}>
-        Vorlagen
-      </h1>
+        if (memberships && memberships.length > 0) {
+          const rank: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+          const selected = [...memberships].sort((a: any, b: any) => {
+            const ra = rank[a.role] ?? 99;
+            const rb = rank[b.role] ?? 99;
+            if (ra !== rb) return ra - rb;
+            return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+          })[0];
+          setActivePracticeId(selected?.practice_id || null);
+        }
+      };
 
-      {/* ➕ NEUE VORLAGE */}
-      <div style={card}>
-        <h3>Neue Vorlage erstellen</h3>
+      bootstrap();
+    }, []);
 
-        <input
-          placeholder="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={input}
-        />
+    useEffect(() => {
+      loadTemplates();
+    }, [hiddenTemplateIds]);
 
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          style={input}
-        >
-          <option value="clinical">Klinisch</option>
-          <option value="communication">Kommunikation</option>
-          <option value="internal">Intern</option>
-        </select>
+    const createTemplateWithAssistant = async () => {
+      if (!name.trim()) {
+        alert('Bitte einen Namen eingeben.');
+        return;
+      }
+      if (scope === 'practice' && !activePracticeId) {
+        alert('Keine zugeordnete Praxis gefunden.');
+        return;
+      }
 
-        <textarea
-          placeholder="Prompt / Vorlage Inhalt"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          style={textarea}
-        />
+      setAssistantLoading(true);
+      setAssistantMessage(null);
+      try {
+        const token = await getAccessToken();
+        if (!token) throw new Error('Nicht eingeloggt.');
 
-        <textarea
-          placeholder={`Untersuchung (eine pro Zeile)
-z.B.
-Allgemeinbefinden
-Herz
-Lunge
-Abdomen`}
-          value={untersuchung}
-          onChange={(e) => setUntersuchung(e.target.value)}
-          style={textarea}
-        />
+        const res = await fetch('/api/templates/assistant', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            action: 'create',
+            name: name.trim(),
+            category,
+            scope,
+            practiceId: scope === 'practice' ? activePracticeId : null,
+            answers: wizardAnswers
+          })
+        });
 
-        <button onClick={saveTemplate} style={primaryBtn}>
-          💾 Speichern
-        </button>
-      </div>
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || 'Vorlage konnte nicht erstellt werden.');
 
-        {/* 📤 VORLAGE HOCHLADEN */}
-        <div style={{ ...card, marginTop: 20 }}>
-          <h3>Vorlage hochladen (.txt, .pdf, .docx)</h3>
-          <input type="file" accept=".txt,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFileUpload} style={{ marginBottom: 10 }} />
-          {showUpload && (
-            <div style={{ marginTop: 10 }}>
-              <b>Vorschlag aus Upload:</b>
-              <input
-                placeholder="Name"
-                value={uploadName}
-                onChange={e => setUploadName(e.target.value)}
-                style={input}
-              />
-              <select
-                value={uploadCategory}
-                onChange={e => setUploadCategory(e.target.value)}
-                style={input}
-              >
-                <option value="clinical">Klinisch</option>
-                <option value="communication">Kommunikation</option>
-                <option value="internal">Intern</option>
-              </select>
-              <textarea
-                value={uploadContent}
-                onChange={e => setUploadContent(e.target.value)}
-                style={textarea}
-                placeholder="Vorlageninhalt"
-              />
-              <textarea
-                placeholder={`Untersuchung (eine pro Zeile)\nz.B.\nAllgemeinbefinden\nHerz\nLunge\nAbdomen`}
-                value={uploadUntersuchung}
-                onChange={e => setUploadUntersuchung(e.target.value)}
-                style={textarea}
-              />
-              <button onClick={saveUploadedTemplate} style={primaryBtn}>
-                Als neue Vorlage speichern
-              </button>
-              <button onClick={() => setShowUpload(false)} style={{ ...primaryBtn, background: '#e5e7eb', color: '#222', marginLeft: 10 }}>
-                Abbrechen
-              </button>
-            </div>
-          )}
+        setAssistantMessage('Vorlage mit VetMind erstellt. Der interne Prompt bleibt verborgen.');
+        setName('');
+        setScope('private');
+        setWizardStep(1);
+        setWizardAnswers({ ziel: '', zielgruppe: '', tonalitaet: '', abschnitte: '', mussEnthalten: '', vermeiden: '', outputFormat: '' });
+        await loadTemplates();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
+        setAssistantMessage(`VetMind-Erstellung fehlgeschlagen: ${message}`);
+      } finally {
+        setAssistantLoading(false);
+      }
+    };
+
+    const reviseTemplateWithAssistant = async () => {
+      if (!editingId || !editInstruction.trim()) {
+        alert('Bitte einen Aenderungswunsch eingeben.');
+        return;
+      }
+
+      setAssistantLoading(true);
+      setAssistantMessage(null);
+      try {
+        const token = await getAccessToken();
+        if (!token) throw new Error('Nicht eingeloggt.');
+
+        const res = await fetch('/api/templates/assistant', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            action: 'revise',
+            templateId: editingId,
+            instruction: editInstruction.trim()
+          })
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || 'Aenderung fehlgeschlagen.');
+
+        setAssistantMessage(json?.forked
+          ? 'Geteilte Vorlage wurde als eigene private Kopie erstellt und mit VetMind angepasst.'
+          : 'Vorlage wurde mit VetMind aktualisiert.');
+        setEditInstruction('');
+        await loadTemplates();
+        cancelEditTemplate();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
+        setAssistantMessage(`VetMind-Bearbeitung fehlgeschlagen: ${message}`);
+      } finally {
+        setAssistantLoading(false);
+      }
+    };
+
+    const saveTemplate = async () => {
+      if (!isSuperadmin) return;
+      if (scope === 'practice' && !activePracticeId) {
+        alert('Keine zugeordnete Praxis gefunden.');
+        return;
+      }
+
+      const struktur = {
+        untersuchung: untersuchung.split('\n').map((s) => s.trim()).filter(Boolean)
+      };
+
+      const { error } = await supabase.from('templates').insert({
+        name,
+        content,
+        category,
+        structure: struktur,
+        scope,
+        practice_id: scope === 'practice' ? activePracticeId : null,
+        user_id: userId
+      });
+
+      if (error) {
+        alert('Fehler beim Speichern');
+        return;
+      }
+
+      setName('');
+      setContent('');
+      setUntersuchung('');
+      await loadTemplates();
+    };
+
+    const deleteTemplate = async (id: string) => {
+      const { error } = await supabase.from('templates').delete().eq('id', id);
+      if (!error) await loadTemplates();
+    };
+
+    const hideTemplateForMe = async (id: string) => {
+      if (!userId) return;
+      const { error } = await supabase
+        .from('template_visibility_prefs')
+        .upsert({ user_id: userId, template_id: id }, { onConflict: 'user_id,template_id' });
+      if (!error) {
+        setHiddenTemplateIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      }
+    };
+
+    const startEditTemplate = (t: any) => {
+      setEditingId(t.id);
+      setEditName(t.name || '');
+      setEditCategory(t.category || 'clinical');
+      setEditScope(t.scope === 'practice' ? 'practice' : 'private');
+      setEditInstruction('');
+      setEditContent(t.content || '');
+      setEditUntersuchung((t.structure?.untersuchung || []).join('\n'));
+    };
+
+    const cancelEditTemplate = () => {
+      setEditingId(null);
+      setEditName('');
+      setEditCategory('clinical');
+      setEditScope('private');
+      setEditInstruction('');
+      setEditContent('');
+      setEditUntersuchung('');
+    };
+
+    const saveEditedTemplate = async () => {
+      if (!isSuperadmin || !editingId) return;
+      if (editScope === 'practice' && !activePracticeId) {
+        alert('Keine zugeordnete Praxis gefunden.');
+        return;
+      }
+
+      const struktur = { untersuchung: editUntersuchung.split('\n').map((s) => s.trim()).filter(Boolean) };
+      const { error } = await supabase
+        .from('templates')
+        .update({
+          name: editName,
+          category: editCategory,
+          scope: editScope,
+          practice_id: editScope === 'practice' ? activePracticeId : null,
+          content: editContent,
+          structure: struktur
+        })
+        .eq('id', editingId);
+
+      if (error) {
+        alert('Fehler beim Aktualisieren');
+        return;
+      }
+
+      cancelEditTemplate();
+      await loadTemplates();
+    };
+
+    return (
+      <main style={{ padding: uiTokens.pagePadding, background: uiTokens.pageBackground, minHeight: '100vh' }}>
+        <div style={{ marginBottom: 16 }}>
+          <h1 style={{ color: uiTokens.brand, margin: 0, fontSize: '32px', fontWeight: 700 }}>Vorlagen</h1>
+          <div style={{ marginTop: 6, color: uiTokens.textSecondary, fontSize: 14 }}>
+            VetMind-gestuetzte Vorlagenverwaltung fuer privat, Praxis und globale Inhalte.
+          </div>
         </div>
 
-      {/* 📄 LISTE */}
-      <div style={{ marginTop: "30px", display: "grid", gap: "16px" }}>
-        {templates.map((t) => (
-          <div key={t.id} style={card}>
-
-            {editingId === t.id ? (
-              <>
-                <h4 style={{ marginTop: 0 }}>Vorlage bearbeiten</h4>
-                <input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  style={input}
-                  placeholder="Name"
-                />
-                <select
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value)}
-                  style={input}
-                >
-                  <option value="clinical">Klinisch</option>
-                  <option value="communication">Kommunikation</option>
-                  <option value="internal">Intern</option>
-                </select>
-                <textarea
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                  style={textarea}
-                  placeholder="Vorlageninhalt"
-                />
-                <textarea
-                  value={editUntersuchung}
-                  onChange={(e) => setEditUntersuchung(e.target.value)}
-                  style={textarea}
-                  placeholder="Untersuchung (eine pro Zeile)"
-                />
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={saveEditedTemplate} style={primaryBtn}>💾 Änderungen speichern</button>
-                  <button onClick={cancelEditTemplate} style={{ ...primaryBtn, background: "#e5e7eb", color: "#222" }}>Abbrechen</button>
-                </div>
-              </>
-            ) : (
-              <>
-
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div>
-                <b>{t.name}</b>
-                <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                  {t.category}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => startEditTemplate(t)}>
-                  ✏️
-                </button>
-                <button onClick={() => deleteTemplate(t.id)}>
-                  ❌
-                </button>
-              </div>
-            </div>
-
-            <div style={{
-              fontSize: "13px",
-              whiteSpace: "pre-wrap",
-              marginTop: "10px",
-              color: "#374151"
-            }}>
-              {t.content}
-            </div>
-
-            {t.structure?.untersuchung && (
-              <div style={{ marginTop: "10px", fontSize: "13px" }}>
-                <b>Untersuchung:</b>
-                <ul>
-                  {t.structure.untersuchung.map((u: string, i: number) => (
-                    <li key={i}>{u}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-              </>
-            )}
-
+        {assistantMessage && (
+          <div style={{ ...card, marginBottom: 16, borderColor: '#99f6e4', color: '#0f766e', background: '#f0fdfa' }}>
+            {assistantMessage}
           </div>
-        ))}
-      </div>
+        )}
 
-    </main>
-  );
-}
+        <div style={card}>
+          <h2 style={{ margin: 0, fontSize: 22, color: uiTokens.textPrimary }}>Neue Vorlage mit VetMind-Assistent</h2>
 
+          <input placeholder='Name' value={name} onChange={(e) => setName(e.target.value)} style={input} />
 
-// 🎨 Styles
+          <select value={category} onChange={(e) => setCategory(e.target.value)} style={input}>
+            <option value='clinical'>Klinisch</option>
+            <option value='communication'>Kommunikation</option>
+            <option value='internal'>Intern</option>
+          </select>
 
-const card = {
-  background: "#fff",
-  padding: "20px",
-  borderRadius: "16px",
-  border: "1px solid #e5e7eb"
-};
+          <select value={scope} onChange={(e) => setScope(e.target.value as 'private' | 'practice')} style={input}>
+            <option value='private'>Sichtbarkeit: Nur ich</option>
+            <option value='practice'>Sichtbarkeit: Meine Praxis</option>
+          </select>
 
-const input = {
-  width: "100%",
-  padding: "12px",
-  borderRadius: "10px",
-  border: "1px solid #e5e7eb",
-  marginBottom: "10px"
-};
+          <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Schritt {wizardStep} von 6</div>
 
-const textarea = {
-  width: "100%",
-  padding: "12px",
-  borderRadius: "10px",
-  border: "1px solid #e5e7eb",
-  marginBottom: "10px",
-  minHeight: "100px"
-};
+          {wizardStep === 1 && <input placeholder='Was soll die Vorlage erreichen?' value={wizardAnswers.ziel} onChange={(e) => setWizardAnswers((p) => ({ ...p, ziel: e.target.value }))} style={input} />}
+          {wizardStep === 2 && <input placeholder='Fuer wen ist der Output gedacht?' value={wizardAnswers.zielgruppe} onChange={(e) => setWizardAnswers((p) => ({ ...p, zielgruppe: e.target.value }))} style={input} />}
+          {wizardStep === 3 && <input placeholder='Ton / Stil (klar, knapp, empathisch...)' value={wizardAnswers.tonalitaet} onChange={(e) => setWizardAnswers((p) => ({ ...p, tonalitaet: e.target.value }))} style={input} />}
+          {wizardStep === 4 && <textarea placeholder='Welche Abschnitte soll die Vorlage enthalten?' value={wizardAnswers.abschnitte} onChange={(e) => setWizardAnswers((p) => ({ ...p, abschnitte: e.target.value }))} style={textarea} />}
+          {wizardStep === 5 && <textarea placeholder='Was MUSS enthalten sein?' value={wizardAnswers.mussEnthalten} onChange={(e) => setWizardAnswers((p) => ({ ...p, mussEnthalten: e.target.value }))} style={textarea} />}
+          {wizardStep === 6 && (
+            <>
+              <textarea placeholder='Was soll vermieden werden?' value={wizardAnswers.vermeiden} onChange={(e) => setWizardAnswers((p) => ({ ...p, vermeiden: e.target.value }))} style={textarea} />
+              <input placeholder='Output-Format (z. B. Fliesstext, Bulletpoints)' value={wizardAnswers.outputFormat} onChange={(e) => setWizardAnswers((p) => ({ ...p, outputFormat: e.target.value }))} style={input} />
+            </>
+          )}
 
-const primaryBtn = {
-  padding: "12px",
-  borderRadius: "10px",
-  border: "none",
-  background: "#0F6B74",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: "pointer"
-};
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+            <button onClick={() => setWizardStep((s) => Math.max(1, s - 1))} style={{ ...secondaryBtn }} disabled={wizardStep === 1 || assistantLoading}>Zurueck</button>
+            {wizardStep < 6 ? (
+              <button onClick={() => setWizardStep((s) => Math.min(6, s + 1))} style={primaryBtn} disabled={assistantLoading}>Weiter</button>
+            ) : (
+              <button onClick={createTemplateWithAssistant} style={primaryBtn} disabled={assistantLoading}>{assistantLoading ? 'Wird erstellt...' : 'VetMind-Vorlage erstellen'}</button>
+            )}
+          </div>
+
+          <div style={{ fontSize: 13, color: '#64748b', marginTop: 10 }}>
+            Interne Prompt-Details bleiben verborgen. Anpassungen erfolgen ueber den VetMind-Aenderungswunsch.
+          </div>
+
+          {isSuperadmin && (
+            <div style={{ marginTop: 16, padding: 14, border: '1px solid #e2e8f0', borderRadius: 10, background: '#f8fafc' }}>
+              <h4 style={{ marginTop: 0, marginBottom: 10, color: '#0f172a' }}>Owner-Expertenmodus (optional)</h4>
+              <textarea placeholder='Interner Prompt / Vorlageninhalt (nur Owner)' value={content} onChange={(e) => setContent(e.target.value)} style={textarea} />
+              <textarea placeholder={'Untersuchung (eine pro Zeile)\nz. B. Allgemeinbefinden\nHerz\nLunge'} value={untersuchung} onChange={(e) => setUntersuchung(e.target.value)} style={textarea} />
+              <button onClick={saveTemplate} style={{ ...primaryBtn, background: '#334155' }}>Als manuelle Vorlage speichern</button>
+            </div>
+          )}
+
+        </div>
+
+        <div style={{ marginTop: uiTokens.sectionGap, display: 'grid', gap: '12px' }}>
+          {templates.map((t) => {
+            const canDelete = isSuperadmin || t.user_id === userId;
+            return (
+              <div key={t.id} style={card}>
+                {editingId === t.id ? (
+                  <>
+                    <h4 style={{ marginTop: 0 }}>Vorlage bearbeiten</h4>
+                    {isSuperadmin && (
+                      <>
+                        <input value={editName} onChange={(e) => setEditName(e.target.value)} style={input} placeholder='Name' />
+                        <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} style={input}>
+                          <option value='clinical'>Klinisch</option>
+                          <option value='communication'>Kommunikation</option>
+                          <option value='internal'>Intern</option>
+                        </select>
+                        <select value={editScope} onChange={(e) => setEditScope(e.target.value as 'private' | 'practice')} style={input}>
+                          <option value='private'>Sichtbarkeit: Nur ich</option>
+                          <option value='practice'>Sichtbarkeit: Meine Praxis</option>
+                        </select>
+                      </>
+                    )}
+                    <textarea value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} style={textarea} placeholder='Aenderungswunsch (z. B. kuerzer, klarer, besitzerfreundlicher)' />
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button onClick={reviseTemplateWithAssistant} style={primaryBtn} disabled={assistantLoading}>Mit VetMind bearbeiten</button>
+                      {isSuperadmin && <button onClick={saveEditedTemplate} style={{ ...primaryBtn, background: '#334155' }}>Stammdaten speichern</button>}
+                      <button onClick={cancelEditTemplate} style={secondaryBtn}>Abbrechen</button>
+                    </div>
+                    {isSuperadmin && (
+                      <>
+                        <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} style={textarea} placeholder='Interner Prompt (Owner)' />
+                        <textarea value={editUntersuchung} onChange={(e) => setEditUntersuchung(e.target.value)} style={textarea} placeholder='Untersuchung (eine pro Zeile)' />
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <div>
+                        <b>{t.name}</b>
+                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                          {t.category} · {t.scope === 'global' ? 'global' : t.scope === 'practice' ? 'praxis' : 'privat'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => startEditTemplate(t)} style={smallBtn}>Bearbeiten</button>
+                        <button onClick={() => hideTemplateForMe(t.id)} style={smallBtn}>Ausblenden</button>
+                        {canDelete && <button onClick={() => deleteTemplate(t.id)} style={{ ...smallBtn, background: '#fee2e2', borderColor: '#fecaca', color: '#b91c1c' }}>Loeschen</button>}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', marginTop: '10px', color: '#374151' }}>
+                      Interner Prompt ist verborgen. Bearbeitung erfolgt ueber VetMind-Aenderungswunsch.
+                    </div>
+
+                    {t.structure?.untersuchung && (
+                      <div style={{ marginTop: '10px', fontSize: '13px' }}>
+                        <b>Untersuchung:</b>
+                        <ul>
+                          {t.structure.untersuchung.map((u: string, i: number) => (
+                            <li key={i}>{u}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </main>
+    );
+  }
+
+  const card = {
+    background: uiTokens.cardBackground,
+    padding: '20px',
+    borderRadius: uiTokens.radiusCard,
+    border: uiTokens.cardBorder
+  };
+
+  const input = {
+    width: '100%',
+    padding: '12px',
+    borderRadius: '10px',
+    border: uiTokens.cardBorder,
+    background: '#fff',
+    marginBottom: '10px'
+  };
+
+  const textarea = {
+    width: '100%',
+    padding: '12px',
+    borderRadius: '10px',
+    border: uiTokens.cardBorder,
+    background: '#fff',
+    marginBottom: '10px',
+    minHeight: '100px'
+  };
+
+  const primaryBtn = {
+    padding: '12px',
+    borderRadius: '10px',
+    border: 'none',
+    background: uiTokens.brand,
+    color: '#fff',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontSize: 14
+  };
+
+  const secondaryBtn = {
+    ...primaryBtn,
+    background: '#fff',
+    color: uiTokens.textPrimary,
+    border: uiTokens.cardBorder
+  };
+
+  const smallBtn = {
+    padding: '6px 10px',
+    borderRadius: '8px',
+    border: '1px solid #d1d5db',
+    background: '#fff',
+    color: '#111827',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 600
+  };

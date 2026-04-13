@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
+import { Button, uiTokens } from '../../../../components/ui/System';
 
 type RecordingSegment = {
   id: string;
@@ -25,6 +26,7 @@ export default function RecordPage() {
   const [nowMs, setNowMs] = useState(Date.now());
   const [currentSegmentStartedAtMs, setCurrentSegmentStartedAtMs] = useState<number | null>(null);
   const [status, setStatus] = useState('Bereit fuer eine neue Session');
+  const [dragActive, setDragActive] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -301,6 +303,13 @@ export default function RecordPage() {
     setStatus('Upload als Segment hinzugefuegt');
   };
 
+  const handleUploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    for (const file of files) {
+      await addUploadSegment(file);
+    }
+  };
+
   const transcribeSegment = async (segment: RecordingSegment) => {
     const formData = new FormData();
     const extension = segment.source === 'upload' ? 'upload' : 'webm';
@@ -454,7 +463,7 @@ export default function RecordPage() {
       background: "linear-gradient(180deg, #0F6B74, #0c555c)",
       color: "#fff",
       fontFamily: "Arial",
-      padding: '28px 20px'
+      padding: `${uiTokens.pagePadding} 20px`
     }}>
 
       <h1 style={{ marginBottom: "10px" }}>
@@ -485,107 +494,97 @@ export default function RecordPage() {
         }}
       />
 
-      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '12px' }}>
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', marginBottom: uiTokens.cardGap }}>
         {!recording && !paused && (
-          <button
+          <Button
             onClick={beginSegmentRecording}
             disabled={processing}
+            variant='secondary'
+            size='lg'
             style={{
-              padding: '14px 20px',
-              borderRadius: '12px',
-              border: 'none',
               background: '#fff',
               color: '#0F6B74',
               fontWeight: 700,
-              fontSize: '16px',
-              cursor: processing ? 'wait' : 'pointer'
+              fontSize: '16px'
             }}
           >
             🎤 Aufnahme beginnen
-          </button>
+          </Button>
         )}
 
         {recording && (
-          <button
+          <Button
             onClick={pauseRecording}
             disabled={processing}
+            variant='primary'
+            size='lg'
             style={{
-              padding: '14px 20px',
-              borderRadius: '12px',
-              border: 'none',
               background: '#f59e0b',
               color: '#fff',
-              fontWeight: 700,
-              cursor: processing ? 'wait' : 'pointer'
+              fontWeight: 700
             }}
           >
             ⏸ Pause
-          </button>
+          </Button>
         )}
 
         {!recording && paused && (
-          <button
+          <Button
             onClick={resumeRecording}
             disabled={processing}
+            variant='primary'
+            size='lg'
             style={{
-              padding: '14px 20px',
-              borderRadius: '12px',
-              border: 'none',
               background: '#10b981',
               color: '#fff',
-              fontWeight: 700,
-              cursor: processing ? 'wait' : 'pointer'
+              fontWeight: 700
             }}
           >
             🎤 Aufnahme fortsetzen
-          </button>
+          </Button>
         )}
 
-        <button
+        <Button
           onClick={() => fileInputRef.current?.click()}
           disabled={processing}
+          variant='secondary'
+          size='lg'
           style={{
-            padding: '14px 20px',
-            borderRadius: '12px',
-            border: 'none',
             background: '#e2e8f0',
             color: '#0f172a',
-            fontWeight: 700,
-            cursor: processing ? 'wait' : 'pointer'
+            fontWeight: 700
           }}
         >
           📤 Aufnahme hochladen
-        </button>
+        </Button>
 
         <input
           ref={fileInputRef}
           type='file'
           accept='audio/*'
+          multiple
           style={{ display: 'none' }}
           onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            await addUploadSegment(file);
+            const files = Array.from(event.target.files || []);
+            await handleUploadFiles(files);
             event.currentTarget.value = '';
           }}
         />
 
-        <button
+        <Button
           onClick={goToDocumentation}
           disabled={processing || (!recording && segments.length === 0)}
+          variant='primary'
+          size='lg'
           style={{
-            padding: '14px 20px',
-            borderRadius: '12px',
-            border: 'none',
             background: '#111827',
             color: '#fff',
             fontWeight: 700,
-            cursor: processing || (!recording && segments.length === 0) ? 'not-allowed' : 'pointer',
             opacity: processing || (!recording && segments.length === 0) ? 0.7 : 1
           }}
         >
           {processing ? 'Verarbeite ...' : '🧠 Zur Dokumentation'}
-        </button>
+        </Button>
       </div>
 
       {paused && !recording && (
@@ -593,6 +592,41 @@ export default function RecordPage() {
           Du kannst jederzeit weitere Teile aufnehmen oder Dateien hinzufuegen.
         </div>
       )}
+
+      <div
+        onClick={() => !processing && fileInputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!dragActive) setDragActive(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragActive(false);
+        }}
+        onDrop={async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragActive(false);
+          if (processing) return;
+          const files = Array.from(e.dataTransfer.files || []);
+          await handleUploadFiles(files);
+        }}
+        style={{
+          width: '100%',
+          maxWidth: '720px',
+          border: dragActive ? '2px dashed rgba(255,255,255,0.95)' : '1px dashed rgba(255,255,255,0.45)',
+          borderRadius: '12px',
+          background: dragActive ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)',
+          padding: '12px',
+          marginBottom: '12px',
+          cursor: processing ? 'wait' : 'pointer'
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: '14px' }}>Audio hier ablegen oder klicken</div>
+        <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '2px' }}>Uploads werden als Segmente hinzugefuegt und mit transkribiert.</div>
+      </div>
 
       <div style={{ fontSize: '13px', opacity: 0.85, marginBottom: '14px' }}>{status}</div>
 
@@ -631,20 +665,18 @@ export default function RecordPage() {
                   {segment.label} - {formatTime(segment.durationSeconds)} min
                 </div>
 
-                <button
+                <Button
                   onClick={() => removeSegment(segment.id)}
+                  size='sm'
+                  variant='primary'
                   style={{
-                    border: 'none',
-                    borderRadius: '8px',
                     background: '#ef4444',
                     color: '#fff',
-                    padding: '6px 8px',
-                    cursor: 'pointer',
                     fontSize: '12px'
                   }}
                 >
                   Loeschen
-                </button>
+                </Button>
               </div>
 
               <audio controls src={segment.url} style={{ width: '100%' }} />

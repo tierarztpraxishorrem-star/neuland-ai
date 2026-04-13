@@ -1,0 +1,30 @@
+Anlage 3 - Kurze Einordnung der Chatbot-Funktionen im Zusammenhang mit Cookie-Consent
+
+Der Chatbot wird so eingebunden, dass vor erteilter Einwilligung keine aktive Initialisierung erfolgt.
+Das bedeutet: kein Laden des Chat-Scripts, keine Anfrage an externe Systeme und keine nutzerbezogene Chat-Verarbeitung vor Consent (sofern nicht als technisch zwingend erforderlich klassifiziert).
+
+Funktionale Einordnung
+1. Vor Consent:
+- Chatbot bleibt inaktiv (nur statischer Platzhalter oder Hinweistext)
+- Keine Chat-Session, keine Analyse-/Insights-Verarbeitung
+- Keine externen Requests durch den Chatbot-Code
+
+2. Nach Consent:
+- Chatbot-Script wird geladen und initialisiert
+- Nutzer kann aktiv Anfragen senden
+- Verarbeitungen erfolgen entsprechend Datenschutzhinweis und technischer Konfiguration
+
+3. Bei Widerruf des Consent:
+- Keine erneute Initialisierung
+- Laufende Session wird beendet bzw. nicht fortgesetzt
+- Erneute Aktivierung erst nach neuer Zustimmung
+
+Rechtlich-praktische Zuordnung
+- Rein technisch notwendige Komponenten sind eng zu begrenzen.
+- Analyse-/Optimierungsfunktionen sind als zustimmungspflichtig zu behandeln.
+- Consent-Text, Datenschutzerklaerung und tatsaechliches Ladeverhalten muessen konsistent sein.
+
+Kurzfazit
+- Der Chatbot ist consent-gesteuert implementiert.
+- Ohne Zustimmung keine aktive Chat-Funktion.
+- Damit ist die Funktionstrennung fuer Cookie-Consent sauber und nachvollziehbar umgesetzt.

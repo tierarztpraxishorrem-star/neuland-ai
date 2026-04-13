@@ -1,0 +1,56 @@
+Anlage 1 - WordPress-Integration via Plugin/Widget (empfohlen)
+
+Ziel
+- Saubere, wartbare Integration des Chatbots in eine WordPress-Seite
+- Hohe Kompatibilitaet mit bestehenden Themes und Plugins
+- DSGVO-freundliche Steuerung ueber Consent-Management
+
+Empfehlung
+- Primaer Plugin/Widget-Integration nutzen
+- Kein direktes hartes Einbetten in Theme-Dateien ohne Fallback-Konzept
+
+Technisches Muster
+- Ein schlankes WordPress-Plugin registriert ein Widget oder Shortcode
+- Der Chatbot-Container wird serverseitig in die Seite eingebracht
+- Das eigentliche Chat-Script wird erst nach Consent geladen
+
+WordPress-Umsetzung (Kurzablauf)
+1. Eigenes Mini-Plugin anlegen (oder bestehendes Site-Plugin nutzen)
+2. Shortcode registrieren, z. B. [tzn_chatbot]
+3. Shortcode gibt nur den Container aus (div + data-attribute)
+4. Script-Lader wird nur bei erteilter Einwilligung gestartet
+5. Optional: nur auf bestimmten Seiten laden (Leistungsoptimierung)
+
+Beispiel-Shortcode (Prinzip)
+- Ausgabe eines Containers:
+  <div id="tzn-chatbot-root" data-channel="public-chat"></div>
+
+Consent-Logik (wichtig)
+- Der Chatbot darf im Browser erst initialisiert werden, wenn die passende Kategorie im Consent-Tool aktiv ist
+- Vor Consent: kein API-Aufruf, kein Tracking, kein externer Script-Load
+- Nach Consent: Script laden und Chatbot starten
+
+Cookie-Consent-Einordnung
+- Falls fuer den Chatbot technisch notwendige Speicherung erfolgt (z. B. Session/Status), diese klar als notwendig oder funktional klassifizieren (je nach Rechtspruefung)
+- Falls Analysefunktionen aktiv sind, immer in zustimmungspflichtiger Kategorie fuehren
+- Consent-Text sollte enthalten:
+  - Zweck des Chatbots
+  - Empfaenger/Kategorien (z. B. Hosting/AI-Verarbeitung)
+  - Speicherdauer bzw. Loeschlogik
+
+DSGVO-Hinweise fuer diesen Weg
+- Einbindung in Datenschutzerklaerung mit Verweis auf vercel.com/legal als technische Grundlage
+- Auftragsverarbeitung und Drittlandbezug rechtlich pruefen/finalisieren
+- Datenminimierung: nur notwendige Eingaben uebertragen
+- Logging nur in pseudonymisierter Form, sofern fuer Qualitaetssicherung erforderlich
+
+Vorteile
+- Bessere Wartbarkeit
+- Bessere Plugin-Kompatibilitaet
+- Klarere Trennung von Darstellung, Consent und Logik
+
+Nachteile
+- Initial etwas mehr Implementierungsaufwand als reiner Script-Snippet
+
+Freigabeempfehlung
+- Dieser Weg sollte als Standard fuer Produktion priorisiert werden.

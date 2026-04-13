@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
+import { Badge, Button, Card, EmptyState, Input, ListItem, Section, SelectInput, uiTokens } from '../../../components/ui/System';
 
 type Patient = {
   id: string;
@@ -28,6 +29,25 @@ type PatientDocument = {
   name: string;
   uploadedAt: string;
   text: string;
+  fileType: 'pdf' | 'image' | 'lab' | 'other';
+  mimeType: string;
+};
+
+const getDocumentType = (fileName: string, mimeType?: string): PatientDocument['fileType'] => {
+  const lowerName = fileName.toLowerCase();
+  const lowerMime = (mimeType || '').toLowerCase();
+
+  if (lowerMime.includes('pdf') || lowerName.endsWith('.pdf')) return 'pdf';
+  if (lowerMime.startsWith('image/') || /\.(png|jpg|jpeg|webp|gif)$/.test(lowerName)) return 'image';
+  if (/(labor|lab|blut|cbc|chem)/.test(lowerName)) return 'lab';
+  return 'other';
+};
+
+const getDocumentTypeLabel = (type: PatientDocument['fileType']) => {
+  if (type === 'pdf') return 'PDF';
+  if (type === 'image') return 'Bild';
+  if (type === 'lab') return 'Labor';
+  return 'Dokument';
 };
 
 const formatDateTime = (value: string) => {
@@ -99,6 +119,10 @@ export default function PatientDetailPage() {
   const [selectedDocument, setSelectedDocument] = useState<PatientDocument | null>(null);
   const [historySummary, setHistorySummary] = useState('');
   const [loading, setLoading] = useState(true);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [uploadAccept, setUploadAccept] = useState('');
 
   const docsStorageKey = `patient_documents_${patientId}`;
 
@@ -167,7 +191,21 @@ export default function PatientDetailPage() {
 
     try {
       const parsed = JSON.parse(stored);
-      setDocuments(Array.isArray(parsed) ? parsed : []);
+      if (!Array.isArray(parsed)) {
+        setDocuments([]);
+        return;
+      }
+
+      const normalized = parsed.map((doc: Partial<PatientDocument>) => ({
+        id: String(doc.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+        name: String(doc.name || 'Dokument'),
+        uploadedAt: String(doc.uploadedAt || new Date().toISOString()),
+        text: String(doc.text || ''),
+        mimeType: String(doc.mimeType || ''),
+        fileType: (doc.fileType as PatientDocument['fileType']) || getDocumentType(String(doc.name || ''), String(doc.mimeType || ''))
+      }));
+
+      setDocuments(normalized);
     } catch {
       setDocuments([]);
     }
@@ -183,10 +221,10 @@ export default function PatientDetailPage() {
 
   const patientTitle = useMemo(() => {
     if (!patient) return 'Patient';
-    return patient.external_id ? `${patient.name} (#${patient.external_id})` : patient.name;
+    return patient.name;
   }, [patient]);
 
-  const detailLine = [patient?.tierart, patient?.rasse, patient?.alter, patient?.geschlecht]
+  const detailLineWithId = [patient?.tierart, patient?.rasse, patient?.alter, patient?.geschlecht, patient?.external_id ? `(#${patient.external_id})` : '']
     .filter(Boolean)
     .join(' · ');
 
@@ -210,10 +248,12 @@ export default function PatientDetailPage() {
       const extractedText = (data?.result || data?.text || '').trim();
 
       const doc: PatientDocument = {
-        id: `${Date.now()}`,
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: file.name,
         uploadedAt: new Date().toISOString(),
-        text: extractedText || 'Kein extrahierter Text gefunden.'
+        text: extractedText || 'Kein extrahierter Text gefunden.',
+        fileType: getDocumentType(file.name, file.type),
+        mimeType: file.type || ''
       };
 
       saveDocuments([doc, ...documents]);
@@ -223,6 +263,26 @@ export default function PatientDetailPage() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    for (const file of files) {
+      await handleUploadDocument(file);
+    }
+  };
+
+  const removeDocument = (id: string) => {
+    const next = documents.filter((doc) => doc.id !== id);
+    saveDocuments(next);
+    if (selectedDocument?.id === id) {
+      setSelectedDocument(null);
+    }
+  };
+
+  const openUploadPicker = (accept = '') => {
+    setUploadAccept(accept);
+    fileInputRef.current?.click();
   };
 
   const openInVetMindWithContext = () => {
@@ -264,20 +324,25 @@ export default function PatientDetailPage() {
     router.push('/vetmind');
   };
 
-  const summarizeDocuments = async () => {
-    if (documents.length === 0) {
-      alert('Bitte zuerst Dokumente hochladen.');
+  const summarizeContext = async () => {
+    if (documents.length === 0 && consultations.length === 0) {
+      alert('Bitte zuerst Konsultationen oder Dokumente bereitstellen.');
       return;
     }
 
     setSummarizing(true);
     try {
-      const content = documents
+      const docsContent = documents
         .slice(0, 8)
         .map((doc) => `Dokument: ${doc.name}\n${doc.text}`)
         .join('\n\n');
 
-      const prompt = `Fasse die folgenden tiermedizinischen Vorberichte/Laborbefunde kompakt zusammen.\n\nWichtige Punkte:\n- Relevante Diagnosen\n- Befunde\n- Therapie/Hinweise\n- Offene Fragen\n\nINHALT:\n${content}`;
+      const consultationContent = consultations
+        .slice(0, 6)
+        .map((entry) => `Konsultation: ${entry.title || 'Konsultation'} (${formatDateTime(entry.created_at)})\n${buildPreview(entry)}`)
+        .join('\n\n');
+
+      const prompt = `Erstelle eine kurze klinische Verlaufszusammenfassung für einen Tierpatienten.\n\nStruktur:\n1) Wichtigste Diagnosen/Befunde\n2) Relevante Probleme\n3) Letzte Maßnahmen\n4) Offene Fragen/Nächste Schritte\n\nSchreibe kompakt, medizinisch klar und ohne Halluzinationen.\n\nKONSULTATIONEN:\n${consultationContent || 'Keine Konsultationen'}\n\nDOKUMENTE:\n${docsContent || 'Keine Dokumente'}`;
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -299,6 +364,7 @@ export default function PatientDetailPage() {
       }
 
       setHistorySummary(fullText.trim());
+      localStorage.setItem(`patient_summary_${patientId}`, fullText.trim());
     } catch (err) {
       console.error(err);
       alert('Zusammenfassung fehlgeschlagen.');
@@ -306,6 +372,33 @@ export default function PatientDetailPage() {
       setSummarizing(false);
     }
   };
+
+  useEffect(() => {
+    if (!patientId) return;
+    const storedSummary = localStorage.getItem(`patient_summary_${patientId}`);
+    if (storedSummary) {
+      setHistorySummary(storedSummary);
+      return;
+    }
+
+    if (consultations.length === 0 && documents.length === 0) {
+      setHistorySummary('');
+      return;
+    }
+
+    const latestConsultation = consultations[0];
+    const latestDoc = documents[0];
+    const autoSummary = [
+      latestConsultation ? `Wichtigster Verlauf: ${latestConsultation.title || 'Konsultation'} (${formatDateTime(latestConsultation.created_at)}).` : '',
+      latestConsultation ? `Letzter Befundhinweis: ${buildPreview(latestConsultation) || 'Keine Vorschau verfügbar.'}` : '',
+      latestDoc ? `Neueste Unterlage: ${latestDoc.name}.` : '',
+      'Empfehlung: Verlauf mit "Neu zusammenfassen" klinisch verdichten.'
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    setHistorySummary(autoSummary);
+  }, [patientId, consultations, documents]);
 
   const savePatientDetails = async () => {
     if (!patientId || !editForm.name.trim()) {
@@ -335,6 +428,7 @@ export default function PatientDetailPage() {
       if (error) throw error;
 
       setPatient(data as Patient);
+      setIsEditingDetails(false);
     } catch (err) {
       console.error(err);
       alert('Patientendetails konnten nicht gespeichert werden.');
@@ -347,273 +441,258 @@ export default function PatientDetailPage() {
     <main
       style={{
         minHeight: '100vh',
-        background: '#f4f7f8',
-        padding: '40px',
-        fontFamily: 'Arial'
+        background: uiTokens.pageBackground,
+        padding: uiTokens.pagePadding,
+        fontFamily: 'Arial, sans-serif'
       }}
     >
-      <button
+      <Button
+        variant='secondary'
         onClick={() => router.push('/patienten')}
-        style={{
-          border: '1px solid #e5e7eb',
-          borderRadius: '10px',
-          background: '#fff',
-          padding: '8px 12px',
-          cursor: 'pointer',
-          marginBottom: '16px'
-        }}
+        style={{ marginBottom: '16px' }}
       >
         ← Zur Patientenliste
-      </button>
+      </Button>
 
-      <div
+      <Card
         style={{
-          background: '#fff',
-          border: '1px solid #e5e7eb',
-          borderRadius: '14px',
-          padding: '20px',
-          marginBottom: '16px',
+          padding: '24px',
+          marginBottom: '18px',
           display: 'flex',
           justifyContent: 'space-between',
-          gap: '16px',
+          alignItems: 'flex-start',
+          gap: '20px',
           flexWrap: 'wrap'
         }}
       >
         <div>
-          <h1 style={{ marginTop: 0, marginBottom: '8px', color: '#0F6B74' }}>{patientTitle}</h1>
-          <div style={{ color: '#334155', fontSize: '14px' }}>
-            {detailLine || 'Tierart · Rasse · Alter · Geschlecht fehlen'}
+          <h1 style={{ marginTop: 0, marginBottom: '8px', color: uiTokens.brand, fontSize: '34px', lineHeight: 1.1 }}>{patientTitle}</h1>
+          <div style={{ color: uiTokens.textPrimary, fontSize: '15px' }}>
+            {detailLineWithId || 'Tierart · Rasse · Alter · Geschlecht fehlen'}
           </div>
-          {patient?.external_id && <div style={{ color: '#64748b', fontSize: '13px', marginTop: '4px' }}>#{patient.external_id}</div>}
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => router.push('/konsultation/start')}
-            style={{
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-              borderRadius: '10px',
-              padding: '10px 12px',
-              cursor: 'pointer',
-              fontWeight: 600
-            }}
-          >
+          <Button variant='secondary' size='lg' onClick={() => router.push('/konsultation/start')}>
             + Neue Konsultation
-          </button>
+          </Button>
 
-          <button
-            onClick={openInVetMindWithContext}
-            style={{
-              border: 'none',
-              background: '#0F6B74',
-              color: '#fff',
-              borderRadius: '10px',
-              padding: '10px 12px',
-              cursor: 'pointer',
-              fontWeight: 600
-            }}
-          >
+          <Button variant='primary' size='lg' onClick={openInVetMindWithContext}>
             In VetMind öffnen
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 7fr) minmax(280px, 3fr)', gap: '16px', alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: '16px' }}>
-          <section
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '14px',
-              padding: '20px'
-            }}
-          >
-            <h2 style={{ marginTop: 0, marginBottom: '12px' }}>Konsultationsverlauf</h2>
+          <Section title='Konsultationen'>
 
             {loading && <div style={{ color: '#64748b' }}>Lade ...</div>}
 
             {!loading && consultations.length === 0 && (
-              <div style={{ color: '#64748b' }}>Noch keine verknuepften Konsultationen.</div>
+              <EmptyState
+                text='Noch keine Konsultationen vorhanden.'
+                actionLabel='+ Erste Konsultation erstellen'
+                onAction={() => router.push('/konsultation/start')}
+              />
             )}
 
             <div style={{ display: 'grid', gap: '12px' }}>
               {consultations.map((entry) => (
-                <div
+                <ListItem
                   key={entry.id}
-                  style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '12px',
-                    background: '#fff',
-                    padding: '14px'
-                  }}
+                  style={{ background: '#fbfdff' }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
                     <div>
-                      <div style={{ fontWeight: 600 }}>{entry.title || 'Konsultation'}</div>
+                      <div style={{ fontWeight: 700 }}>🧾 {entry.title || 'Konsultation'}</div>
                       <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
                         {formatDateTime(entry.created_at)} · Dauer: {formatDuration(consultationDurations[entry.id] || 0)}
                       </div>
                     </div>
 
-                    <button
+                    <Button
+                      variant='secondary'
+                      size='sm'
                       onClick={() => router.push(`/konsultation/${entry.id}/result`)}
-                      style={{
-                        border: '1px solid #e5e7eb',
-                        background: '#fff',
-                        borderRadius: '8px',
-                        padding: '6px 10px',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
                     >
                       Öffnen
-                    </button>
+                    </Button>
                   </div>
-                  <div style={{ color: '#334155', fontSize: '13px', marginTop: '8px' }}>{buildPreview(entry) || 'Keine Vorschau'}</div>
-                </div>
+                  <div style={{ color: '#334155', fontSize: '13px', marginTop: '8px', lineHeight: 1.45 }}>
+                    {buildPreview(entry) || 'Keine Vorschau'}
+                  </div>
+                </ListItem>
               ))}
             </div>
-          </section>
+          </Section>
 
-          <section
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '14px',
-              padding: '20px'
-            }}
+          <Section
+            title='🧠 Letzter Verlauf'
+            actions={(
+              <Button
+                variant='secondary'
+                onClick={summarizeContext}
+                disabled={summarizing || (documents.length === 0 && consultations.length === 0)}
+              >
+                {summarizing ? 'Neu zusammenfassen ...' : 'Neu zusammenfassen'}
+              </Button>
+            )}
           >
-            <h2 style={{ marginTop: 0, marginBottom: '12px' }}>Patientenhistorie</h2>
 
             <div
               style={{
-                border: '1px dashed #cbd5e1',
+                border: '1px solid #dbeafe',
+                background: '#f8fbff',
+                color: '#1f2937',
                 borderRadius: '12px',
-                padding: '14px',
-                marginBottom: '12px',
-                background: '#f8fafc'
+                padding: '12px',
+                whiteSpace: 'pre-wrap',
+                fontSize: '14px',
+                lineHeight: 1.55
               }}
             >
-              <div style={{ color: '#334155', marginBottom: '10px' }}>
-                Dokumente, Laborbefunde oder Vorberichte hinzufügen
+              {historySummary || 'Noch keine Zusammenfassung vorhanden. Nutze "Neu zusammenfassen" für einen schnellen klinischen Überblick.'}
+            </div>
+          </Section>
+
+          <Section title='Dokumente & Patientenhistorie'>
+
+            <div
+              onClick={() => !uploading && openUploadPicker('')}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!dragActive) setDragActive(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragActive(false);
+              }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragActive(false);
+                if (uploading) return;
+                const files = Array.from(e.dataTransfer.files || []);
+                await handleUploadFiles(files);
+              }}
+              style={{
+                border: dragActive ? '2px dashed #0F6B74' : '1px dashed #cbd5e1',
+                borderRadius: '14px',
+                padding: '16px',
+                marginBottom: '12px',
+                background: dragActive ? '#ecfeff' : '#f8fafc',
+                transition: 'all 0.16s ease',
+                cursor: uploading ? 'wait' : 'pointer'
+              }}
+            >
+              <div style={{ color: '#0f172a', marginBottom: '6px', fontWeight: 700 }}>
+                Dateien hier ablegen oder klicken
+              </div>
+              <div style={{ color: '#64748b', marginBottom: '10px', fontSize: '13px' }}>
+                Drag & Drop ist aktiv. Unterstützt: PDF, Bilder, Laborunterlagen
               </div>
 
+              <input
+                type='file'
+                hidden
+                ref={fileInputRef}
+                disabled={uploading}
+                multiple
+                accept={uploadAccept}
+                onChange={async (e) => {
+                  const input = e.target;
+                  const files = Array.from(input.files || []);
+                  await handleUploadFiles(files);
+                  input.value = '';
+                  setUploadAccept('');
+                }}
+              />
+
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <label
-                  style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    background: '#fff',
-                    padding: '8px 12px',
-                    cursor: uploading ? 'wait' : 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px'
+                <Button
+                  type='button'
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openUploadPicker('');
                   }}
+                  variant='secondary'
+                  disabled={uploading}
                 >
                   📤 Datei hochladen
-                  <input
-                    type='file'
-                    hidden
-                    disabled={uploading}
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      await handleUploadDocument(file);
-                      e.currentTarget.value = '';
-                    }}
-                  />
-                </label>
+                </Button>
 
-                <button
-                  onClick={summarizeDocuments}
-                  disabled={summarizing || documents.length === 0}
-                  style={{
-                    border: 'none',
-                    borderRadius: '8px',
-                    background: '#0F6B74',
-                    color: '#fff',
-                    padding: '8px 12px',
-                    cursor: summarizing || documents.length === 0 ? 'not-allowed' : 'pointer',
-                    opacity: summarizing || documents.length === 0 ? 0.7 : 1,
-                    fontWeight: 600,
-                    fontSize: '14px'
+                <Button
+                  type='button'
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openUploadPicker('application/pdf,.pdf');
                   }}
+                  variant='secondary'
                 >
-                  {summarizing ? 'Zusammenfassung ...' : '🧠 Zusammenfassen'}
-                </button>
+                  PDF
+                </Button>
 
-                <button
-                  onClick={openInVetMindWithContext}
-                  style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    background: '#fff',
-                    padding: '8px 12px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px'
+                <Button
+                  type='button'
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openUploadPicker('.csv,.txt,.pdf,application/pdf');
                   }}
+                  variant='secondary'
+                >
+                  Labor
+                </Button>
+
+                <Button
+                  type='button'
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openUploadPicker('image/*,.pdf');
+                  }}
+                  variant='secondary'
+                >
+                  Röntgen
+                </Button>
+
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openInVetMindWithContext();
+                  }}
+                  variant='secondary'
                 >
                   🧠 Mit Kontext arbeiten
-                </button>
+                </Button>
               </div>
             </div>
 
-            {documents.length === 0 && (
-              <div style={{ color: '#64748b', marginBottom: '8px' }}>
-                Füge Vorberichte oder Laborwerte hinzu, um die KI kontextreicher zu machen
-              </div>
-            )}
-
-            {historySummary && (
-              <div
-                style={{
-                  border: '1px solid #d1fae5',
-                  background: '#ecfeff',
-                  color: '#134e4a',
-                  borderRadius: '10px',
-                  padding: '10px',
-                  marginBottom: '10px',
-                  whiteSpace: 'pre-wrap',
-                  fontSize: '13px'
-                }}
-              >
-                {historySummary}
-              </div>
-            )}
-
             <div style={{ display: 'grid', gap: '10px' }}>
               {documents.map((doc) => (
-                <div
+                <ListItem
                   key={doc.id}
-                  style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '10px',
-                    padding: '10px',
-                    background: '#fff'
-                  }}
                 >
-                  <div style={{ fontWeight: 600 }}>{doc.name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ fontWeight: 600 }}>{doc.name}</div>
+                    <Badge tone='accent'>{getDocumentTypeLabel(doc.fileType)}</Badge>
+                  </div>
                   <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                     {formatDateTime(doc.uploadedAt)}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => setSelectedDocument(doc)}
-                      style={{
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        background: '#fff',
-                        padding: '6px 8px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Öffnen
-                    </button>
+                  <div style={{ fontSize: '13px', color: '#334155', marginTop: '7px', lineHeight: 1.45 }}>
+                    {(doc.text || 'Kein Inhalt verfügbar.').slice(0, 180)}
+                    {(doc.text || '').length > 180 ? ' ...' : ''}
+                  </div>
 
-                    <button
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    <Button variant='secondary' size='sm' onClick={() => setSelectedDocument(doc)}>
+                      👁 Vorschau öffnen
+                    </Button>
+
+                    <Button
                       onClick={() => {
                         const payload = {
                           source: 'patient-document',
@@ -630,138 +709,140 @@ export default function PatientDetailPage() {
                         localStorage.setItem('activeCase', JSON.stringify(payload));
                         router.push('/vetmind');
                       }}
-                      style={{
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: '#0F6B74',
-                        color: '#fff',
-                        padding: '6px 8px',
-                        cursor: 'pointer'
-                      }}
+                      variant='primary'
+                      size='sm'
                     >
-                      In KI verwenden
-                    </button>
+                      🧠 Als Kontext verwenden
+                    </Button>
+
+                    <Button variant='secondary' size='sm' onClick={() => removeDocument(doc.id)}>
+                      🗑 löschen
+                    </Button>
                   </div>
-                </div>
+                </ListItem>
               ))}
             </div>
-          </section>
+          </Section>
         </div>
 
         <aside style={{ display: 'grid', gap: '16px', position: 'sticky', top: '16px' }}>
-          <section
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '14px',
-              padding: '14px'
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: '10px' }}>Patientendetails</h3>
+          <Section title='🧬 Patient'>
 
-            <div style={{ display: 'grid', gap: '8px' }}>
-              <input
-                value={editForm.name}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder='Name *'
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              />
-              <select
-                value={editForm.tierart}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, tierart: e.target.value }))}
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              >
-                <option value=''>Tierart</option>
-                <option value='Hund'>Hund</option>
-                <option value='Katze'>Katze</option>
-                <option value='Heimtier'>Heimtier</option>
-              </select>
-              <input
-                value={editForm.rasse}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, rasse: e.target.value }))}
-                placeholder='Rasse'
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              />
-              <input
-                value={editForm.alter}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, alter: e.target.value }))}
-                placeholder='Alter'
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              />
-              <select
-                value={editForm.geschlecht}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, geschlecht: e.target.value }))}
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              >
-                <option value=''>Geschlecht</option>
-                <option value='m'>m</option>
-                <option value='w'>w</option>
-                <option value='mk'>mk</option>
-                <option value='wk'>wk</option>
-              </select>
-              <input
-                value={editForm.external_id}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, external_id: e.target.value }))}
-                placeholder='PMS-ID'
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              />
-              <input
-                value={editForm.owner_name}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, owner_name: e.target.value }))}
-                placeholder='Besitzer'
-                style={{ padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-              />
-            </div>
+            {!isEditingDetails && (
+              <div style={{ display: 'grid', gap: '8px' }}>
+                <div style={{ color: '#334155', fontWeight: 600 }}>{patient?.tierart || '-'}</div>
+                <div style={{ color: '#334155' }}>{patient?.rasse || '-'}</div>
+                <div style={{ color: '#334155' }}>{patient?.alter || '-'}</div>
+                <div style={{ color: '#334155' }}>{patient?.geschlecht || '-'}</div>
+                <div style={{ color: '#64748b', fontSize: '13px' }}>PMS-ID: {patient?.external_id || '-'}</div>
+                <div style={{ color: '#64748b', fontSize: '13px' }}>Besitzer: {patient?.owner_name || '-'}</div>
 
-            <button
-              onClick={savePatientDetails}
-              disabled={savingPatient}
-              style={{
-                marginTop: '10px',
-                border: 'none',
-                borderRadius: '8px',
-                background: '#0F6B74',
-                color: '#fff',
-                padding: '8px 10px',
-                cursor: savingPatient ? 'wait' : 'pointer',
-                fontWeight: 600,
-                width: '100%'
-              }}
-            >
-              {savingPatient ? 'Speichert ...' : 'Details speichern'}
-            </button>
-          </section>
+                <Button variant='ghost' onClick={() => setIsEditingDetails(true)} style={{ justifyContent: 'flex-start', width: '100%' }}>
+                  ✏️ Bearbeiten
+                </Button>
+              </div>
+            )}
 
-          <section
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '14px',
-              padding: '14px'
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: '8px' }}>📚 Kontext verfügbar</h3>
+            {isEditingDetails && (
+              <>
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  <Input
+                    value={editForm.name}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                    placeholder='Name *'
+                  />
+                  <SelectInput
+                    value={editForm.tierart}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, tierart: e.target.value }))}
+                  >
+                    <option value=''>Tierart</option>
+                    <option value='Hund'>Hund</option>
+                    <option value='Katze'>Katze</option>
+                    <option value='Heimtier'>Heimtier</option>
+                  </SelectInput>
+                  <Input
+                    value={editForm.rasse}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, rasse: e.target.value }))}
+                    placeholder='Rasse'
+                  />
+                  <Input
+                    value={editForm.alter}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, alter: e.target.value }))}
+                    placeholder='Alter'
+                  />
+                  <SelectInput
+                    value={editForm.geschlecht}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, geschlecht: e.target.value }))}
+                  >
+                    <option value=''>Geschlecht</option>
+                    <option value='m'>m</option>
+                    <option value='w'>w</option>
+                    <option value='mk'>mk</option>
+                    <option value='wk'>wk</option>
+                  </SelectInput>
+                  <Input
+                    value={editForm.external_id}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, external_id: e.target.value }))}
+                    placeholder='PMS-ID'
+                  />
+                  <Input
+                    value={editForm.owner_name}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, owner_name: e.target.value }))}
+                    placeholder='Besitzer'
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+                  <Button variant='primary' onClick={savePatientDetails} disabled={savingPatient} style={{ width: '100%' }}>
+                    {savingPatient ? 'Speichert ...' : 'Details speichern'}
+                  </Button>
+
+                  <Button
+                    variant='secondary'
+                    onClick={() => {
+                      if (!patient) return;
+                      setEditForm({
+                        name: patient.name || '',
+                        tierart: patient.tierart || '',
+                        rasse: patient.rasse || '',
+                        alter: patient.alter || '',
+                        geschlecht: patient.geschlecht || '',
+                        external_id: patient.external_id || '',
+                        owner_name: patient.owner_name || ''
+                      });
+                      setIsEditingDetails(false);
+                    }}
+                    style={{ width: '100%' }}
+                  >
+                    Abbrechen
+                  </Button>
+                </div>
+              </>
+            )}
+          </Section>
+
+          <Section title='📚 Kontext verfügbar'>
             <div style={{ color: '#334155', fontSize: '14px', lineHeight: 1.6 }}>
               <div>- {consultations.length} Konsultationen</div>
               <div>- {documents.length} Dokumente</div>
             </div>
 
-            <button
-              onClick={openInVetMindWithContext}
-              style={{
-                marginTop: '10px',
-                border: '1px solid #e5e7eb',
-                borderRadius: '8px',
-                background: '#fff',
-                padding: '8px 10px',
-                cursor: 'pointer',
-                width: '100%',
-                fontWeight: 600
-              }}
-            >
+            <Button variant='secondary' onClick={openInVetMindWithContext} style={{ marginTop: '10px', width: '100%' }}>
               🧠 Mit Kontext arbeiten
-            </button>
-          </section>
+            </Button>
+          </Section>
+
+          <Section title='Aktionen'>
+            <div style={{ display: 'grid', gap: '8px' }}>
+              <Button variant='primary' onClick={() => router.push('/konsultation/start')} style={{ width: '100%' }}>
+                + Konsultation starten
+              </Button>
+
+              <Button variant='secondary' onClick={openInVetMindWithContext} style={{ width: '100%' }}>
+                🧠 VetMind öffnen
+              </Button>
+            </div>
+          </Section>
         </aside>
       </div>
 
@@ -778,32 +859,26 @@ export default function PatientDetailPage() {
             zIndex: 120
           }}
         >
-          <div
+          <Card
             onClick={(e) => e.stopPropagation()}
             style={{
               width: 'min(760px, calc(100vw - 24px))',
               maxHeight: '78vh',
               overflow: 'auto',
-              background: '#fff',
-              borderRadius: '14px',
-              border: '1px solid #e5e7eb',
               padding: '16px'
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ margin: 0 }}>{selectedDocument.name}</h3>
-              <button
-                onClick={() => setSelectedDocument(null)}
-                style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '18px' }}
-              >
+              <Button variant='ghost' onClick={() => setSelectedDocument(null)} style={{ fontSize: '18px' }}>
                 ✕
-              </button>
+              </Button>
             </div>
             <div style={{ color: '#64748b', fontSize: '12px', marginBottom: '10px' }}>{formatDateTime(selectedDocument.uploadedAt)}</div>
             <div style={{ whiteSpace: 'pre-wrap', color: '#1f2937', fontSize: '14px', lineHeight: 1.5 }}>
               {selectedDocument.text || 'Kein Inhalt verfügbar.'}
             </div>
-          </div>
+          </Card>
         </div>
       )}
     </main>

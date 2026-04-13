@@ -2,7 +2,10 @@
 
 import { supabase } from '../../lib/supabase';
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { createPDFBlob, generatePDF, type PracticeProfile } from '../../lib/pdfReport';
+import AiDisclaimer from '../../components/AiDisclaimer';
+import { Button, Card, Input, TextAreaInput, uiTokens } from '../../components/ui/System';
 
 type ChatPatient = {
   id: string;
@@ -22,6 +25,19 @@ type PatientConsultation = {
   transcript: string | null;
   created_at: string;
 };
+
+type UploadedContextFile = {
+  id: string;
+  name: string;
+  uploadedAt: string;
+  extractedText: string;
+  fileType: 'pdf' | 'image' | 'other';
+  inContext: boolean;
+  status: 'uploading' | 'ready' | 'error';
+  error?: string;
+};
+
+type PromptCategory = 'clinical' | 'communication' | 'internal';
 
 function Typewriter({ text }: { text: string }) {
   const [displayed, setDisplayed] = useState("");
@@ -47,6 +63,7 @@ function Typewriter({ text }: { text: string }) {
 }
 
 export default function VetMind() {
+  const router = useRouter();
 
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
@@ -83,6 +100,7 @@ export default function VetMind() {
   const [selectedChatPatient, setSelectedChatPatient] = useState<ChatPatient | null>(null);
   const [selectedPatientConsultations, setSelectedPatientConsultations] = useState<PatientConsultation[]>([]);
   const [patientsLoading, setPatientsLoading] = useState(false);
+  const [activePracticeId, setActivePracticeId] = useState<string | null>(null);
 
   const [showMenu, setShowMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -93,10 +111,12 @@ export default function VetMind() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile | null>(null);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
 
   const [recognition, setRecognition] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const promptDropdownRef = useRef<HTMLDivElement | null>(null);
   const autoScrollEnabledRef = useRef(true);
   const pendingResponseStartIndexRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -105,9 +125,101 @@ export default function VetMind() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   const [fileContext, setFileContext] = useState("");
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedContextFile[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const contextFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [promptTab, setPromptTab] = useState<"clinical" | "communication" | "internal">("clinical");
+  const [promptTab, setPromptTab] = useState<PromptCategory>('clinical');
+  const [openPromptDropdown, setOpenPromptDropdown] = useState<PromptCategory | null>(null);
   const [lastPromptId, setLastPromptId] = useState("");
+
+  const getContextFileType = (name: string): UploadedContextFile['fileType'] => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) return 'pdf';
+    if (/\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(lower)) return 'image';
+    return 'other';
+  };
+
+  const processContextFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    for (const file of files) {
+      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const pending: UploadedContextFile = {
+        id,
+        name: file.name,
+        uploadedAt: new Date().toISOString(),
+        extractedText: '',
+        fileType: getContextFileType(file.name),
+        inContext: true,
+        status: 'uploading'
+      };
+
+      setUploadedFiles((prev) => [pending, ...prev]);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch('/api/analyze-image', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+        const extracted = (data?.result || data?.text || '').trim();
+
+        setUploadedFiles((prev) => prev.map((item) => (
+          item.id === id
+            ? {
+                ...item,
+                status: extracted ? 'ready' : 'error',
+                extractedText: extracted,
+                error: extracted ? undefined : 'Kein verwertbarer Text erkannt.'
+              }
+            : item
+        )));
+
+        if (extracted) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'assistant', content: `Datei ${file.name} analysiert und dem Kontext hinzugefügt.` }
+          ]);
+        }
+      } catch (err) {
+        console.error(err);
+        setUploadedFiles((prev) => prev.map((item) => (
+          item.id === id
+            ? { ...item, status: 'error', error: 'Analyse fehlgeschlagen.' }
+            : item
+        )));
+      }
+    }
+  };
+
+  const removeContextFile = (id: string) => {
+    setUploadedFiles((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      const contextText = next
+        .filter((item) => item.inContext && item.status === 'ready' && item.extractedText.trim())
+        .map((item) => item.extractedText)
+        .join('\n\n');
+      setFileContext(contextText);
+      return next;
+    });
+  };
+
+  const toggleContextFile = (id: string) => {
+    setUploadedFiles((prev) => {
+      const next = prev.map((item) => item.id === id ? { ...item, inContext: !item.inContext } : item);
+      const contextText = next
+        .filter((item) => item.inContext && item.status === 'ready' && item.extractedText.trim())
+        .map((item) => item.extractedText)
+        .join('\n\n');
+      setFileContext(contextText);
+      return next;
+    });
+  };
 
   const brand = {
     primary: '#0F6B74',
@@ -138,11 +250,50 @@ export default function VetMind() {
   }, []);
 
   useEffect(() => {
+    const resolveMembership = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) {
+        router.push('/');
+        return;
+      }
+
+      setCurrentUser(authData.user);
+
+      const { data, error } = await supabase
+        .from('practice_memberships')
+        .select('practice_id, role, created_at')
+        .order('created_at', { ascending: true });
+
+      if (error || !data || data.length === 0) {
+        router.push('/onboarding');
+        return;
+      }
+
+      const rank: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+      const selected = [...data].sort((a: any, b: any) => {
+        const ra = rank[a.role] ?? 99;
+        const rb = rank[b.role] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      })[0];
+
+      setActivePracticeId(selected?.practice_id || null);
+    };
+
+    resolveMembership();
+  }, [router]);
+
+  useEffect(() => {
     const loadPracticeProfile = async () => {
+      if (!activePracticeId) {
+        setPracticeProfile(null);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("practice_settings")
         .select("practice_name, address, phone, email, logo_data_url")
-        .limit(1)
+        .eq('practice_id', activePracticeId)
         .maybeSingle();
 
       if (error || !data) {
@@ -160,13 +311,13 @@ export default function VetMind() {
     };
 
     loadPracticeProfile();
-  }, []);
+  }, [activePracticeId]);
 
   const applyQuickPrompt = (entry: { id: string; prompt: string }) => {
-    setInput((prev) => (prev.trim() ? `${prev}\n\n${entry.prompt}` : entry.prompt));
+    if (loading) return;
     setLastPromptId(entry.id);
     localStorage.setItem("vetmind_last_prompt_id", entry.id);
-    textareaRef.current?.focus();
+    void sendMessage(entry.prompt);
   };
 
   const actionStyle = {
@@ -547,7 +698,9 @@ const saveTemplate = async () => {
     name: newTemplateName,
     content: newTemplateContent,
     category: promptTab,
-    structure: null
+    structure: null,
+    scope: 'private',
+    practice_id: null
   });
 
   if (error) {
@@ -604,9 +757,15 @@ useEffect(() => {
 
 // 📥 CASES LADEN (NEU RICHTIG!)
 const loadCases = async () => {
+  if (!activePracticeId) {
+    setCases([]);
+    return;
+  }
+
   const { data } = await supabase
     .from("cases")
     .select("*, patient:patients(id, name, tierart, rasse, alter, geschlecht, external_id)")
+    .eq('practice_id', activePracticeId)
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -690,10 +849,16 @@ const loadPatients = async () => {
 const attachPatient = async (patient: ChatPatient) => {
   setSelectedChatPatient(patient);
 
+  if (!activePracticeId) {
+    setSelectedPatientConsultations([]);
+    return;
+  }
+
   const { data, error } = await supabase
     .from('cases')
     .select('id, title, result, transcript, created_at')
     .eq('patient_id', patient.id)
+    .eq('practice_id', activePracticeId)
     .order('created_at', { ascending: false })
     .limit(3);
 
@@ -716,9 +881,10 @@ const attachPatient = async (patient: ChatPatient) => {
   ]);
 };
 
-const promptTemplates = templatesDB.filter(
-  (t: any) => normalizeTemplateCategory(t?.category) === promptTab
-);
+const getPromptTemplatesForCategory = (category: PromptCategory) =>
+  templatesDB.filter((t: any) => normalizeTemplateCategory(t?.category) === category);
+
+const activePromptTemplates = openPromptDropdown ? getPromptTemplatesForCategory(openPromptDropdown) : [];
 
 useEffect(() => {
   const stored = localStorage.getItem("vetmind_sessions");
@@ -738,6 +904,18 @@ useEffect(() => {
 useEffect(() => {
   const storedLastPrompt = localStorage.getItem("vetmind_last_prompt_id") || "";
   setLastPromptId(storedLastPrompt);
+}, []);
+
+useEffect(() => {
+  const handleOutsideClick = (event: MouseEvent) => {
+    if (!promptDropdownRef.current) return;
+    if (!promptDropdownRef.current.contains(event.target as Node)) {
+      setOpenPromptDropdown(null);
+    }
+  };
+
+  document.addEventListener('mousedown', handleOutsideClick);
+  return () => document.removeEventListener('mousedown', handleOutsideClick);
 }, []);
 
 const syncActiveSessionTitle = (msgList: any[] = messages, caseData: any = selectedCase) => {
@@ -769,6 +947,7 @@ useEffect(() => {
 
   // 🧠 CHAT
   const sendMessage = async (preset?: string) => {
+    if (loading) return;
 
     const text = preset || input;
 
@@ -800,11 +979,19 @@ ${consultationPreview(entry) || 'Keine Vorschau'}
   : 'Keine verknuepften Konsultationen vorhanden.'}
 ` : ""}
 
-${fileContext ? `
+${(() => {
+  const uploadedContext = uploadedFiles
+    .filter((item) => item.inContext && item.status === 'ready' && item.extractedText.trim())
+    .map((item) => `Datei: ${item.name}\n${item.extractedText}`)
+    .join('\n\n');
+  const effectiveContext = uploadedFiles.length > 0 ? uploadedContext : fileContext;
+  if (!effectiveContext) return '';
+  return `
 DATEI-KONTEXT:
 
-${fileContext}
-` : ""}
+${effectiveContext}
+`;
+})()}
 `;
 
     const newMessages = [
@@ -877,12 +1064,53 @@ setResult(fullText);
 
   const getReportMetadata = () => {
     const ownerName = selectedCase?.besitzer || selectedCase?.ownerName || selectedCase?.contextData?.besitzer || "";
+    const signatureName =
+      currentUser?.user_metadata?.full_name ||
+      (currentUser?.email ? String(currentUser.email).split("@")[0] : "") ||
+      "Tierärztliches Team";
+
     return {
       title: promptTab === "communication" ? "Patientenbrief" : (selectedCase?.title || "Bericht"),
       date: new Date(),
       patientName: selectedCase?.patientName || "",
-      ownerName
+      ownerName,
+      signatureName,
     };
+  };
+
+  const dataUrlFromBlob = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => reject(new Error("Logo konnte nicht gelesen werden."));
+      reader.readAsDataURL(blob);
+    });
+
+  const buildEffectivePracticeProfile = async (): Promise<PracticeProfile> => {
+    const base: PracticeProfile = {
+      practiceName: practiceProfile?.practiceName?.trim() || "Tierärztezentrum Neuland",
+      address: practiceProfile?.address?.trim() || "Kopernikusstraße 35, 50126 Bergheim",
+      phone: practiceProfile?.phone?.trim() || "+49 2271 5885269",
+      email: practiceProfile?.email?.trim() || "empfang@tzn-bergheim.de",
+      logoDataUrl: practiceProfile?.logoDataUrl?.trim() || "",
+    };
+
+    if (base.logoDataUrl) return base;
+
+    try {
+      const res = await fetch("/tzn-logo.jpg", { cache: "force-cache" });
+      if (res.ok) {
+        const blob = await res.blob();
+        const fallbackLogo = await dataUrlFromBlob(blob);
+        if (fallbackLogo) {
+          return { ...base, logoDataUrl: fallbackLogo };
+        }
+      }
+    } catch {
+      // Keep profile without logo if fallback load fails.
+    }
+
+    return base;
   };
 
   const handleCreatePdf = async () => {
@@ -890,7 +1118,8 @@ setResult(fullText);
 
     setPdfLoading(true);
     try {
-      generatePDF(result, getReportMetadata(), practiceProfile || undefined);
+      const effectiveProfile = await buildEffectivePracticeProfile();
+      generatePDF(result, getReportMetadata(), effectiveProfile);
     } finally {
       setPdfLoading(false);
     }
@@ -908,7 +1137,8 @@ setResult(fullText);
     setShareLoading(true);
     try {
       const metadata = getReportMetadata();
-      const { blob, filename } = createPDFBlob(result, metadata, practiceProfile || undefined);
+      const effectiveProfile = await buildEffectivePracticeProfile();
+      const { blob, filename } = createPDFBlob(result, metadata, effectiveProfile);
       const pdfFile = new File([blob], filename, { type: "application/pdf" });
 
       const canShareFiles =
@@ -993,6 +1223,7 @@ const resetChat = () => {
   setSelectedChatPatient(null);
   setSelectedPatientConsultations([]);
   setFileContext("");
+  setUploadedFiles([]);
   setShowCases(false);
   setCaseSearch("");
   setShowMenu(false);
@@ -1035,7 +1266,7 @@ const filteredSessions = sortedSessions.filter((s: any) => {
   display: "flex",
   height: "100vh",
   background: brand.bg,
-  fontFamily: "Arial",
+      fontFamily: "Arial, sans-serif",
   color: brand.text
 }}>
 
@@ -1053,20 +1284,20 @@ const filteredSessions = sortedSessions.filter((s: any) => {
 
   <div style={{ display: "flex", justifyContent: sidebarCollapsed ? "center" : "space-between", alignItems: "center" }}>
     {!sidebarCollapsed && <div style={{ fontWeight: 700, color: brand.text }}>Chats</div>}
-    <button
+    <Button
       onClick={() => setSidebarCollapsed((v) => !v)}
       title={sidebarCollapsed ? "Sidebar ausklappen" : "Sidebar einklappen"}
+      variant='secondary'
+      size='sm'
       style={{
-        border: `1px solid ${brand.border}`,
         background: "#fff",
-        borderRadius: "8px",
         width: "34px",
         height: "34px",
-        cursor: "pointer"
+        padding: 0
       }}
     >
       {sidebarCollapsed ? "▶" : "◀"}
-    </button>
+    </Button>
   </div>
 
   {!sidebarCollapsed && (
@@ -1108,7 +1339,7 @@ const filteredSessions = sortedSessions.filter((s: any) => {
     </div>
   )}
 
-  <button
+  <Button
     onClick={() => {
       resetChat();
       const now = new Date().toISOString();
@@ -1131,16 +1362,14 @@ const filteredSessions = sortedSessions.filter((s: any) => {
 
       localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
     }}
+    variant='secondary'
     style={{
       padding: "10px",
-      borderRadius: "8px",
-      border: `1px solid ${brand.border}`,
-      cursor: "pointer",
       background: "#f9fafb"
     }}
   >
     {sidebarCollapsed ? "＋" : "➕ Neuer Chat"}
-  </button>
+  </Button>
 
   {!sidebarCollapsed && filteredSessions.map((s) => (
   <div
@@ -1181,28 +1410,30 @@ const filteredSessions = sortedSessions.filter((s: any) => {
     <div style={{ display: "flex", gap: "6px" }}>
       
       {/* ✏️ RENAME */}
-      <button
+      <Button
         onClick={() => renameSession(s.id)}
+        variant='ghost'
+        size='sm'
         style={{
-          border: "none",
-          background: "transparent",
-          cursor: "pointer"
+          padding: "2px 6px",
+          minWidth: 0
         }}
       >
         ✏️
-      </button>
+      </Button>
 
       {/* ❌ DELETE */}
-      <button
+      <Button
         onClick={() => deleteSession(s.id)}
+        variant='ghost'
+        size='sm'
         style={{
-          border: "none",
-          background: "transparent",
-          cursor: "pointer"
+          padding: "2px 6px",
+          minWidth: 0
         }}
       >
         ❌
-      </button>
+      </Button>
 
     </div>
   </div>
@@ -1237,7 +1468,7 @@ const filteredSessions = sortedSessions.filter((s: any) => {
   <div style={{ fontSize: "12px", color: brand.muted, marginTop: "4px" }}>
     {selectedCase?.patientName
       ? `${selectedCase.patientName}${selectedCase?.external_id ? ` (#${selectedCase.external_id})` : ""}`
-      : (selectedCase?.title || "KI-Workspace")}
+      : (selectedCase?.title || "VetMind-Workspace")}
   </div>
 </div>
 
@@ -1305,7 +1536,7 @@ const filteredSessions = sortedSessions.filter((s: any) => {
             </div>
           </div>
 
-          <button
+          <Button
             onClick={() => {
               setSelectedChatPatient(null);
               setSelectedPatientConsultations([]);
@@ -1314,17 +1545,16 @@ const filteredSessions = sortedSessions.filter((s: any) => {
                 { role: "assistant", content: "Patientenkontext entfernt." }
               ]);
             }}
+            variant='secondary'
+            size='sm'
             style={{
-              border: `1px solid ${brand.border}`,
               background: "#fff",
-              borderRadius: "8px",
-              cursor: "pointer",
               fontSize: "12px",
               padding: "4px 8px"
             }}
           >
             ✕ Entfernen
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1352,6 +1582,7 @@ onScroll={handleChatScroll}
   {messages.map((m, i) => {
     const isUser = m.role === "user";
     const isEditableResultMessage = !isUser && !loading && i === messages.length - 1 && Boolean(result);
+    const showAiDisclaimer = m.role === "assistant" && String(m.content || '').trim().length > 0;
 
     return (
       <div
@@ -1411,22 +1642,23 @@ onScroll={handleChatScroll}
     )}
   </div>
 
+  {showAiDisclaimer && <AiDisclaimer />}
+
   {/* 🔥 COPY BUTTON NUR FÜR VetMind */}
   {!isUser && (
     <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <button
+      <Button
         onClick={() => navigator.clipboard.writeText(m.content)}
+        variant='secondary'
+        size='sm'
         style={{
           fontSize: "12px",
           padding: "4px 8px",
-          borderRadius: "6px",
-          border: "1px solid #E5E7EB",
-          background: "#fff",
-          cursor: "pointer"
+          background: "#fff"
         }}
       >
         📋 kopieren
-      </button>
+      </Button>
     </div>
   )}
 
@@ -1464,6 +1696,112 @@ onScroll={handleChatScroll}
           paddingTop: "10px"
         }}
       >
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!dragActive) setDragActive(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragActive(false);
+        }}
+        onDrop={async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragActive(false);
+          const files = Array.from(e.dataTransfer.files || []);
+          await processContextFiles(files);
+        }}
+        onClick={() => contextFileInputRef.current?.click()}
+        style={{
+          marginBottom: "10px",
+          border: dragActive ? "2px dashed #0F6B74" : "1px dashed #cbd5e1",
+          borderRadius: "12px",
+          background: dragActive ? "#ecfeff" : "#f8fafc",
+          padding: "10px 12px",
+          cursor: "pointer"
+        }}
+      >
+        <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600 }}>Dateien hier ablegen oder klicken</div>
+        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>PDF/Bilder werden analysiert und als Kontext nutzbar gemacht</div>
+      </div>
+
+      <input
+        ref={contextFileInputRef}
+        type="file"
+        accept="image/*,.pdf"
+        multiple
+        style={{ display: "none" }}
+        onChange={async (e) => {
+          const files = Array.from(e.target.files || []);
+          await processContextFiles(files);
+          e.target.value = "";
+        }}
+      />
+
+      {uploadedFiles.length > 0 && (
+        <div style={{ display: "grid", gap: "8px", marginBottom: "10px" }}>
+          {uploadedFiles.map((file) => (
+            <div
+              key={file.id}
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "10px",
+                background: "#fff",
+                padding: "8px 10px"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: "13px", fontWeight: 600 }}>{file.name}</div>
+                <div style={{ fontSize: "11px", color: "#475569" }}>
+                  {file.status === 'uploading' ? 'Wird analysiert ...' : file.status === 'error' ? 'Fehler' : (file.fileType === 'pdf' ? 'PDF' : file.fileType === 'image' ? 'Bild' : 'Datei')}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", marginTop: "6px", flexWrap: "wrap" }}>
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    alert(file.extractedText || file.error || 'Kein Inhalt verfügbar.');
+                  }}
+                  variant='secondary'
+                  size='sm'
+                  style={{ background: "#fff", fontSize: "12px" }}
+                >
+                  👁 Vorschau
+                </Button>
+
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleContextFile(file.id);
+                  }}
+                  variant='secondary'
+                  size='sm'
+                  style={{ background: "#fff", fontSize: "12px" }}
+                >
+                  🧠 {file.inContext ? 'Im Kontext' : 'Nicht im Kontext'}
+                </Button>
+
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeContextFile(file.id);
+                  }}
+                  variant='secondary'
+                  size='sm'
+                  style={{ background: "#fff1f2", color: "#b91c1c", fontSize: "12px" }}
+                >
+                  🗑 löschen
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
 
   {/* + BUTTON */}
@@ -1520,44 +1858,15 @@ onScroll={handleChatScroll}
         >
           🐾 Patient anhängen
         </div>
-        <label style={menuItemStyle}>
-  📎 Datei anhängen
-  <input
-    type="file"
-    accept="image/*,.pdf"
-    style={{ display: "none" }}
-   onChange={async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-e.target.value = "";
-
-  setShowMenu(false); // 🔥 DAS IST DER FIX
-
-  const formData = new FormData();
-formData.append("file", file);
-
-try {
-  const res = await fetch("/api/analyze-image", {
-    method: "POST",
-    body: formData
-  });
-
-  const data = await res.json();
-  const extracted = data?.result || data?.text || "";
-  if (!extracted) return;
-
-  setFileContext((prev) => (prev ? `${prev}\n\n${extracted}` : extracted));
-  setMessages(prev => [
-    ...prev,
-    { role: "assistant", content: "Datei analysiert und dem Kontext hinzugefügt." }
-  ]);
-
-} catch (err) {
-  console.error(err);
-}
-}}
-  />
-</label>
+        <div
+          style={menuItemStyle}
+          onClick={() => {
+            setShowMenu(false);
+            contextFileInputRef.current?.click();
+          }}
+        >
+          📎 Datei anhängen
+        </div>
       </div>
     )}
   </div>
@@ -1590,38 +1899,38 @@ try {
 />
 
   {/* SEND */}
-  <button
+  <Button
     onClick={() => sendMessage()}
+    variant='primary'
+    size='sm'
     style={{
       width: "42px",
       height: "42px",
-      borderRadius: "10px",
       background: brand.primary,
       color: "#fff",
-      border: "none",
-      cursor: "pointer"
+      padding: 0
     }}
   >
     ➤
-  </button>
+  </Button>
 
   {/* MIC */}
-  <button
+  <Button
     onClick={() => {
   setInput("");
   recognition?.start();
 }}
+    variant='secondary'
+    size='sm'
     style={{
       width: "42px",
       height: "42px",
-      borderRadius: "10px",
-      border: `1px solid ${brand.border}`,
       background: "#fff",
-      cursor: "pointer"
+      padding: 0
     }}
   >
     🎤
-  </button>
+  </Button>
 
 </div>
 
@@ -1635,79 +1944,101 @@ try {
           padding: "6px 2px 0"
         }}
       >
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
-          {[
-            { key: "clinical", label: "Klinisch" },
-            { key: "communication", label: "Kommunikation" },
-            { key: "internal", label: "Intern" }
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setPromptTab(tab.key as "clinical" | "communication" | "internal")}
+        <div ref={promptDropdownRef} style={{ position: "relative" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+            {[
+              { key: 'clinical', label: 'Klinisch' },
+              { key: 'communication', label: 'Kommunikation' },
+              { key: 'internal', label: 'Intern' }
+            ].map((tab) => (
+              <Button
+                key={tab.key}
+                onClick={() => {
+                  const next = tab.key as PromptCategory;
+                  setPromptTab(next);
+                  setOpenPromptDropdown((prev) => (prev === next ? null : next));
+                }}
+                variant={openPromptDropdown === tab.key ? 'primary' : 'secondary'}
+                size='sm'
+                style={{
+                  borderRadius: "999px",
+                  fontWeight: 600,
+                  background: openPromptDropdown === tab.key ? brand.primary : "#fff",
+                  color: openPromptDropdown === tab.key ? "#fff" : brand.text,
+                  transition: "all 0.15s ease"
+                }}
+              >
+                {tab.label} ▾
+              </Button>
+            ))}
+
+            <Button
+              onClick={() => {
+                setOpenPromptDropdown(null);
+                setShowTemplateBuilder(true);
+              }}
+              variant='secondary'
+              size='sm'
               style={{
                 borderRadius: "999px",
-                border: `1px solid ${brand.border}`,
-                padding: "6px 12px",
-                cursor: "pointer",
                 fontWeight: 600,
-                background: promptTab === tab.key ? brand.primary : "#fff",
-                color: promptTab === tab.key ? "#fff" : brand.text,
-                transition: "all 0.15s ease"
+                background: "#fff",
+                color: brand.text
               }}
             >
-              {tab.label}
-            </button>
-          ))}
+              ➕ Vorlage erstellen
+            </Button>
+          </div>
 
-          <button
-            onClick={() => setShowTemplateBuilder(true)}
-            style={{
-              borderRadius: "999px",
-              border: `1px solid ${brand.border}`,
-              padding: "6px 12px",
-              cursor: "pointer",
-              fontWeight: 600,
-              background: "#fff",
-              color: brand.text
-            }}
-          >
-            ➕ Vorlage erstellen
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            flexWrap: "nowrap",
-            overflowX: "auto",
-            paddingBottom: "6px"
-          }}
-        >
-          {promptTemplates.map((entry: any) => (
-            <button
-              key={`db-${entry.id}`}
-              onClick={() => applyQuickPrompt({ id: `db-${entry.id}`, prompt: entry.content })}
-              title="Fuegt den Prompt unter Beibehaltung deines aktuellen Textes ein"
+          {openPromptDropdown && (
+            <div
               style={{
-                borderRadius: "999px",
-                border: `1px solid ${lastPromptId === `db-${entry.id}` ? "#8fc6cb" : "#d8e3ea"}`,
-                padding: "6px 12px",
-                cursor: "pointer",
-                background: lastPromptId === `db-${entry.id}` ? "#eef8fa" : "#f8fafb",
-                color: brand.text,
-                fontSize: "13px",
-                whiteSpace: "nowrap",
-                flex: "0 0 auto"
+                position: "absolute",
+                top: "44px",
+                left: 0,
+                minWidth: "260px",
+                maxWidth: "420px",
+                maxHeight: "240px",
+                overflowY: "auto",
+                background: "#fff",
+                border: "1px solid #dbe3e9",
+                borderRadius: "12px",
+                boxShadow: "0 10px 26px rgba(15, 23, 42, 0.12)",
+                padding: "8px",
+                zIndex: 20
               }}
             >
-              🧾 {entry.name}
-            </button>
-          ))}
+              {activePromptTemplates.map((entry: any) => (
+                <button
+                  key={`db-${entry.id}`}
+                  type="button"
+                  onClick={() => {
+                    applyQuickPrompt({ id: `db-${entry.id}`, prompt: entry.content });
+                    setOpenPromptDropdown(null);
+                  }}
+                  title="Startet diese Vorlage sofort im Chat"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "9px 10px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: lastPromptId === `db-${entry.id}` ? "#eef8fa" : "transparent",
+                    color: brand.text,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    marginBottom: "4px"
+                  }}
+                >
+                  🧾 {entry.name}
+                </button>
+              ))}
 
-          {promptTemplates.length === 0 && (
-            <div style={{ fontSize: "13px", color: brand.muted }}>
-              Keine Vorlagen in dieser Kategorie.
+              {activePromptTemplates.length === 0 && (
+                <div style={{ fontSize: "13px", color: brand.muted, padding: "8px 10px" }}>
+                  Keine Vorlagen in dieser Kategorie.
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1723,37 +2054,37 @@ try {
     flexWrap: "wrap"
   }}>
 
-    <button
+    <Button
       onClick={copy}
+      variant='primary'
       style={{
         padding: "10px 14px",
-        borderRadius: "10px",
         background: brand.primary,
-        color: "#fff",
-        border: "none",
-        cursor: "pointer",
         fontWeight: 600
       }}
     >
       📋 Kopieren
-    </button>
+    </Button>
 
-    <button
+    <Button
       onClick={handleCreatePdf}
       disabled={pdfLoading}
+      variant='secondary'
       style={actionStyle}
+      title="PDF lokal speichern"
     >
-      {pdfLoading ? "PDF wird erstellt..." : "📄 PDF erstellen"}
-    </button>
+      {pdfLoading ? "Speichere..." : "💾 PDF speichern"}
+    </Button>
 
-    <button
+    <Button
       onClick={handleShare}
       disabled={shareLoading}
-      style={{ ...actionStyle, opacity: shareLoading ? 0.75 : 1 }}
-      title="Geraeteabhängiges Teilen (z.B. Mail, Messenger, WhatsApp)"
+      variant='secondary'
+      style={actionStyle}
+      title="PDF direkt ueber Teilen-Dialog versenden (z. B. Mail)"
     >
-      {shareLoading ? "Teilen..." : "📤 Teilen"}
-    </button>
+      {shareLoading ? "Teilen..." : "📄 PDF teilen"}
+    </Button>
 
     {copied && (
       <span style={{ color: "#1f7a1f", fontSize: "14px" }}>
@@ -1872,13 +2203,14 @@ try {
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
             <h3 style={{ margin: 0 }}>Patient auswählen</h3>
-            <button
+            <Button
               onClick={() => setShowPatients(false)}
-              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "18px" }}
+              variant='ghost'
+              style={{ fontSize: "18px" }}
               title="Schliessen"
             >
               ✕
-            </button>
+            </Button>
           </div>
 
           <input
@@ -1913,14 +2245,15 @@ try {
               }}
             >
               <div>Noch keine Patienten vorhanden</div>
-              <button
+              <Button
                 onClick={() => {
                   window.location.href = "/patienten";
                 }}
+                variant='secondary'
                 style={{ ...actionStyle, width: "fit-content" }}
               >
                 Patient erstellen
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1990,52 +2323,41 @@ try {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
         <h3 style={{ margin: 0 }}>Neue Vorlage erstellen</h3>
-        <button
+        <Button
           onClick={() => setShowTemplateBuilder(false)}
-          style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "18px" }}
+          variant='ghost'
+          style={{ fontSize: "18px" }}
           title="Schliessen"
         >
           ✕
-        </button>
+        </Button>
       </div>
 
-      <input
+      <Input
         placeholder="Name der Vorlage"
         value={newTemplateName}
         onChange={(e) => setNewTemplateName(e.target.value)}
-        style={{
-          width: "100%",
-          padding: "11px",
-          marginBottom: "10px",
-          borderRadius: "10px",
-          border: "1px solid #dbe3e9"
-        }}
+        style={{ marginBottom: "10px" }}
       />
 
-      <textarea
+      <TextAreaInput
         placeholder="Inhalt / Struktur der Vorlage"
         value={newTemplateContent}
         onChange={(e) => setNewTemplateContent(e.target.value)}
-        style={{
-          width: "100%",
-          minHeight: "190px",
-          padding: "11px",
-          borderRadius: "10px",
-          border: "1px solid #dbe3e9",
-          marginBottom: "10px"
-        }}
+        style={{ minHeight: "190px", marginBottom: "10px" }}
       />
 
       <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-        <button
+        <Button
           onClick={() => setShowTemplateBuilder(false)}
+          variant='secondary'
           style={{ ...actionStyle, background: "#f8fafb" }}
         >
           Abbrechen
-        </button>
-        <button onClick={saveTemplate} style={actionStyle}>
+        </Button>
+        <Button onClick={saveTemplate} variant='secondary' style={actionStyle}>
           💾 Speichern
-        </button>
+        </Button>
       </div>
     </div>
   </div>

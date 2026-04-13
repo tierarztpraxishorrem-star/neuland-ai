@@ -2,15 +2,36 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabase';
+import {
+  DEFAULT_REGISTRATION_CONFIG,
+  evaluatePasswordRules,
+  isPasswordValid,
+  type RegistrationConfig,
+} from '../lib/registrationConfig';
+import { isPersonalDiamondEnabled } from '../lib/features';
 
 export default function Home() {
+  const router = useRouter();
+  const diamondEnabled = isPersonalDiamondEnabled();
 
   const [user, setUser] = useState<any | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [checkingMembership, setCheckingMembership] = useState(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = useState(false);
+  const [acceptProductUpdates, setAcceptProductUpdates] = useState(false);
+  const [registrationConfig, setRegistrationConfig] = useState<RegistrationConfig>(DEFAULT_REGISTRATION_CONFIG);
+
+  const passwordRules = evaluatePasswordRules(password, registrationConfig);
+  const passwordStrong = isPasswordValid(passwordRules, registrationConfig);
 
   // 🎨 STYLES
   const inputStyle = {
@@ -50,30 +71,120 @@ export default function Home() {
   // 🔐 LOGIN
   const handleLogin = async () => {
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password
     });
 
     if (error) alert(error.message);
+  };
+
+  const persistConsentAudit = async (token: string) => {
+    const acceptedAt = new Date().toISOString();
+    try {
+      await fetch('/api/auth/consent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          consents: [
+            { type: 'terms', accepted: acceptTerms, acceptedAt },
+            { type: 'privacy', accepted: acceptPrivacy, acceptedAt },
+            { type: 'product_updates', accepted: acceptProductUpdates, acceptedAt },
+          ],
+          source: 'registration',
+        }),
+      });
+    } catch {
+      // Do not block signup if audit persistence fails.
+    }
   };
 
   // 🆕 REGISTRIEREN
   const handleRegister = async () => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+    const fullName = [normalizedFirstName, normalizedLastName].filter(Boolean).join(' ');
+
+    if ((registrationConfig.requireFirstName && !normalizedFirstName) || (registrationConfig.requireLastName && !normalizedLastName)) {
+      alert('Bitte Vorname und Nachname angeben.');
+      return;
+    }
+
+    if ((registrationConfig.requireTerms && !acceptTerms) || (registrationConfig.requirePrivacy && !acceptPrivacy)) {
+      alert('Bitte AGB und Datenschutz akzeptieren.');
+      return;
+    }
+
+    if (!passwordStrong) {
+      alert('Passwort erfüllt die Mindestanforderungen noch nicht.');
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          first_name: normalizedFirstName || undefined,
+          last_name: normalizedLastName || undefined,
+          full_name: fullName || undefined,
+          accepted_terms: acceptTerms,
+          accepted_privacy: acceptPrivacy,
+          accepted_product_updates: acceptProductUpdates,
+          registration_completed_at: new Date().toISOString(),
+        },
+      },
     });
 
-    if (error) alert(error.message);
-    else alert("Registriert! Jetzt einloggen.");
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    if (!data.session) {
+      alert('Registrierung erfolgreich. Bitte E-Mail bestaetigen und danach einloggen.');
+      return;
+    }
+
+    await persistConsentAudit(data.session.access_token);
+
+    router.push('/onboarding');
   };
 
   // 👤 USER CHECK
   useEffect(() => {
+    const loadRegistrationConfig = async () => {
+      try {
+        const res = await fetch('/api/auth/registration-config');
+        const data = (await res.json()) as Partial<RegistrationConfig>;
+        setRegistrationConfig({ ...DEFAULT_REGISTRATION_CONFIG, ...data });
+      } catch {
+        setRegistrationConfig(DEFAULT_REGISTRATION_CONFIG);
+      }
+    };
+
+    loadRegistrationConfig();
+  }, []);
+
+  useEffect(() => {
     const checkUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      setUser(data.user);
-      setLoadingAuth(false);
+      try {
+        // Prefer local session bootstrap to avoid blocking UI on transient getUser failures.
+        const { data: sessionData } = await supabase.auth.getSession();
+        setUser(sessionData.session?.user ?? null);
+
+        if (!sessionData.session) {
+          const { data: userData } = await supabase.auth.getUser();
+          setUser(userData.user ?? null);
+        }
+      } catch (err) {
+        console.error('Auth bootstrap failed', err);
+        setUser(null);
+      } finally {
+        setLoadingAuth(false);
+      }
     };
 
     checkUser();
@@ -81,6 +192,7 @@ export default function Home() {
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null);
+        setLoadingAuth(false);
       }
     );
 
@@ -89,8 +201,34 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    const ensureMembership = async () => {
+      if (!user) return;
+
+      setCheckingMembership(true);
+      try {
+        const { data, error } = await supabase
+          .from('practice_memberships')
+          .select('id')
+          .limit(1);
+
+        if (error) {
+          return;
+        }
+
+        if (!data || data.length === 0) {
+          router.push('/onboarding');
+        }
+      } finally {
+        setCheckingMembership(false);
+      }
+    };
+
+    ensureMembership();
+  }, [router, user]);
+
   // ⏳ LOADING
-  if (loadingAuth) {
+  if (loadingAuth || checkingMembership) {
     return <div style={{ padding: "40px" }}>Lade...</div>;
   }
 
@@ -124,8 +262,35 @@ export default function Home() {
               Neuland AI
             </h1>
             <p style={{ color: "#6b7280", marginTop: "6px" }}>
-              Login zur Praxisplattform
+              {authMode === 'login' ? 'Login zur Praxisplattform' : registrationConfig.registrationSubtitle}
             </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+            <button
+              onClick={() => setAuthMode('login')}
+              style={{
+                ...secondaryButton,
+                flex: 1,
+                background: authMode === 'login' ? '#0F6B74' : '#fff',
+                color: authMode === 'login' ? '#fff' : '#0f172a',
+                marginBottom: 0,
+              }}
+            >
+              Login
+            </button>
+            <button
+              onClick={() => setAuthMode('register')}
+              style={{
+                ...secondaryButton,
+                flex: 1,
+                background: authMode === 'register' ? '#0F6B74' : '#fff',
+                color: authMode === 'register' ? '#fff' : '#0f172a',
+                marginBottom: 0,
+              }}
+            >
+              Registrieren
+            </button>
           </div>
 
           {/* INPUTS */}
@@ -156,15 +321,106 @@ export default function Home() {
             }}
           />
 
+          {authMode === 'register' && (
+            <>
+              {registrationConfig.requireFirstName && (
+                <input
+                  placeholder="Vorname"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  style={inputStyle}
+                />
+              )}
+
+              {registrationConfig.requireLastName && (
+                <input
+                  placeholder="Nachname"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  style={inputStyle}
+                />
+              )}
+
+              <div style={{ marginTop: -8, marginBottom: 12, fontSize: 12, color: '#475569' }}>
+                Passwortregeln: mindestens {registrationConfig.minPasswordLength} Zeichen
+                {registrationConfig.requireUppercase ? ', Großbuchstabe' : ''}
+                {registrationConfig.requireLowercase ? ', Kleinbuchstabe' : ''}
+                {registrationConfig.requireDigit ? ', Zahl' : ''}
+                {registrationConfig.requireSpecialChar ? ', Sonderzeichen' : ''}.
+              </div>
+              <div style={{ marginTop: -6, marginBottom: 12, fontSize: 12, color: '#475569', display: 'grid', gap: 3 }}>
+                <div style={{ color: passwordRules.minLength ? '#166534' : '#b91c1c' }}>• Mindestens {registrationConfig.minPasswordLength} Zeichen</div>
+                {registrationConfig.requireUppercase && (
+                  <div style={{ color: passwordRules.upper ? '#166534' : '#b91c1c' }}>• Mindestens 1 Großbuchstabe</div>
+                )}
+                {registrationConfig.requireLowercase && (
+                  <div style={{ color: passwordRules.lower ? '#166534' : '#b91c1c' }}>• Mindestens 1 Kleinbuchstabe</div>
+                )}
+                {registrationConfig.requireDigit && (
+                  <div style={{ color: passwordRules.digit ? '#166534' : '#b91c1c' }}>• Mindestens 1 Zahl</div>
+                )}
+                {registrationConfig.requireSpecialChar && (
+                  <div style={{ color: passwordRules.special ? '#166534' : '#b91c1c' }}>• Mindestens 1 Sonderzeichen</div>
+                )}
+              </div>
+
+              {registrationConfig.requireTerms && (
+                <label style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 13, color: '#475569' }}>
+                  <input
+                    type="checkbox"
+                    checked={acceptTerms}
+                    onChange={(e) => setAcceptTerms(e.target.checked)}
+                  />
+                  {registrationConfig.termsLabel}
+                </label>
+              )}
+
+              {registrationConfig.requirePrivacy && (
+                <label style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 13, color: '#475569' }}>
+                  <input
+                    type="checkbox"
+                    checked={acceptPrivacy}
+                    onChange={(e) => setAcceptPrivacy(e.target.checked)}
+                  />
+                  {registrationConfig.privacyLabel}
+                </label>
+              )}
+
+              {registrationConfig.allowProductUpdates && (
+                <label style={{ display: 'flex', gap: 8, marginBottom: 12, fontSize: 13, color: '#475569' }}>
+                  <input
+                    type="checkbox"
+                    checked={acceptProductUpdates}
+                    onChange={(e) => setAcceptProductUpdates(e.target.checked)}
+                  />
+                  {registrationConfig.productUpdatesLabel}
+                </label>
+              )}
+            </>
+          )}
+
           {/* BUTTONS */}
           <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-            <button onClick={handleLogin} style={primaryButton}>
-              Login
-            </button>
-
-            <button onClick={handleRegister} style={secondaryButton}>
-              Registrieren
-            </button>
+            {authMode === 'login' ? (
+              <button onClick={handleLogin} style={primaryButton}>
+                Login
+              </button>
+            ) : (
+              <button
+                onClick={handleRegister}
+                style={{
+                  ...primaryButton,
+                  opacity:
+                    passwordStrong
+                    && (!registrationConfig.requireTerms || acceptTerms)
+                    && (!registrationConfig.requirePrivacy || acceptPrivacy)
+                      ? 1
+                      : 0.7,
+                }}
+              >
+                Registrieren
+              </button>
+            )}
           </div>
         </div>
       </main>
@@ -172,6 +428,37 @@ export default function Home() {
   }
 
   // 🧠 DASHBOARD
+  const dashboardCards = [
+    {
+      title: "Patienten",
+      icon: "📁",
+      desc: "Patientenkontext und Verlauf öffnen",
+      link: "/patienten"
+    },
+    {
+      title: "Vorlagen",
+      icon: "🧾",
+      desc: "Eigene Templates verwalten",
+      link: "/vorlagen"
+    },
+    ...(diamondEnabled
+      ? [
+          {
+            title: "Persönlicher Diamant",
+            icon: "💎",
+            desc: "Werteprofil aus 40 Fragen auswerten",
+            link: "/diamant"
+          },
+        ]
+      : []),
+    {
+      title: "VetMind",
+      icon: "🤖",
+      desc: "SOPs & Wissen durchsuchen",
+      link: "/vetmind"
+    }
+  ];
+
   return (
     <main
       style={{
@@ -273,26 +560,7 @@ export default function Home() {
         </Link>
 
         {/* 🔹 SECONDARY CARDS */}
-        {[
-          {
-            title: "Patienten",
-            icon: "📁",
-            desc: "Patientenkontext und Verlauf öffnen",
-            link: "/patienten"
-          },
-          {
-            title: "Vorlagen",
-            icon: "🧾",
-            desc: "Eigene Templates verwalten",
-            link: "/vorlagen"
-          },
-          {
-            title: "VetMind",
-            icon: "🤖",
-            desc: "SOPs & Wissen durchsuchen",
-            link: "/vetmind"
-          }
-        ].map((card, i) => (
+        {dashboardCards.map((card, i) => (
           <Link key={i} href={card.link} style={{ textDecoration: "none" }}>
             <div
               style={{

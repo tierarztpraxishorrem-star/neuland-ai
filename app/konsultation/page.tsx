@@ -1,13 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
+import { uiTokens } from '../../components/ui/System';
+import { buildOwnerLetterHtml } from '../../lib/ownerCommunicationTemplate';
+import {
+  DEFAULT_REGISTRATION_CONFIG,
+  evaluatePasswordRules,
+  isPasswordValid,
+  type RegistrationConfig,
+} from '../../lib/registrationConfig';
 
 
 export default function Home() {
+const router = useRouter();
 const [search, setSearch] = useState("");
 const [user, setUser] = useState<any | null>(null);
 const [loadingAuth, setLoadingAuth] = useState(true);
+const [checkingMembership, setCheckingMembership] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -16,25 +27,98 @@ const [selectedCase, setSelectedCase] = useState<any | null>(null);
 
 const handleLogin = async () => {
   const { error } = await supabase.auth.signInWithPassword({
-    email,
+    email: email.trim(),
     password
   });
 
   if (error) alert(error.message);
 };
 
+const persistConsentAudit = async (token: string) => {
+  const acceptedAt = new Date().toISOString();
+  try {
+    await fetch('/api/auth/consent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        consents: [
+          { type: 'terms', accepted: acceptTerms, acceptedAt },
+          { type: 'privacy', accepted: acceptPrivacy, acceptedAt },
+          { type: 'product_updates', accepted: acceptProductUpdates, acceptedAt },
+        ],
+        source: 'registration',
+      }),
+    });
+  } catch {
+    // Do not block signup if audit persistence fails.
+  }
+};
+
 const handleRegister = async () => {
-  const { error } = await supabase.auth.signUp({
-    email,
-    password
+  const normalizedFirstName = firstName.trim();
+  const normalizedLastName = lastName.trim();
+  const fullName = [normalizedFirstName, normalizedLastName].filter(Boolean).join(' ');
+
+  if ((registrationConfig.requireFirstName && !normalizedFirstName) || (registrationConfig.requireLastName && !normalizedLastName)) {
+    alert('Bitte Vorname und Nachname angeben.');
+    return;
+  }
+
+  if ((registrationConfig.requireTerms && !acceptTerms) || (registrationConfig.requirePrivacy && !acceptPrivacy)) {
+    alert('Bitte AGB und Datenschutz akzeptieren.');
+    return;
+  }
+
+  if (!passwordStrong) {
+    alert('Passwort erfüllt die Mindestanforderungen noch nicht.');
+    return;
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+    options: {
+      data: {
+        first_name: normalizedFirstName || undefined,
+        last_name: normalizedLastName || undefined,
+        full_name: fullName || undefined,
+        accepted_terms: acceptTerms,
+        accepted_privacy: acceptPrivacy,
+        accepted_product_updates: acceptProductUpdates,
+        registration_completed_at: new Date().toISOString(),
+      },
+    },
   });
 
-  if (error) alert(error.message);
-  else alert("Registriert! Jetzt einloggen.");
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  if (!data.session) {
+    alert('Registrierung erfolgreich. Bitte E-Mail bestaetigen und danach einloggen.');
+    return;
+  }
+
+  await persistConsentAudit(data.session.access_token);
+
+  router.push('/onboarding');
 };
 
 const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
+const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+const [firstName, setFirstName] = useState("");
+const [lastName, setLastName] = useState("");
+const [acceptTerms, setAcceptTerms] = useState(false);
+const [acceptPrivacy, setAcceptPrivacy] = useState(false);
+const [acceptProductUpdates, setAcceptProductUpdates] = useState(false);
+const [registrationConfig, setRegistrationConfig] = useState<RegistrationConfig>(DEFAULT_REGISTRATION_CONFIG);
+const passwordRules = evaluatePasswordRules(password, registrationConfig);
+const passwordStrong = isPasswordValid(passwordRules, registrationConfig);
 
   const [species, setSpecies] = useState('');
   const [patientName, setPatientName] = useState('');
@@ -45,6 +129,7 @@ const [password, setPassword] = useState("");
 const [cases, setCases] = useState<any[]>([]);
 const [showAllCases, setShowAllCases] = useState(false);
 const [loadingCases, setLoadingCases] = useState(false);
+const [activePracticeId, setActivePracticeId] = useState<string | null>(null);
   const [practice, setPractice] = useState<'TZN' | 'TPH' | 'TPW'>('TZN');
   const [vet, setVet] = useState('');
 
@@ -54,6 +139,9 @@ const createCase = async () => {
     .insert([
       {
         status: 'draft',
+        category: 'clinical',
+        case_kind: 'clinical',
+        visibility_scope: 'practice',
         species,
         patient_name: patientName,
         age,
@@ -61,7 +149,8 @@ const createCase = async () => {
         notes,
         ai_request: aiRequest,
         vet,
-        practice
+        practice,
+        practice_id: activePracticeId
       }
     ])
     .select();
@@ -83,18 +172,16 @@ useEffect(() => {
 }, []);
 
 const loadCases = async () => {
-  if (!user) return;
+  if (!user || !activePracticeId) return;
 
   setLoadingCases(true);
 
   let query = supabase
     .from("cases")
     .select("*")
+    .eq('practice_id', activePracticeId)
     .order("created_at", { ascending: false })
     .limit(10);
-
-  // 🔥 Praxisfilter
-  query = query.eq("practice", practice);
 
   // 🔥 nur eigene Fälle wenn Toggle AUS
   if (!showAllCases) {
@@ -114,9 +201,21 @@ const loadCases = async () => {
 
 useEffect(() => {
   loadCases();
-}, [user, showAllCases, practice]);
+}, [user, showAllCases, activePracticeId]);
 
 useEffect(() => {
+  const loadRegistrationConfig = async () => {
+    try {
+      const res = await fetch('/api/auth/registration-config');
+      const data = (await res.json()) as Partial<RegistrationConfig>;
+      setRegistrationConfig({ ...DEFAULT_REGISTRATION_CONFIG, ...data });
+    } catch {
+      setRegistrationConfig(DEFAULT_REGISTRATION_CONFIG);
+    }
+  };
+
+  loadRegistrationConfig();
+
   const checkUser = async () => {
   const { data } = await supabase.auth.getUser();
   const currentUser = data.user;
@@ -125,24 +224,6 @@ useEffect(() => {
   setLoadingAuth(false);
 
   if (!currentUser) return;
-
-  // 🔥 prüfen ob Profil existiert
-const { data: profile } = await supabase
-  .from("profiles")
-  .select("*")
-  .eq("id", currentUser.id)
-  .maybeSingle();
-
-  if (!profile) {
-    // 🔥 Profil automatisch erstellen
-    await supabase.from("profiles").insert([
-      {
-        id: currentUser.id,
-        practice_id: "TZN",
-        name: "Unbekannt"
-      }
-    ]);
-  }
 };
 
   checkUser();
@@ -157,6 +238,43 @@ const { data: profile } = await supabase
     listener.subscription.unsubscribe();
   };
 }, []);
+
+useEffect(() => {
+  const ensureMembership = async () => {
+    if (!user) return;
+
+    setCheckingMembership(true);
+    try {
+      const { data, error } = await supabase
+        .from('practice_memberships')
+        .select('practice_id, role, created_at')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        router.push('/onboarding');
+        return;
+      }
+
+      const rank: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+      const selected = [...data].sort((a: any, b: any) => {
+        const ra = rank[a.role] ?? 99;
+        const rb = rank[b.role] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      })[0];
+
+      setActivePracticeId(selected?.practice_id || null);
+    } finally {
+      setCheckingMembership(false);
+    }
+  };
+
+  ensureMembership();
+}, [router, user]);
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
   const [reviewReady, setReviewReady] = useState(false);
@@ -229,9 +347,9 @@ const [imageAnalysis, setImageAnalysis] = useState("");
     name: "Tierärztezentrum Neuland",
     logo: "/tzn-logo.jpg",
     address: "Kopernikusstraße 35\n50126 Bergheim",
-    phone: "02271 5885269",
+    phone: "+49 2271 5885269",
     website: "tzn-bergheim.de",
-    contact: "https://tzn-bergheim.de/kontakt"
+    contact: "https://app.petsxl.com/#/signin/appointment-registration-start/64fe56cd-427b-4757-ad0a-c0a7ad3f7b53?branch=3"
   },
 
  TPH: {
@@ -502,6 +620,9 @@ setResult(prev =>
     const { error } = await supabase.from("cases").insert([
       {
         patient_name: patientName,
+        category: 'clinical',
+        case_kind: 'clinical',
+        visibility_scope: 'practice',
         species,
         age,
         breed,
@@ -509,6 +630,7 @@ setResult(prev =>
         ai_request: aiRequest,
         result: text,
         practice,
+        practice_id: activePracticeId,
         vet,
         status: "completed",
         user_id: user.id,
@@ -605,12 +727,13 @@ const extractPatientLetter = () => {
 
 
 const printPatientLetter = () => {
-  if(!vet){
-  alert("Bitte Tierarzt eintragen");
-  return;
-}
-
   if (!patientLetter) return;
+
+  const derivedSignatureName =
+    vet?.trim() ||
+    user?.user_metadata?.full_name ||
+    (user?.email ? String(user.email).split("@")[0] : "") ||
+    "Tierärztliches Team";
 
   let animalText = "Ihrem Tier";
 
@@ -626,179 +749,16 @@ const printPatientLetter = () => {
   const printWindow = window.open('', '_blank', 'width=900,height=900');
   if (!printWindow) return;
 
-  printWindow.document.write(`
-<html>
-<head>
-<title>Patientenbrief</title>
-
-<style>
-
-body{
-font-family: Arial, sans-serif;
-padding:40px;
-color:#1f2937;
-}
-
-.header{
-display:flex;
-justify-content:space-between;
-align-items:flex-start;
-margin-bottom:30px;
-border-bottom:2px solid #0F6B74;
-padding-bottom:20px;
-}
-
-.logo{
-height:90px;
-object-fit:contain;
-}
-
-.practice{
-text-align:right;
-font-size:14px;
-line-height:1.6;
-}
-
-.title{
-font-size:22px;
-color:#0F6B74;
-margin-top:30px;
-margin-bottom:16px;
-font-weight:bold;
-}
-
-.content{
-font-size:15px;
-line-height:1.45;
-white-space:pre-wrap;
-}
-
-.medbox{
-border:1px solid #d1d5db;
-border-radius:8px;
-padding:12px;
-margin-top:20px;
-font-size:14px;
-line-height:1.4;
-}
-
-.footer{
-margin-top:40px;
-border-top:1px solid #ccc;
-padding-top:20px;
-display:flex;
-justify-content:space-between;
-align-items:center;
-font-size:14px;
-page-break-inside:avoid;
-}
-
-.qr{
-width:110px;
-}
-
-</style>
-</head>
-
-<body>
-
-<div class="header">
-
-<img src="${currentPractice.logo}" class="logo"/>
-
-<div class="practice">
-
-<div style="font-size:16px;font-weight:bold;">
-${currentPractice.name}
-</div>
-
-${currentPractice.address.replace(/\n/g,"<br>")}
-
-Telefon: ${currentPractice.phone}
-<a href="https://${currentPractice.website}" target="_blank">
-${currentPractice.website}
-</a></div>
-
-</div>
-
-<div class="title">${title}</div>
-
-<div class="content">
-${patientLetter}
-</div>
-
-<div class="medbox">
-
-<b>Medikation</b><br>
-${medication || "—"}
-
-<br><br>
-
-<b>Empfohlene Kontrolle</b><br>
-${followUp || "—"}
-
-</div>
-
-<div class="footer">
-
-<div>
-
-<div style="margin-bottom:18px;">
-Mit freundlichen Grüßen
-</div>
-
-<div style="
-font-family:'Brush Script MT','Segoe Script',cursive;
-font-size:22px;
-margin-bottom:6px;
-">
-${vet}
-</div>
-
-<div>
-${currentPractice.name}
-</div>
-
-</div>
-
-<div style="text-align:center">
-
-<div style="font-size:13px;margin-bottom:8px;color:#5F6B73;">
-Termin online
-</div>
-
-<img class="qr"
-src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${currentPractice.contact}"
-/>
-
-</div>
-
-</div>
-
-<script>
-
-function fitContentToPage(){
-
-const content=document.querySelector(".content");
-
-let fontSize=15;
-
-content.style.fontSize=fontSize+"px";
-
-while(document.body.scrollHeight>1120 && fontSize>11){
-fontSize-=0.5;
-content.style.fontSize=fontSize+"px";
-}
-
-}
-
-window.onload=fitContentToPage;
-
-</script>
-
-</body>
-</html>
-`);
+  printWindow.document.write(
+    buildOwnerLetterHtml(currentPractice, {
+      title,
+      dateLabel: today,
+      body: patientLetter,
+      medication,
+      followUp,
+      vet: derivedSignatureName,
+    })
+  );
 
 printWindow.document.close();
 printWindow.focus();
@@ -844,26 +804,132 @@ const buttonStyle = (background: string, color: string, disabled: boolean, borde
   justifyContent: 'center' as const,
   opacity: disabled ? 1 : 1,
 });
-if (loadingAuth) return <div>Lade...</div>;
+
+const sectionCardStyle = {
+  background: '#fff',
+  border: uiTokens.cardBorder,
+  borderRadius: '14px',
+  padding: '18px'
+};
+
+if (loadingAuth || checkingMembership) return <div>Lade...</div>;
 
 if (!user) {
   return (
     <div style={{ padding: "40px" }}>
-      <h2>Login</h2>
+      <h2>{authMode === 'login' ? 'Login' : 'Registrierung'}</h2>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <button onClick={() => setAuthMode('login')}>Login</button>
+        <button onClick={() => setAuthMode('register')}>Registrieren</button>
+      </div>
 
       <input
         placeholder="Email"
+        value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
 
       <input
         placeholder="Passwort"
         type="password"
+        value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
 
-      <button onClick={handleLogin}>Login</button>
-      <button onClick={handleRegister}>Registrieren</button>
+      {authMode === 'register' && (
+        <>
+          {registrationConfig.requireFirstName && (
+            <input
+              placeholder="Vorname"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+          )}
+
+          {registrationConfig.requireLastName && (
+            <input
+              placeholder="Nachname"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          )}
+
+          <div style={{ marginTop: 8, marginBottom: 8, fontSize: 12, color: '#475569' }}>
+            Passwortregeln: mind. {registrationConfig.minPasswordLength} Zeichen
+            {registrationConfig.requireUppercase ? ', Großbuchstabe' : ''}
+            {registrationConfig.requireLowercase ? ', Kleinbuchstabe' : ''}
+            {registrationConfig.requireDigit ? ', Zahl' : ''}
+            {registrationConfig.requireSpecialChar ? ', Sonderzeichen' : ''}.
+          </div>
+          <div style={{ marginTop: 0, marginBottom: 12, fontSize: 12, color: '#475569', display: 'grid', gap: 3 }}>
+            <div style={{ color: passwordRules.minLength ? '#166534' : '#b91c1c' }}>• Mindestens {registrationConfig.minPasswordLength} Zeichen</div>
+            {registrationConfig.requireUppercase && (
+              <div style={{ color: passwordRules.upper ? '#166534' : '#b91c1c' }}>• Mindestens 1 Großbuchstabe</div>
+            )}
+            {registrationConfig.requireLowercase && (
+              <div style={{ color: passwordRules.lower ? '#166534' : '#b91c1c' }}>• Mindestens 1 Kleinbuchstabe</div>
+            )}
+            {registrationConfig.requireDigit && (
+              <div style={{ color: passwordRules.digit ? '#166534' : '#b91c1c' }}>• Mindestens 1 Zahl</div>
+            )}
+            {registrationConfig.requireSpecialChar && (
+              <div style={{ color: passwordRules.special ? '#166534' : '#b91c1c' }}>• Mindestens 1 Sonderzeichen</div>
+            )}
+          </div>
+
+          {registrationConfig.requireTerms && (
+            <label style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+                style={{ marginRight: 8 }}
+              />
+              {registrationConfig.termsLabel}
+            </label>
+          )}
+
+          {registrationConfig.requirePrivacy && (
+            <label style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={acceptPrivacy}
+                onChange={(e) => setAcceptPrivacy(e.target.checked)}
+                style={{ marginRight: 8 }}
+              />
+              {registrationConfig.privacyLabel}
+            </label>
+          )}
+
+          {registrationConfig.allowProductUpdates && (
+            <label style={{ display: 'block', marginTop: 8, marginBottom: 12, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={acceptProductUpdates}
+                onChange={(e) => setAcceptProductUpdates(e.target.checked)}
+                style={{ marginRight: 8 }}
+              />
+              {registrationConfig.productUpdatesLabel}
+            </label>
+          )}
+        </>
+      )}
+
+      {authMode === 'login' ? (
+        <button onClick={handleLogin}>Login</button>
+      ) : (
+        <button
+          onClick={handleRegister}
+          disabled={
+            !passwordStrong
+            || (registrationConfig.requireTerms && !acceptTerms)
+            || (registrationConfig.requirePrivacy && !acceptPrivacy)
+          }
+        >
+          Registrieren
+        </button>
+      )}
     </div>
   );
 }
@@ -871,24 +937,24 @@ return (
   <main
     style={{
       minHeight: '100vh',
-      background: `linear-gradient(180deg, ${brand.page} 0%, #eaf0f1 100%)`,
+      background: uiTokens.pageBackground,
       display: 'flex',
       justifyContent: 'center',
       alignItems: 'flex-start',
-      padding: isMobile ? '16px 10px 28px' : '32px 20px',
-      fontFamily: 'Arial, sans-serif',
+      padding: isMobile ? '14px 10px 24px' : uiTokens.pagePadding,
+      fontFamily: 'inherit',
       color: brand.text,
     }}
   >
       <div
         style={{
           width: '100%',
-          maxWidth: '980px',
+          maxWidth: '1120px',
           background: brand.card,
-          borderRadius: isMobile ? '18px' : '22px',
-          padding: isMobile ? '18px' : '36px',
-          boxShadow: '0 16px 40px rgba(0,0,0,0.08)',
-          border: `1px solid ${brand.border}`,
+          borderRadius: isMobile ? '16px' : '18px',
+          padding: isMobile ? '16px' : '24px',
+          boxShadow: 'none',
+          border: uiTokens.cardBorder,
         }}
       >
         <div
@@ -1008,7 +1074,7 @@ background:'#fff'
                 wordBreak: 'break-word',
               }}
             >
-              {isMobile ? 'Behandlungsassistent' : 'Digitaler Behandlungsassistent'}
+              {isMobile ? 'Konsultation' : 'VetMind Konsultation'}
             </h1>
             <p
               style={{
@@ -1018,20 +1084,25 @@ background:'#fff'
                 lineHeight: 1.45,
               }}
             >
-              Aufnahme direkt im Browser starten, pausieren, fortsetzen und gezielt einreichen.
+              Fall erfassen, Kontext anreichern und Ergebnisse strukturiert mit VetMind erstellen.
             </p>
           </div>
         </div>
 
         <div
           style={{
-            marginBottom: isMobile ? '18px' : '24px',
+            ...sectionCardStyle,
+            marginBottom: isMobile ? '16px' : '20px',
             padding: isMobile ? '14px' : '18px',
-            background: '#f7fbfb',
-            border: `1px solid ${brand.border}`,
-            borderRadius: isMobile ? '12px' : '14px',
           }}
         >
+          <div style={{ marginBottom: 12 }}>
+            <h2 style={{ margin: 0, fontSize: isMobile ? '18px' : '21px', color: brand.primary }}>Falldaten</h2>
+            <div style={{ marginTop: 4, fontSize: 13, color: brand.muted }}>
+              Basisinformationen, Zusatznotizen und optionaler VetMind-Arbeitsauftrag.
+            </div>
+          </div>
+
           <div
             style={{
               display: 'grid',
@@ -1225,7 +1296,7 @@ background:'#fff'
                 fontSize: isMobile ? '14px' : 'inherit',
               }}
             >
-              Zusätzlicher Wunsch an die KI (optional)
+              Zusätzlicher Wunsch an VetMind (optional)
             </label>
 
             <textarea
@@ -1256,7 +1327,7 @@ background:'#fff'
                 lineHeight: 1.4,
               }}
             >
-              Hier kannst du einen zusätzlichen Arbeitsauftrag an die KI ergänzen. Dieser wird getrennt von den fallbezogenen Zusatzinformationen behandelt.
+              Hier kannst du einen zusätzlichen Arbeitsauftrag an VetMind ergänzen. Dieser wird getrennt von den fallbezogenen Zusatzinformationen behandelt.
 
 
             </div>
@@ -1293,7 +1364,7 @@ background:'#fff'
 
        const data = await res.json();
 
-// 🔥 NEU: Bildanalyse speichern (für KI!)
+// Bildanalyse speichern (für VetMind)
 setImageAnalysis(data.result);
 
 setResult(prev =>
@@ -1314,9 +1385,10 @@ setResult(prev =>
 
         <div
   style={{
+    ...sectionCardStyle,
     display: 'flex',
     gap: isMobile ? '10px' : '12px',
-    marginBottom: '20px',
+    marginBottom: '16px',
     flexWrap: 'wrap',
   }}
 >
@@ -1381,10 +1453,8 @@ setResult(prev =>
 
         <div
           style={{
+            ...sectionCardStyle,
             padding: isMobile ? '14px' : '16px 18px',
-            background: '#f4f8f8',
-            borderRadius: isMobile ? '10px' : '12px',
-            border: `1px solid ${brand.border}`,
             marginBottom: '20px',
           }}
         >
@@ -1467,11 +1537,9 @@ setResult(prev =>
 {result && (
   <div
     style={{
+      ...sectionCardStyle,
       marginTop: '24px',
       padding: isMobile ? '16px' : '20px',
-      background: '#f9fafb',
-      borderRadius: '12px',
-      border: '1px solid #e5e7eb',
     }}
   >
 
@@ -1538,10 +1606,9 @@ fontSize: isMobile ? '22px' : '28px',  }}
 {patientLetter && (
   <div
     style={{
+      ...sectionCardStyle,
       marginTop: '20px',
       padding: '20px',
-      border: '1px solid #e5e7eb',
-      borderRadius: '12px',
     }}
   >
     <h2 style={{ color: brand.primary }}>Patientenbrief</h2>
@@ -1748,10 +1815,9 @@ fontSize: isMobile ? '22px' : '28px',  }}
 
 <div
   style={{
+    ...sectionCardStyle,
     marginTop: '30px',
     padding: '20px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '12px',
   }}
 >
   <input

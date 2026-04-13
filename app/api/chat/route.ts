@@ -1,62 +1,271 @@
 import { NextResponse } from "next/server";
+import { privacyConfig, PUBLIC_CHAT_CHANNEL } from "../../../lib/privacyConfig";
+
+type ChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+type ChatRequestBody = {
+  messages?: Array<Partial<ChatMessage>>;
+  context?: unknown;
+  consentAccepted?: boolean;
+  channel?: string;
+  mode?: "safe_documentation" | "clinical_support";
+};
+
+const MAX_CONTEXT_CHARS = 4000;
+const MAX_MESSAGE_CHARS = 4000;
+const MAX_MESSAGES = 12;
+const PRIMARY_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
+const FALLBACK_MODEL = process.env.OPENAI_CHAT_FALLBACK_MODEL || "gpt-4.1";
+const UNCERTAINTY_NOTE =
+  "Die Einschaetzung basiert ausschliesslich auf den vorliegenden Informationen und kann unvollstaendig sein.";
+
+const sanitizeText = (value: unknown, limit: number) => {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, limit);
+};
+
+const sanitizeMessages = (messages: ChatRequestBody["messages"]) => {
+  if (!Array.isArray(messages)) return [] as ChatMessage[];
+  return messages
+    .filter((message): message is Partial<ChatMessage> => typeof message === "object" && message !== null)
+    .map((message) => ({
+      role: message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user",
+      content: sanitizeText(message.content, MAX_MESSAGE_CHARS),
+    }))
+    .filter((message) => message.content.length > 0)
+    .slice(-MAX_MESSAGES);
+};
+
+const containsLiteratureRequest = (value: string) =>
+  /\b(studie|studien|literatur|quelle|quellen|leitlinie|guideline|pubmed|paper|evidenz)\b/i.test(value);
+
+const enforceLiteraturePolicy = (text: string, allowLiterature: boolean) => {
+  if (allowLiterature) return text;
+
+  const lines = text.split("\n");
+  const filtered: string[] = [];
+  let inSourcesBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim().toLowerCase();
+
+    if (trimmed.startsWith("quellen")) {
+      inSourcesBlock = true;
+      continue;
+    }
+
+    if (inSourcesBlock) {
+      if (!trimmed) {
+        inSourcesBlock = false;
+      }
+      continue;
+    }
+
+    filtered.push(line);
+  }
+
+  return filtered.join("\n").trim();
+};
+
+const shouldMarkAsPossibleConsideration = (inputText: string, outputText: string) => {
+  const input = inputText.toLowerCase();
+  const output = outputText.toLowerCase();
+
+  const signalWords = [
+    "diagnose",
+    "differential",
+    "therapie",
+    "operation",
+    "medikation",
+    "prognose",
+    "verdacht",
+    "wahrscheinlich",
+  ];
+
+  const hasClinicalInferenceSignal = signalWords.some((w) => output.includes(w));
+  if (!hasClinicalInferenceSignal) return false;
+
+  const outputTerms = new Set(
+    output
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 7),
+  );
+
+  let unseenTerms = 0;
+  for (const term of outputTerms) {
+    if (!input.includes(term)) unseenTerms += 1;
+    if (unseenTerms >= 4) return true;
+  }
+
+  return false;
+};
+
+const validateOutput = ({
+  mode,
+  inputText,
+  outputText,
+  allowLiterature,
+}: {
+  mode: "safe_documentation" | "clinical_support";
+  inputText: string;
+  outputText: string;
+  allowLiterature: boolean;
+}) => {
+  let next = enforceLiteraturePolicy(outputText, allowLiterature);
+
+  const shouldMark = shouldMarkAsPossibleConsideration(inputText, next);
+  if (shouldMark) {
+    const marker = "Moegliche Ueberlegung (nicht gesichert):";
+    if (!next.startsWith(marker)) {
+      next = `${marker}\n${next}`;
+    }
+  }
+
+  if (mode === "safe_documentation" && shouldMark) {
+    next = `${markerForSafeMode()}\n${next}`;
+  }
+
+  return next.trim();
+};
+
+const markerForSafeMode = () =>
+  "Hinweis: Es wurden potenziell ueber den Input hinausgehende Inhalte erkannt und als moegliche Ueberlegung gekennzeichnet.";
+
 export async function POST(req: Request) {
-  const { messages, context } = await req.json();
+  const body = (await req.json()) as ChatRequestBody;
+  const channel = sanitizeText(body.channel, 64);
+  const consentAccepted = body.consentAccepted === true;
+  const mode = body.mode === "safe_documentation" ? "safe_documentation" : "clinical_support";
+
+  if (privacyConfig.consentRequired && channel === PUBLIC_CHAT_CHANNEL && !consentAccepted) {
+    return NextResponse.json(
+      { error: "Consent erforderlich: Bitte Zustimmung zur Datenverarbeitung erteilen." },
+      { status: 403 },
+    );
+  }
+
+  const messages = sanitizeMessages(body.messages);
+  const context = sanitizeText(body.context, MAX_CONTEXT_CHARS);
+  const latestUserMessage = [...messages].reverse().find((m) => m.role === "user")?.content || "";
+  const allowLiterature = containsLiteratureRequest(latestUserMessage);
+  const mergedInput = `${context}\n${messages.map((m) => `${m.role}: ${m.content}`).join("\n")}`;
+  const hasClearData = context.trim().length >= 80 || messages.filter((m) => m.role === "user").length >= 2;
+  let isUncertain = mode === "clinical_support" || !hasClearData;
+  const hasExternalKnowledge = mode === "clinical_support";
+
+  if (messages.length === 0) {
+    return NextResponse.json({ error: "Keine gueltigen Nachrichten uebergeben." }, { status: 400 });
+  }
 
   const systemPrompt = `
-Du bist ein hochqualifizierter, erfahrener Tierarzt (Fachtierarzt-Niveau, Klinikniveau).
+Du antwortest auf Diplomate-/Professoren-Niveau (ECVIM/ACVIM, Innere Medizin) fuer ein fachliches Peer-Publikum.
 
-DEINE AUFGABE:
-- Unterstütze Tierärzte bei klinischen Entscheidungen
-- Analysiere Fälle präzise und differenziert
-- Antworte strukturiert, fachlich korrekt und praxisnah
+PRIMAERZIEL:
+- Maximale medizinische Korrektheit, Praezision und klinische Entscheidungsqualitaet.
+- Keine Vereinfachung fuer Laien.
 
-WICHTIG:
-- Keine allgemeinen Floskeln
-- Keine Laienerklärungen
-- Fokus auf klinische Relevanz
-- Wenn Unsicherheit → klar benennen
-- Denke wie ein Oberarzt in einer Tierklinik
-- Bei medizinischen Fakten, Dosierungen oder Leitlinien: nenne belastbare Quellen
-- Wenn keine belastbare Quelle vorliegt: kennzeichne dies explizit
-- Füge am Ende einen Abschnitt "Quellen" hinzu, wenn du fachliche Aussagen mit Evidenz machst
-- Gib Quellen als anklickbare Links im Format [Kurzname](https://...) aus
+AKTUELLER MODUS:
+- MODE: ${mode}
+- Wenn MODE = safe_documentation: nur strukturieren, keine neuen Interpretationen oder Massnahmen ergaenzen.
+- Wenn MODE = clinical_support: vorsichtige Interpretation ist erlaubt, aber ausschliesslich als Vorschlag und ohne Sicherheitssignal.
 
-ANTWORTSTRUKTUR (wenn sinnvoll):
-- Einschätzung
-- Differentialdiagnosen
-- Diagnostik (next steps)
-- Therapie / Vorgehen
-- Prognose (optional)
+ARBEITSWEISE:
+- Denke wie ein erfahrener klinischer Konsiliar-Diplomate.
+- Priorisiere Differentialdiagnosen nach Wahrscheinlichkeit und klinischer Gefaehrlichkeit.
+- Benenne kritische Red Flags und immediate next steps zuerst.
+- Trenne klar zwischen gesichert, wahrscheinlich und spekulativ.
+- Weise auf Informationsluecken hin und nenne gezielte Zusatzdaten, die die Entscheidung aendern wuerden.
+
+EVIDENZSTANDARD:
+- Verwende evidenzbasierte Aussagen, wenn moeglich mit Leitlinien, Reviews, Primarliteratur oder etablierten Referenzwerken.
+- Keine erfundenen Quellen. Wenn Evidenz unsicher/fehlend ist, explizit kennzeichnen.
+- Bei Dosierungen/Schwellenwerten nur konservative, klinisch belastbare Angaben; bei Unsicherheit klar zur Verifikation auffordern.
+
+WICHTIGE REGELN (HOHE PRIORITAET):
+- Treffe KEINE Annahmen, die nicht explizit im Input genannt wurden.
+- Ergaenze KEINE Diagnosen, Therapien oder Massnahmen, die nicht genannt oder direkt logisch ableitbar sind.
+- Wenn Informationen fehlen: klar benennen, nicht auffuellen.
+- Erfinde KEINE Studien, Literatur oder Quellen.
+- Wenn keine verlaessliche Quelle vorliegt: explizit sagen.
+
+LITERATURREGELN:
+- Nenne Studien nur, wenn du sicher bist, dass sie existieren.
+- Bei Unsicherheit nutze exakt: "Ich kann dazu keine verlaesslichen Quellen nennen."
+- Keine erfundenen Links, Autoren oder Zitate.
+- Literatur nur, wenn vom Nutzer explizit angefragt.
+
+KLINISCHE INTERPRETATION:
+- Beschraenke dich auf beschriebene Befunde und direkt ableitbare Schluesse.
+- Keine automatische Therapieeinleitung.
+- Keine OP-Vorschlaege ohne explizite Grundlage.
+
+ANTWORTFORMAT (strikt):
+1) Klinische Kerneinschaetzung (2-5 Saetze)
+2) Priorisierte Differentialdiagnosen (Top 3-6, jeweils Pro/Contra)
+3) Diagnostischer Plan (sofort, kurzfristig, optional)
+4) Therapie-/Managementplan (akut vs. weiterfuehrend)
+5) Unsicherheiten und Entscheidungsrisiken
+6) Quellen (nur falls explizit angefragt, sonst weglassen)
+
+STIL:
+- Praezise, knapp, fachlich dicht.
+- Keine Floskeln, kein generischer Sicherheits-Text.
+- Keine Halluzinationen; im Zweifel transparent begrenzen.
 
 KONTEXT DES AKTUELLEN FALLS:
 ${context || "Kein Kontext vorhanden"}
 
-Nutze diesen Kontext aktiv in deiner Antwort.
+Nutze den Kontext aktiv und beziehe ihn explizit in Priorisierung und Empfehlungen ein.
 `;
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}` // ✅ FIX
-    },
-    body: JSON.stringify({
-      model: "gpt-4.1",
-      stream: true,
-      input: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        ...messages.map((m: any) => ({
-          role: m.role,
-          content: m.content
-        }))
-      ],
-      temperature: 0.3,
-      max_output_tokens: 1200
-    })
-  });
+  const callOpenAI = async (model: string) =>
+    fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        // Privacy-by-default: ask OpenAI not to store this request/response payload.
+        store: false,
+        stream: true,
+        input: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          ...messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        ],
+        temperature: 0.15,
+        max_output_tokens: 1600,
+      }),
+    });
+
+  let activeModel = PRIMARY_MODEL;
+  let response = await callOpenAI(activeModel);
+
+  if (!response.ok && activeModel !== FALLBACK_MODEL) {
+    const primaryError = await response.text();
+    const fallbackResponse = await callOpenAI(FALLBACK_MODEL);
+    if (fallbackResponse.ok && fallbackResponse.body) {
+      response = fallbackResponse;
+      activeModel = FALLBACK_MODEL;
+    } else {
+      const fallbackError = await fallbackResponse.text();
+      return NextResponse.json(
+        { error: `Primary model failed (${PRIMARY_MODEL}): ${primaryError}; fallback failed (${FALLBACK_MODEL}): ${fallbackError}` },
+        { status: 500 },
+      );
+    }
+  }
 
   if (!response.ok || !response.body) {
     const error = await response.text();
@@ -69,6 +278,7 @@ Nutze diesen Kontext aktiv in deiner Antwort.
   const stream = new ReadableStream({
     async start(controller) {
       const reader = response.body!.getReader();
+      let fullReply = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -107,7 +317,7 @@ if (!text) {
 }
 
             if (text) {
-              controller.enqueue(encoder.encode(text));
+              fullReply += text;
             }
           } catch {
             // ignore Fehler
@@ -115,9 +325,33 @@ if (!text) {
         }
       }
 
+      fullReply = validateOutput({
+        mode,
+        inputText: mergedInput,
+        outputText: fullReply,
+        allowLiterature,
+      });
+
+      if (!hasClearData || mode === "clinical_support") {
+        if (!fullReply.includes(UNCERTAINTY_NOTE)) {
+          fullReply = `${fullReply}\n\n${UNCERTAINTY_NOTE}`;
+        }
+      }
+
+      isUncertain = isUncertain || fullReply.includes("Moegliche Ueberlegung");
+
+      // Emit finalized, validated output once to avoid leaking unvalidated chunks.
+      controller.enqueue(encoder.encode(fullReply));
+
       controller.close();
     }
   });
 
-  return new Response(stream);
+  return new Response(stream, {
+    headers: {
+      "x-ai-mode": mode,
+      "x-ai-is-uncertain": String(isUncertain),
+      "x-ai-has-external-knowledge": String(hasExternalKnowledge),
+    },
+  });
 }

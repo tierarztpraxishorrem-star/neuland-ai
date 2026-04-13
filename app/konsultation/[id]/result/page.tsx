@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
 import { generatePDF } from '../../../../lib/pdfReport';
 import { searchBreeds } from '../../../../lib/patientBreeds';
+import AiDisclaimer from '../../../../components/AiDisclaimer';
+import { Badge, Button, Input, SelectInput, TextAreaInput, uiTokens } from '../../../../components/ui/System';
 
 type Template = {
   id: string;
@@ -24,6 +26,25 @@ type Patient = {
   external_id: string | null;
   owner_name: string | null;
   created_at: string;
+};
+
+type UploadedContextFile = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  previewUrl: string;
+  extractedText: string;
+  inContext: boolean;
+  status: 'uploading' | 'ready' | 'error';
+  progress: number;
+  uploadedAt: string;
+};
+
+type PracticeMembership = {
+  practice_id: string | null;
+  role: string | null;
+  created_at: string | null;
 };
 
 const genderOptions = ['m', 'w', 'mk', 'wk'];
@@ -47,6 +68,14 @@ const normalizeCategory = (value: unknown) => {
   if (normalized === 'admin') return 'internal';
   return normalized;
 };
+
+const normalizeVisibilityScope = (value: unknown) => {
+  if (typeof value !== 'string') return 'practice';
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'restricted' ? 'restricted' : 'practice';
+};
+
+const deriveCaseKind = (value: string) => (value === 'internal' ? 'internal' : 'clinical');
 
 const contextFields: Record<string, Array<{ key: string; label: string; type?: string; options?: string[]; optional?: boolean }>> = {
   clinical: [
@@ -82,6 +111,7 @@ const contextFields: Record<string, Array<{ key: string; label: string; type?: s
 
 export default function ResultPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams();
   const caseId = String(params.id || '');
 
@@ -94,9 +124,16 @@ export default function ResultPage() {
   const [saving, setSaving] = useState(false);
 
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedContextFile[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [caseNotes, setCaseNotes] = useState('');
   const [caseTitle, setCaseTitle] = useState('');
+  const [casePracticeId, setCasePracticeId] = useState<string | null>(null);
   const [category, setCategory] = useState('clinical');
+  const [visibilityScope, setVisibilityScope] = useState<'practice' | 'restricted'>('practice');
+  const [quickMode, setQuickMode] = useState(true);
   const [showContext, setShowContext] = useState(false);
   const [contextData, setContextData] = useState<Record<string, string>>({});
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -128,6 +165,10 @@ export default function ResultPage() {
   const previousCategoryRef = useRef(category);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [showTranscriptEditor, setShowTranscriptEditor] = useState(false);
+  const [showLiveHandoffBanner, setShowLiveHandoffBanner] = useState(false);
+  const [isLiveHandoffMode, setIsLiveHandoffMode] = useState(false);
+  const [handoffFinalizedAt, setHandoffFinalizedAt] = useState<string | null>(null);
+  const [finalizingHandoff, setFinalizingHandoff] = useState(false);
 
   const autosavePrefix = `case_${caseId}_autosave_`;
   const checks = useMemo(() => (templateStructure?.untersuchung || []), [templateStructure]);
@@ -152,6 +193,7 @@ export default function ResultPage() {
     ? Math.max(0, Math.floor((timerNowMs - recordingStartedAtMs) / 1000))
     : 0;
   const totalDurationSeconds = recordedDurationSeconds + liveSegmentSeconds;
+  const supportsPatientContext = category !== 'internal';
 
   const formatDuration = (seconds: number) => {
     const safe = Math.max(0, Math.floor(seconds));
@@ -176,6 +218,19 @@ export default function ResultPage() {
       minute: '2-digit'
     });
     return `${day} · ${time}`;
+  };
+
+  const formatDateTime = (value: string) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString('de-DE', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   const getStructuredCaseData = () => {
@@ -205,13 +260,30 @@ export default function ResultPage() {
     card: '#FFFFFF'
   };
 
+  const maxFileSizeBytes = 30 * 1024 * 1024;
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+  };
+
+  const getFileBadge = (type: string) => {
+    if (type.startsWith('image/')) return '🖼';
+    if (type.includes('pdf')) return '📄 PDF';
+    if (type.startsWith('audio/')) return '🎵';
+    return '📎';
+  };
+
   const buildCombinedInput = () => {
     let contextBlock = '';
-    const fields = contextFields[category] || [];
-    const filled = fields.filter((f) => contextData[f.key]);
+    if (!quickMode) {
+      const fields = contextFields[category] || [];
+      const filled = fields.filter((f) => contextData[f.key]);
 
-    if (filled.length > 0) {
-      contextBlock = `KONTEXT:\n${filled.map((f) => `${f.label}: ${contextData[f.key]}`).join('\n')}\n\n`;
+      if (filled.length > 0) {
+        contextBlock = `KONTEXT:\n${filled.map((f) => `${f.label}: ${contextData[f.key]}`).join('\n')}\n\n`;
+      }
     }
 
     let combined = '';
@@ -221,12 +293,116 @@ export default function ResultPage() {
     // Always use transcript as source for generation; never reuse generated result as source.
     combined += transcript;
 
-    if (attachments.length > 0) {
-      combined += `\n\nZUSÄTZLICHE BEFUNDE:\n${attachments.join('\n\n')}`;
+    const filesInContext = uploadedFiles.length > 0
+      ? uploadedFiles
+          .filter((file) => file.inContext && file.status === 'ready' && file.extractedText)
+          .map((file) => file.extractedText)
+      : attachments;
+
+    if (filesInContext.length > 0) {
+      combined += `\n\nZUSÄTZLICHE BEFUNDE:\n${filesInContext.join('\n\n')}`;
     }
 
     return combined.trim();
   };
+
+  const processFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+
+    const files = Array.from(fileList);
+    for (const file of files) {
+      const tooLarge = file.size > maxFileSizeBytes;
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
+
+      const base: UploadedContextFile = {
+        id,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        previewUrl,
+        extractedText: '',
+        inContext: !tooLarge,
+        status: tooLarge ? 'error' : 'uploading',
+        progress: tooLarge ? 0 : 15,
+        uploadedAt: new Date().toISOString()
+      };
+
+      setUploadedFiles((prev) => [base, ...prev]);
+
+      if (tooLarge) {
+        alert(`Datei zu groß: ${file.name} (max. 30 MB)`);
+        continue;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        setUploadedFiles((prev) => prev.map((entry) => (entry.id === id ? { ...entry, progress: 55 } : entry)));
+        const res = await fetch('/api/analyze-image', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+        const extracted = (data?.result || data?.text || '').trim();
+
+        if (!extracted) {
+          setUploadedFiles((prev) => prev.map((entry) => (
+            entry.id === id ? { ...entry, status: 'error', progress: 100 } : entry
+          )));
+          continue;
+        }
+
+        // Keep legacy attachments in sync as fallback for older context paths.
+        setAttachments((prev) => [...prev, extracted]);
+        setUploadedFiles((prev) => prev.map((entry) => (
+          entry.id === id
+            ? { ...entry, extractedText: extracted, status: 'ready', progress: 100 }
+            : entry
+        )));
+      } catch (err) {
+        console.error(err);
+        setUploadedFiles((prev) => prev.map((entry) => (
+          entry.id === id ? { ...entry, status: 'error', progress: 100 } : entry
+        )));
+      }
+    }
+  };
+
+  const removeUploadedFile = (fileId: string) => {
+    setUploadedFiles((prev) => {
+      const current = prev.find((entry) => entry.id === fileId);
+      if (current?.previewUrl) {
+        URL.revokeObjectURL(current.previewUrl);
+      }
+
+      if (current?.extractedText) {
+        setAttachments((prevAttachments) => {
+          const idx = prevAttachments.findIndex((item) => item === current.extractedText);
+          if (idx === -1) return prevAttachments;
+          const next = [...prevAttachments];
+          next.splice(idx, 1);
+          return next;
+        });
+      }
+
+      return prev.filter((entry) => entry.id !== fileId);
+    });
+
+    if (previewFileId === fileId) {
+      setPreviewFileId(null);
+    }
+  };
+
+  const toggleFileInContext = (fileId: string) => {
+    setUploadedFiles((prev) => prev.map((entry) => (
+      entry.id === fileId ? { ...entry, inContext: !entry.inContext } : entry
+    )));
+  };
+
+  const previewFile = uploadedFiles.find((entry) => entry.id === previewFileId) || null;
 
   const patientSuggestion = useMemo(() => {
     const name = (contextData.patientName || contextData.tiername || '').trim();
@@ -242,7 +418,7 @@ export default function ResultPage() {
   }, [contextData]);
 
   const generate = async () => {
-    if (!transcript.trim() && attachments.length === 0 && !caseNotes.trim()) {
+    if (!transcript.trim() && attachments.length === 0 && !caseNotes.trim() && !selectedTemplate.trim()) {
       alert('Keine Eingaben für Generierung vorhanden.');
       return;
     }
@@ -312,15 +488,21 @@ export default function ResultPage() {
       const storedResult = localStorage.getItem(`${autosavePrefix}result`);
       const storedTemplate = localStorage.getItem(`${autosavePrefix}template`);
       const storedCategory = localStorage.getItem(`${autosavePrefix}category`);
+      const storedVisibility = localStorage.getItem(`${autosavePrefix}visibility_scope`);
       const storedContext = localStorage.getItem(`${autosavePrefix}context`);
       const storedAttachments = localStorage.getItem(`${autosavePrefix}attachments`);
+      const storedAttachmentFiles = localStorage.getItem(`${autosavePrefix}attachment_files`);
       const storedNotes = localStorage.getItem(`${autosavePrefix}notes`);
       const storedRecordingSession = localStorage.getItem(`${autosavePrefix}recording_session`);
+      const storedHandoff = localStorage.getItem(`case_${caseId}_anamnesis_handoff`);
 
       if (storedTranscript !== null) setTranscript(storedTranscript);
       if (storedResult !== null) setResult(storedResult);
       if (storedTemplate !== null) setSelectedTemplate(storedTemplate);
       if (storedCategory) setCategory(normalizeCategory(storedCategory));
+      if (storedVisibility) {
+        setVisibilityScope(normalizeVisibilityScope(storedVisibility));
+      }
       if (storedContext) {
         try {
           setContextData(JSON.parse(storedContext));
@@ -335,7 +517,28 @@ export default function ResultPage() {
           setAttachments([]);
         }
       }
+      if (storedAttachmentFiles) {
+        try {
+          const parsed = JSON.parse(storedAttachmentFiles) as UploadedContextFile[];
+          setUploadedFiles(parsed || []);
+        } catch {
+          setUploadedFiles([]);
+        }
+      }
       if (storedNotes !== null) setCaseNotes(storedNotes);
+      if (storedHandoff) {
+        try {
+          const handoff = JSON.parse(storedHandoff) as { transcript?: string; result?: string; source?: string };
+          if (!storedTranscript && typeof handoff.transcript === 'string') setTranscript(handoff.transcript);
+          if (!storedResult && typeof handoff.result === 'string') setResult(handoff.result);
+          if (handoff.source === 'live') {
+            setShowLiveHandoffBanner(true);
+            setIsLiveHandoffMode(true);
+          }
+        } catch {
+          // Ignore invalid handoff payload.
+        }
+      }
       if (storedRecordingSession) {
         try {
           const parsed = JSON.parse(storedRecordingSession);
@@ -357,7 +560,12 @@ export default function ResultPage() {
 
       if (data) {
         if (data.title) setCaseTitle(data.title);
+        if (data.practice_id) setCasePracticeId(data.practice_id);
         if (data.patient_id) setSelectedPatientId(data.patient_id);
+        if (!storedCategory && data.category) setCategory(normalizeCategory(data.category));
+        if (!storedVisibility && data.visibility_scope) {
+          setVisibilityScope(normalizeVisibilityScope(data.visibility_scope));
+        }
         if (!storedRecordingSession && data.created_at) setSessionCreatedAt(data.created_at);
         if (!storedTranscript && data.transcript) setTranscript(data.transcript);
         if (!storedResult && data.result) setResult(data.result);
@@ -419,7 +627,11 @@ export default function ResultPage() {
             });
           }
           if (!storedAttachments && parsed.attachments) setAttachments(parsed.attachments);
+          if (!storedAttachmentFiles && parsed.attachmentFiles) setUploadedFiles(parsed.attachmentFiles);
           if (!storedCategory && parsed.category) setCategory(normalizeCategory(parsed.category));
+          if (!storedVisibility && parsed.visibilityScope) {
+            setVisibilityScope(normalizeVisibilityScope(parsed.visibilityScope));
+          }
           if (!storedTemplate && parsed.template) setSelectedTemplate(parsed.template);
           if (parsed.recordingSession) {
             if (parsed.recordingSession.created_at) setSessionCreatedAt(parsed.recordingSession.created_at);
@@ -439,6 +651,25 @@ export default function ResultPage() {
 
     loadCaseAndDraft();
   }, [autosavePrefix, caseId]);
+
+  useEffect(() => {
+    if (searchParams.get('source') === 'live') {
+      setShowLiveHandoffBanner(true);
+      setIsLiveHandoffMode(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!caseId) return;
+    const raw = localStorage.getItem(`case_${caseId}_handoff_status`);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { finalizedAt?: string };
+      if (parsed.finalizedAt) setHandoffFinalizedAt(parsed.finalizedAt);
+    } catch {
+      // Ignore malformed handoff status.
+    }
+  }, [caseId]);
 
   useEffect(() => {
     const loadPatients = async () => {
@@ -576,12 +807,24 @@ export default function ResultPage() {
   }, [autosavePrefix, category]);
 
   useEffect(() => {
+    if (category !== 'internal' && visibilityScope !== 'practice') {
+      setVisibilityScope('practice');
+      return;
+    }
+    localStorage.setItem(`${autosavePrefix}visibility_scope`, visibilityScope);
+  }, [autosavePrefix, category, visibilityScope]);
+
+  useEffect(() => {
     localStorage.setItem(`${autosavePrefix}context`, JSON.stringify(contextData || {}));
   }, [autosavePrefix, contextData]);
 
   useEffect(() => {
     localStorage.setItem(`${autosavePrefix}attachments`, JSON.stringify(attachments || []));
   }, [autosavePrefix, attachments]);
+
+  useEffect(() => {
+    localStorage.setItem(`${autosavePrefix}attachment_files`, JSON.stringify(uploadedFiles || []));
+  }, [autosavePrefix, uploadedFiles]);
 
   useEffect(() => {
     localStorage.setItem(`${autosavePrefix}notes`, caseNotes || '');
@@ -612,7 +855,9 @@ export default function ResultPage() {
         created_at: new Date().toISOString(),
         contextData,
         attachments,
+        attachmentFiles: uploadedFiles,
         category,
+        visibilityScope,
         template: selectedTemplate,
         notes: caseNotes,
         recordingSession: {
@@ -642,7 +887,7 @@ export default function ResultPage() {
         updatedAt: new Date().toISOString()
       })
     );
-  }, [caseId, caseTitle, contextData, result, transcript, attachments, category, selectedTemplate, caseNotes, totalDurationSeconds, sessionCreatedAt, recordingAudioUrl, selectedPatientId, selectedPatient]);
+  }, [caseId, caseTitle, contextData, result, transcript, attachments, uploadedFiles, category, selectedTemplate, caseNotes, totalDurationSeconds, sessionCreatedAt, recordingAudioUrl, selectedPatientId, selectedPatient]);
 
   useEffect(() => {
     if (!caseId) return;
@@ -803,15 +1048,16 @@ export default function ResultPage() {
   };
 
   const createPatient = async () => {
-    if (!newPatient.name.trim()) {
-      alert('Bitte einen Patientennamen angeben.');
+    const normalizedName = newPatient.name.trim();
+    if (!normalizedName) {
+      alert('Bitte einen Patientennamen eingeben.');
       return;
     }
 
     setSavingPatient(true);
     try {
       const payload = {
-        name: newPatient.name.trim(),
+        name: normalizedName,
         tierart: newPatient.tierart || null,
         rasse: newPatient.rasse.trim() || null,
         alter: newPatient.alter.trim() || null,
@@ -843,14 +1089,35 @@ export default function ResultPage() {
     }
   };
 
-  const saveCase = async () => {
+  const saveCase = async (): Promise<boolean> => {
     if (!caseId) {
       alert('Keine Fall-ID gefunden.');
-      return;
+      return false;
     }
 
     setSaving(true);
     try {
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUserId = authData.user?.id || null;
+
+      const { data: memberships } = await supabase
+        .from('practice_memberships')
+        .select('practice_id, role, created_at')
+        .order('created_at', { ascending: true });
+
+      const rank: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+      const selectedMembership = ((memberships || []) as PracticeMembership[]).sort((a, b) => {
+        const ra = rank[a.role || ''] ?? 99;
+        const rb = rank[b.role || ''] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      })[0];
+      const effectivePracticeId = casePracticeId || selectedMembership?.practice_id || null;
+
+      if (!effectivePracticeId) {
+        throw new Error('Kein practice_id vorhanden. Bitte Praxiszuordnung prüfen.');
+      }
+
       const structuredCase = getStructuredCaseData();
       const patientName = structuredCase.patientName;
       const previewBase = (result || transcript || '').trim();
@@ -869,10 +1136,14 @@ export default function ResultPage() {
         species: selectedPatient?.tierart || structuredCase.tierart || null,
         breed: selectedPatient?.rasse || structuredCase.rasse || null,
         age: selectedPatient?.alter || structuredCase.alter || null,
+        user_id: currentUserId,
+        practice_id: effectivePracticeId,
+        category,
+        case_kind: deriveCaseKind(category),
+        visibility_scope: category === 'internal' ? visibilityScope : 'practice',
         transcript,
         result,
-        template: selectedTemplate || null,
-        updated_at: new Date().toISOString()
+        template: selectedTemplate || null
       };
 
       const { error } = await supabase
@@ -880,7 +1151,10 @@ export default function ResultPage() {
         .update(payload)
         .eq('id', caseId);
 
-      if (error) throw error;
+      if (error) {
+        const detail = [error.message, error.details, error.hint].filter(Boolean).join(' | ');
+        throw new Error(detail || 'Unbekannter Datenbankfehler');
+      }
 
       localStorage.setItem(
         `case_context_${caseId}`,
@@ -894,7 +1168,9 @@ export default function ResultPage() {
           created_at: new Date().toISOString(),
           contextData,
           attachments,
+          attachmentFiles: uploadedFiles,
           category,
+          visibilityScope,
           template: selectedTemplate,
           notes: caseNotes,
           recordingSession: {
@@ -909,42 +1185,342 @@ export default function ResultPage() {
       // Keep autosave as a local fallback so reopening "Letzte Konsultation" restores state instantly.
 
       alert('✅ Fall gespeichert');
+      return true;
     } catch (err) {
-      console.error(err);
-      alert('Fehler beim Speichern');
+      const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
+      console.error('saveCase failed', err);
+      alert(`Fehler beim Speichern: ${message}`);
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const finalizeHandoff = async () => {
+    if (!caseId || finalizingHandoff) return;
+
+    setFinalizingHandoff(true);
+    try {
+      const ok = await saveCase();
+      if (!ok) return;
+
+      const finalizedAt = new Date().toISOString();
+      setHandoffFinalizedAt(finalizedAt);
+      localStorage.setItem(
+        `case_${caseId}_handoff_status`,
+        JSON.stringify({
+          finalizedAt,
+          mode: 'live-documentation'
+        })
+      );
+
+      alert('✅ Anamnese wurde in die Konsultation übernommen.');
+    } finally {
+      setFinalizingHandoff(false);
+    }
+  };
+
+  if (isLiveHandoffMode) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          background: brand.bg,
+          padding: uiTokens.pagePadding,
+          fontFamily: 'Arial'
+        }}
+      >
+        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+          <div style={{ marginBottom: 16 }}>
+            <h1 style={{ margin: 0, color: uiTokens.brand, fontSize: '32px', fontWeight: 700 }}>Dokumentation (Live-Übergabe)</h1>
+            <div style={{ marginTop: 6, fontSize: '14px', color: uiTokens.textSecondary }}>
+              Strukturierte Anamnese prüfen, bei Bedarf editieren und in die Konsultation übernehmen.
+            </div>
+          </div>
+
+          {showLiveHandoffBanner && (
+            <div
+              style={{
+                marginBottom: '16px',
+                border: '1px solid #c7e2d2',
+                background: '#eefbf3',
+                color: '#0f5132',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '10px',
+                flexWrap: 'wrap',
+                alignItems: 'center'
+              }}
+            >
+              <div style={{ fontSize: '13px' }}>
+                Live-Anamnese wurde übernommen. Dieses Ergebnisfeld ist direkt editierbar.
+              </div>
+              <Button
+                size='sm'
+                variant='secondary'
+                onClick={() => setShowLiveHandoffBanner(false)}
+                style={{ background: '#fff', color: '#14532d' }}
+              >
+                Hinweis schließen
+              </Button>
+            </div>
+          )}
+
+          <div
+            style={{
+              background: '#fff',
+              padding: '14px',
+              borderRadius: '12px',
+              border: `1px solid ${brand.border}`,
+              marginBottom: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              flexWrap: 'wrap'
+            }}
+          >
+            <div style={{ fontSize: '13px', color: '#334155' }}>
+              📄 {caseTitle || 'Unbenannte Konsultation'}{' '}
+              • {formatPatientLabel(selectedPatient)}{' '}
+              • {formatSessionDateTime(sessionCreatedAt) || 'Datum offen'}{' '}
+              • {formatDuration(totalDurationSeconds)} min
+            </div>
+
+            {handoffFinalizedAt ? (
+              <div
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  background: '#ecfdf3',
+                  border: '1px solid #bbf7d0',
+                  color: '#166534',
+                  fontSize: '12px',
+                  fontWeight: 700
+                }}
+              >
+                Übernommen am {formatDateTime(handoffFinalizedAt)}
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Button
+                onClick={recording ? stopRecording : startRecording}
+                variant='secondary'
+                size='sm'
+                style={{ background: recording ? '#fff1f2' : '#fff', fontSize: '12px' }}
+              >
+                {recording ? '⏹ Aufnahme stoppen' : '🎤 Aufnahme fortsetzen'}
+              </Button>
+
+              <Button
+                onClick={() => router.push(`/konsultation/${caseId}/live`)}
+                variant='secondary'
+                size='sm'
+                style={{ background: '#fff', fontSize: '12px' }}
+              >
+                🧭 Zur Live-Ansicht
+              </Button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#fff',
+              padding: '16px',
+              borderRadius: '12px',
+              border: `1px solid ${brand.border}`,
+              marginBottom: '14px'
+            }}
+          >
+            <div style={{ marginBottom: '10px', fontSize: '13px', color: '#64748b' }}>Fertiges Ergebnis (editierbar)</div>
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              onInput={(e) => setResult(e.currentTarget.innerText)}
+              style={{
+                width: '100%',
+                minHeight: '360px',
+                border: '1px solid #E5E7EB',
+                borderRadius: '10px',
+                padding: '12px',
+                whiteSpace: 'pre-wrap',
+                background: '#fcfdff'
+              }}
+            >
+              {result}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#fff',
+              padding: '16px',
+              borderRadius: '12px',
+              border: `1px solid ${brand.border}`,
+              marginBottom: '14px'
+            }}
+          >
+            <div style={{ marginBottom: '10px', fontSize: '13px', color: '#64748b' }}>Transkript</div>
+            <Button
+              onClick={() => setShowTranscriptEditor((prev) => !prev)}
+              variant='secondary'
+              size='sm'
+              style={{ marginBottom: 10, background: showTranscriptEditor ? '#eef6f7' : '#fff' }}
+            >
+              {showTranscriptEditor ? 'Transkript ausblenden' : 'Transkript anzeigen/bearbeiten'}
+            </Button>
+
+            {showTranscriptEditor ? (
+              <TextAreaInput
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+                placeholder='Transkript hier bearbeiten...'
+                style={{ minHeight: '180px', resize: 'vertical', background: '#fff' }}
+              />
+            ) : null}
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <Button
+              onClick={finalizeHandoff}
+              disabled={saving || finalizingHandoff}
+              variant='primary'
+              style={{ background: '#166534', color: '#fff', fontWeight: 700 }}
+            >
+              {finalizingHandoff ? 'Übernehme...' : handoffFinalizedAt ? 'Erneut übernehmen' : 'Anamnese in Konsultation übernehmen'}
+            </Button>
+
+            <Button
+              onClick={saveCase}
+              disabled={saving}
+              variant='primary'
+              style={{ background: brand.primary, color: '#fff', fontWeight: 700 }}
+            >
+              {saving ? 'Speichert...' : '💾 Dokumentation speichern'}
+            </Button>
+
+            <Button
+              onClick={() => {
+                setIsLiveHandoffMode(false);
+                setShowLiveHandoffBanner(false);
+                router.replace(`/konsultation/${caseId}/result`);
+              }}
+              variant='secondary'
+              style={{ background: '#fff', color: '#111827', fontWeight: 600 }}
+            >
+              Vollständige Konsultation öffnen
+            </Button>
+          </div>
+
+          {result.trim() ? <AiDisclaimer /> : null}
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main
       style={{
         minHeight: '100vh',
         background: brand.bg,
-        padding: '40px',
+        padding: uiTokens.pagePadding,
         fontFamily: 'Arial'
       }}
     >
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ margin: 0, color: uiTokens.brand, fontSize: '32px', fontWeight: 700 }}>Konsultation</h1>
+        <div style={{ marginTop: 6, fontSize: '14px', color: uiTokens.textSecondary }}>
+          Vorlage waehlen, Kontext anreichern und Ergebnis direkt mit VetMind weiterbearbeiten.
+        </div>
+      </div>
+
+      {showLiveHandoffBanner && (
+        <div
+          style={{
+            marginBottom: '16px',
+            border: '1px solid #c7e2d2',
+            background: '#eefbf3',
+            color: '#0f5132',
+            borderRadius: '12px',
+            padding: '12px 14px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '10px',
+            flexWrap: 'wrap',
+            alignItems: 'center'
+          }}
+        >
+          <div style={{ fontSize: '13px' }}>
+            Live-Anamnese wurde übernommen. Ergebnis ist sofort editierbar und für die Konsultation bereit.
+          </div>
+          <Button
+            size='sm'
+            variant='secondary'
+            onClick={() => setShowLiveHandoffBanner(false)}
+            style={{ background: '#fff', color: '#14532d' }}
+          >
+            Hinweis schließen
+          </Button>
+        </div>
+      )}
+
+      <div
+        style={{
+          background: brand.card,
+          padding: '12px',
+          borderRadius: '12px',
+          border: `1px solid ${brand.border}`,
+          marginBottom: '10px'
+        }}
+      >
       <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
         {['clinical', 'communication', 'internal'].map((cat) => (
-          <button
+          <Button
             key={cat}
             onClick={() => {
               setCategory(cat);
             }}
+            variant={category === cat ? 'primary' : 'secondary'}
             style={{
-              padding: '8px 12px',
-              borderRadius: '8px',
-              border: '1px solid #E5E7EB',
-              background: category === cat ? '#0F6B74' : '#fff',
-              color: category === cat ? '#fff' : '#000',
-              cursor: 'pointer'
+              color: category === cat ? '#fff' : '#000'
             }}
           >
             {categoryLabels[cat]}
-          </button>
+          </Button>
         ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: '12px', color: '#64748b' }}>Sichtbarkeit</div>
+        {category === 'internal' ? (
+          <>
+            <Button
+              size='sm'
+              variant={visibilityScope === 'restricted' ? 'primary' : 'secondary'}
+              onClick={() => setVisibilityScope('restricted')}
+              style={{ color: visibilityScope === 'restricted' ? '#fff' : '#111827' }}
+            >
+              Nur ausgewählte Personen
+            </Button>
+            <Button
+              size='sm'
+              variant={visibilityScope === 'practice' ? 'primary' : 'secondary'}
+              onClick={() => setVisibilityScope('practice')}
+              style={{ color: visibilityScope === 'practice' ? '#fff' : '#111827' }}
+            >
+              Ganze Praxis
+            </Button>
+          </>
+        ) : (
+          <div style={{ fontSize: '12px', color: '#64748b' }}>
+            Klinische und Kommunikationsfälle sind praxisweit sichtbar.
+          </div>
+        )}
+      </div>
       </div>
 
       <div
@@ -956,18 +1532,13 @@ export default function ResultPage() {
           marginBottom: '20px'
         }}
       >
-        <select
+        <div style={{ marginBottom: 10, fontSize: '13px', color: '#64748b' }}>Vorlage</div>
+        <SelectInput
           value={selectedTemplate}
           onChange={(e) => {
             const selected = templates.find((t) => t.content === e.target.value);
             setSelectedTemplate(e.target.value);
             setTemplateStructure(selected?.structure || null);
-          }}
-          style={{
-            width: '100%',
-            padding: '12px',
-            borderRadius: '10px',
-            border: `1px solid ${brand.border}`
           }}
         >
           <option value=''>Vorlage wählen</option>
@@ -976,25 +1547,51 @@ export default function ResultPage() {
               {t.name}
             </option>
           ))}
-        </select>
+        </SelectInput>
       </div>
 
       <div style={{ marginBottom: 18 }}>
-        <button
+        <div style={{ marginBottom: 8, fontSize: '13px', color: '#64748b' }}>Arbeitsmodus</div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            variant={quickMode ? 'primary' : 'secondary'}
+            size='sm'
+            onClick={() => {
+              setQuickMode(true);
+              setShowContext(false);
+            }}
+          >
+            Schnellmodus
+          </Button>
+
+          <Button
+            variant={!quickMode ? 'primary' : 'secondary'}
+            size='sm'
+            onClick={() => {
+              setQuickMode(false);
+              setShowContext(true);
+            }}
+          >
+            Mit Kontext arbeiten
+          </Button>
+
+          {category === 'internal' && (
+            <div style={{ fontSize: '12px', color: '#64748b' }}>
+              Intern/SOP: Patientenkontext ist optional und standardmäßig nicht nötig.
+            </div>
+          )}
+        </div>
+
+        <Button
           onClick={() => setShowContext((v) => !v)}
+          variant={showContext ? 'primary' : 'secondary'}
           style={{
-            background: showContext ? brand.primary : '#fff',
-            color: showContext ? '#fff' : brand.primary,
-            border: `1px solid ${brand.primary}`,
-            borderRadius: 10,
-            padding: '8px 18px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            marginBottom: 8
+            marginBottom: 8,
+            color: showContext ? '#fff' : brand.primary
           }}
         >
           {showContext ? 'Kontext ausblenden' : 'Kontext hinzufügen (optional)'}
-        </button>
+        </Button>
 
         {showContext && (
           <div
@@ -1018,272 +1615,260 @@ export default function ResultPage() {
                 background: '#f9fbfc'
               }}
             >
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <button
-                  onClick={() => setShowPatientAssign((v) => !v)}
-                  style={{
-                    border: `1px solid ${brand.primary}`,
-                    borderRadius: '8px',
-                    background: showPatientAssign ? brand.primary : '#fff',
-                    color: showPatientAssign ? '#fff' : brand.primary,
-                    padding: '6px 10px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '12px'
-                  }}
-                >
-                  {showPatientAssign ? 'Patienten-Auswahl schließen' : 'Patient zuordnen'}
-                </button>
+              <div style={{ display: 'grid', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: '2px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Patientenbezug</div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      {formatPatientLabel(selectedPatient)}
+                    </div>
+                  </div>
 
-                <div style={{ fontSize: '12px', color: '#475569' }}>
-                  {formatPatientLabel(selectedPatient)}
+                  {selectedPatientId && (
+                    <Button
+                      onClick={() => setSelectedPatientId(null)}
+                      size='sm'
+                      variant='secondary'
+                      style={{ fontSize: '12px' }}
+                    >
+                      Zuordnung entfernen
+                    </Button>
+                  )}
                 </div>
 
-                {selectedPatientId && (
-                  <button
-                    onClick={() => setSelectedPatientId(null)}
-                    style={{
-                      border: '1px solid #d1dbe4',
-                      borderRadius: '8px',
-                      background: '#fff',
-                      padding: '6px 10px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                  >
-                    Zuordnung entfernen
-                  </button>
-                )}
-              </div>
-
-              {showPatientAssign && (
-                <div style={{ marginTop: '10px', display: 'grid', gap: '10px' }}>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => setPatientAction('existing')}
-                      style={{
-                        border: '1px solid #d1dbe4',
-                        borderRadius: '8px',
-                        background: patientAction === 'existing' ? '#eef6f7' : '#fff',
-                        padding: '6px 10px',
-                        cursor: 'pointer',
-                        fontSize: '12px'
-                      }}
-                    >
-                      Bestehenden Patienten auswählen
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setPatientAction('new');
-                        if (patientSuggestion) {
-                          setNewPatient((prev) => ({
-                            ...prev,
-                            name: patientSuggestion.name,
-                            tierart: patientSuggestion.tierart || prev.tierart,
-                            external_id: patientSuggestion.external_id || prev.external_id
-                          }));
-                        }
-                      }}
-                      style={{
-                        border: '1px solid #d1dbe4',
-                        borderRadius: '8px',
-                        background: patientAction === 'new' ? '#eef6f7' : '#fff',
-                        padding: '6px 10px',
-                        cursor: 'pointer',
-                        fontSize: '12px'
-                      }}
-                    >
-                      Neuen Patienten anlegen
-                    </button>
-
-                    {patientSuggestion && (
-                      <button
+                {supportsPatientContext ? (
+                  <div style={{ display: 'grid', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <Button
                         onClick={() => {
-                          setPatientAction('new');
-                          setNewPatient((prev) => ({
-                            ...prev,
-                            name: patientSuggestion.name,
-                            tierart: patientSuggestion.tierart,
-                            external_id: patientSuggestion.external_id
-                          }));
+                          setShowPatientAssign(true);
+                          setPatientAction('existing');
                         }}
+                        size='sm'
+                        variant={showPatientAssign && patientAction === 'existing' ? 'primary' : 'secondary'}
                         style={{
-                          border: '1px dashed #94a3b8',
-                          borderRadius: '8px',
-                          background: '#fff',
-                          padding: '6px 10px',
-                          cursor: 'pointer',
+                          color: showPatientAssign && patientAction === 'existing' ? '#fff' : brand.primary,
                           fontSize: '12px'
                         }}
                       >
-                        {patientSuggestion.label}
-                      </button>
-                    )}
-                  </div>
+                        Patient suchen
+                      </Button>
 
-                  {patientAction === 'existing' ? (
-                    <div style={{ display: 'grid', gap: '8px' }}>
-                      <input
-                        type='text'
-                        placeholder='Nach Name oder PMS-ID suchen'
-                        value={patientSearch}
-                        onChange={(e) => setPatientSearch(e.target.value)}
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      />
-
-                      <div style={{ maxHeight: '180px', overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-                        {filteredPatients.length === 0 ? (
-                          <div style={{ padding: '10px', fontSize: '12px', color: '#6b7280' }}>Keine passenden Patienten gefunden.</div>
-                        ) : (
-                          filteredPatients.map((patient) => (
-                            <button
-                              key={patient.id}
-                              onClick={() => {
-                                setSelectedPatientId(patient.id);
-                                applyPatientToContext(patient);
-                                setShowPatientAssign(false);
-                              }}
-                              style={{
-                                width: '100%',
-                                textAlign: 'left',
-                                padding: '10px',
-                                border: 'none',
-                                borderBottom: '1px solid #f1f5f9',
-                                background: selectedPatientId === patient.id ? '#f1f8f9' : '#fff',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <div style={{ fontWeight: 600, fontSize: '13px' }}>{formatPatientLabel(patient)}</div>
-                              <div style={{ fontSize: '12px', color: '#64748b' }}>
-                                {patient.tierart || 'Tierart offen'}{patient.rasse ? ` · ${patient.rasse}` : ''}
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-                      <input
-                        type='text'
-                        value={newPatient.name}
-                        onChange={(e) => setNewPatient((prev) => ({ ...prev, name: e.target.value }))}
-                        placeholder='Name *'
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      />
-
-                      <select
-                        value={newPatient.tierart}
-                        onChange={(e) => setNewPatient((prev) => ({ ...prev, tierart: e.target.value }))}
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      >
-                        <option value=''>Tierart (optional)</option>
-                        <option value='Hund'>Hund</option>
-                        <option value='Katze'>Katze</option>
-                        <option value='Heimtier'>Heimtier</option>
-                      </select>
-
-                      <div style={{ position: 'relative' }}>
-                        <input
-                          type='text'
-                          value={newPatient.rasse}
-                          onChange={(e) => setNewPatient((prev) => ({ ...prev, rasse: e.target.value }))}
-                          placeholder='Rasse (Autocomplete, optional)'
-                          style={{ width: '100%', padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                        />
-                        {newPatient.rasse.trim() && breedSuggestions.length > 0 && (
-                          <div
-                            style={{
-                              position: 'absolute',
-                              top: '100%',
-                              left: 0,
-                              right: 0,
-                              marginTop: 4,
-                              background: '#fff',
-                              border: '1px solid #e5e7eb',
-                              borderRadius: 8,
-                              maxHeight: 140,
-                              overflow: 'auto',
-                              zIndex: 20
-                            }}
-                          >
-                            {breedSuggestions.map((breed) => (
-                              <button
-                                key={breed}
-                                onClick={() => setNewPatient((prev) => ({ ...prev, rasse: breed }))}
-                                style={{
-                                  width: '100%',
-                                  textAlign: 'left',
-                                  border: 'none',
-                                  background: '#fff',
-                                  padding: '8px 10px',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                {breed}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <input
-                        type='text'
-                        value={newPatient.alter}
-                        onChange={(e) => setNewPatient((prev) => ({ ...prev, alter: e.target.value }))}
-                        placeholder='Alter (optional)'
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      />
-
-                      <select
-                        value={newPatient.geschlecht}
-                        onChange={(e) => setNewPatient((prev) => ({ ...prev, geschlecht: e.target.value }))}
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      >
-                        <option value=''>Geschlecht (optional)</option>
-                        {genderOptions.map((value) => (
-                          <option key={value} value={value}>
-                            {value}
-                          </option>
-                        ))}
-                      </select>
-
-                      <input
-                        type='text'
-                        value={newPatient.external_id}
-                        onChange={(e) => setNewPatient((prev) => ({ ...prev, external_id: e.target.value }))}
-                        placeholder='PMS-ID / external_id (optional)'
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      />
-
-                      <input
-                        type='text'
-                        value={newPatient.owner_name}
-                        onChange={(e) => setNewPatient((prev) => ({ ...prev, owner_name: e.target.value }))}
-                        placeholder='Besitzername (optional)'
-                        style={{ padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                      />
-
-                      <button
-                        onClick={createPatient}
-                        disabled={savingPatient}
+                      <Button
+                        onClick={() => {
+                          setShowPatientAssign(true);
+                          setPatientAction('new');
+                          if (patientSuggestion) {
+                            setNewPatient((prev) => ({
+                              ...prev,
+                              name: patientSuggestion.name,
+                              tierart: patientSuggestion.tierart || prev.tierart,
+                              external_id: patientSuggestion.external_id || prev.external_id
+                            }));
+                          }
+                        }}
+                        size='sm'
+                        variant={showPatientAssign && patientAction === 'new' ? 'primary' : 'secondary'}
                         style={{
-                          border: 'none',
-                          borderRadius: 8,
-                          background: brand.primary,
-                          color: '#fff',
-                          padding: '8px 12px',
-                          cursor: savingPatient ? 'wait' : 'pointer',
-                          fontWeight: 600
+                          color: showPatientAssign && patientAction === 'new' ? '#fff' : brand.primary,
+                          fontSize: '12px'
                         }}
                       >
-                        {savingPatient ? 'Speichert...' : 'Patient anlegen und zuordnen'}
-                      </button>
+                        Neuen Patienten anlegen
+                      </Button>
+
+                      {showPatientAssign && (
+                        <Button
+                          onClick={() => setShowPatientAssign(false)}
+                          size='sm'
+                          variant='ghost'
+                          style={{ fontSize: '12px' }}
+                        >
+                          Schließen
+                        </Button>
+                      )}
+
+                      {patientSuggestion && (
+                        <Button
+                          onClick={() => {
+                            setShowPatientAssign(true);
+                            setPatientAction('new');
+                            setNewPatient((prev) => ({
+                              ...prev,
+                              name: patientSuggestion.name,
+                              tierart: patientSuggestion.tierart,
+                              external_id: patientSuggestion.external_id
+                            }));
+                          }}
+                          size='sm'
+                          variant='secondary'
+                          style={{ fontSize: '12px' }}
+                        >
+                          {patientSuggestion.label}
+                        </Button>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+
+                    {showPatientAssign && (
+                      patientAction === 'existing' ? (
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <Input
+                            placeholder='Nach Name oder PMS-ID suchen'
+                            value={patientSearch}
+                            onChange={(e) => setPatientSearch(e.target.value)}
+                          />
+
+                          <div style={{ maxHeight: '220px', overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: '10px', background: '#fff' }}>
+                            {filteredPatients.length === 0 ? (
+                              <div style={{ padding: '10px', fontSize: '12px', color: '#6b7280' }}>Keine passenden Patienten gefunden.</div>
+                            ) : (
+                              filteredPatients.map((patient) => (
+                                <Button
+                                  key={patient.id}
+                                  onClick={() => {
+                                    setSelectedPatientId(patient.id);
+                                    applyPatientToContext(patient);
+                                    setShowPatientAssign(false);
+                                  }}
+                                  variant='ghost'
+                                  size='sm'
+                                  style={{
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    borderBottom: '1px solid #f1f5f9',
+                                    background: selectedPatientId === patient.id ? '#f1f8f9' : '#fff',
+                                    justifyContent: 'flex-start'
+                                  }}
+                                >
+                                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{formatPatientLabel(patient)}</div>
+                                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                                    {patient.tierart || 'Tierart offen'}{patient.rasse ? ` · ${patient.rasse}` : ''}
+                                  </div>
+                                </Button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                          <Input
+                            label='Patientenname'
+                            value={newPatient.name}
+                            onChange={(e) => setNewPatient((prev) => ({ ...prev, name: e.target.value }))}
+                            placeholder='Name eingeben'
+                          />
+
+                          <SelectInput
+                            label='Tierart (optional)'
+                            value={newPatient.tierart}
+                            onChange={(e) => setNewPatient((prev) => ({ ...prev, tierart: e.target.value }))}
+                          >
+                            <option value=''>-</option>
+                            <option value='Hund'>Hund</option>
+                            <option value='Katze'>Katze</option>
+                            <option value='Heimtier'>Heimtier</option>
+                          </SelectInput>
+
+                          <div style={{ position: 'relative' }}>
+                            <Input
+                              label='Rasse (optional)'
+                              value={newPatient.rasse}
+                              onChange={(e) => setNewPatient((prev) => ({ ...prev, rasse: e.target.value }))}
+                              placeholder='Rasse eingeben'
+                            />
+                            {newPatient.rasse.trim() && breedSuggestions.length > 0 && (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  top: '100%',
+                                  left: 0,
+                                  right: 0,
+                                  marginTop: 4,
+                                  background: '#fff',
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: 8,
+                                  maxHeight: 140,
+                                  overflow: 'auto',
+                                  zIndex: 20
+                                }}
+                              >
+                                {breedSuggestions.map((breed) => (
+                                  <Button
+                                    key={breed}
+                                    onClick={() => setNewPatient((prev) => ({ ...prev, rasse: breed }))}
+                                    variant='ghost'
+                                    size='sm'
+                                    style={{
+                                      width: '100%',
+                                      textAlign: 'left',
+                                      background: '#fff',
+                                      justifyContent: 'flex-start'
+                                    }}
+                                  >
+                                    {breed}
+                                  </Button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <Input
+                            label='Alter (optional)'
+                            value={newPatient.alter}
+                            onChange={(e) => setNewPatient((prev) => ({ ...prev, alter: e.target.value }))}
+                            placeholder='z. B. 6 Jahre'
+                          />
+
+                          <SelectInput
+                            label='Geschlecht (optional)'
+                            value={newPatient.geschlecht}
+                            onChange={(e) => setNewPatient((prev) => ({ ...prev, geschlecht: e.target.value }))}
+                          >
+                            <option value=''>-</option>
+                            {genderOptions.map((value) => (
+                              <option key={value} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </SelectInput>
+
+                          <Input
+                            label='PMS-ID / external_id (optional)'
+                            value={newPatient.external_id}
+                            onChange={(e) => setNewPatient((prev) => ({ ...prev, external_id: e.target.value }))}
+                            placeholder='Interne Kennung'
+                          />
+
+                          <Input
+                            label='Besitzername (optional)'
+                            value={newPatient.owner_name}
+                            onChange={(e) => setNewPatient((prev) => ({ ...prev, owner_name: e.target.value }))}
+                            placeholder='Name des Besitzers'
+                          />
+
+                          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                            <Button
+                              onClick={createPatient}
+                              disabled={savingPatient}
+                              variant='primary'
+                              style={{
+                                background: brand.primary,
+                                fontWeight: 600
+                              }}
+                            >
+                              {savingPatient ? 'Speichert...' : 'Patient anlegen und zuordnen'}
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                    Für intern/SOP ist kein Patientenbezug erforderlich.
+                  </div>
+                )}
+              </div>
             </div>
 
             {(contextFields[category] || []).map((field) => (
@@ -1334,90 +1919,196 @@ export default function ResultPage() {
           marginBottom: '20px'
         }}
       >
-        <label style={{ cursor: 'pointer' }}>
-          📎 Datei hinzufügen
+        <div style={{ marginBottom: 10, fontSize: '13px', color: '#64748b' }}>Kontext-Dateien</div>
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!dragActive) setDragActive(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragActive(false);
+          }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragActive(false);
+            await processFiles(e.dataTransfer.files);
+          }}
+          style={{
+            border: dragActive ? '2px dashed #0F6B74' : '1px dashed #cbd5e1',
+            borderRadius: '12px',
+            background: dragActive ? '#ecfeff' : '#f8fafc',
+            padding: '14px',
+            cursor: 'pointer',
+            marginBottom: '12px',
+            transition: 'all 0.16s ease'
+          }}
+        >
+          <div style={{ fontWeight: 700, color: '#0f172a' }}>Dateien hier ablegen oder klicken</div>
+          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+            PDF, Bilder oder Befunde werden analysiert und als Kontext hinzugefügt
+          </div>
+
           <input
+            ref={fileInputRef}
             type='file'
+            accept='image/*,.pdf,text/plain,.txt'
             hidden
+            multiple
             onChange={async (e) => {
               const inputEl = e.currentTarget;
-              const file = inputEl.files?.[0];
-              if (!file) return;
-
-              const formData = new FormData();
-              formData.append('file', file);
-
-              try {
-                const res = await fetch('/api/analyze-image', {
-                  method: 'POST',
-                  body: formData
-                });
-                const data = await res.json();
-                const extracted = data?.result || data?.text || '';
-                if (extracted) {
-                  setAttachments((prev) => [...prev, extracted]);
-                } else {
-                  alert('Datei wurde hochgeladen, aber es konnte kein Text extrahiert werden.');
-                }
-              } catch (err) {
-                console.error(err);
-                alert('Fehler bei Dateianalyse');
-              } finally {
-                inputEl.value = '';
-              }
+              await processFiles(inputEl.files);
+              inputEl.value = '';
             }}
           />
-        </label>
 
-        {attachments.length > 0 && (
-          <div style={{ marginTop: '10px', fontSize: '13px' }}>{attachments.length} Datei(en) hinzugefügt</div>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+            <Button variant='secondary' size='sm'>📎 Datei auswählen</Button>
+            <Button variant='secondary' size='sm' onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>PDF / Bild / Befund</Button>
+          </div>
+        </div>
+
+        {uploadedFiles.length > 0 && (
+          <div style={{ display: 'grid', gap: '8px' }}>
+            {uploadedFiles.map((file) => (
+              <div
+                key={file.id}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '10px',
+                  background: '#fff',
+                  padding: '10px'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 600, fontSize: '14px' }}>{file.name}</div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <Badge tone={file.status === 'error' ? 'danger' : file.status === 'ready' ? 'success' : 'default'}>
+                      {file.status === 'uploading' ? `${file.progress}%` : file.status === 'ready' ? 'Bereit' : 'Fehler'}
+                    </Badge>
+                    <Badge tone='accent'>{getFileBadge(file.type)}</Badge>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                  {formatFileSize(file.size)} · {new Date(file.uploadedAt).toLocaleString('de-DE')}
+                </div>
+
+                {file.status === 'uploading' && (
+                  <div style={{ marginTop: '8px', height: '6px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div style={{ width: `${file.progress}%`, height: '100%', background: '#0F6B74' }} />
+                  </div>
+                )}
+
+                {file.status === 'error' && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#b91c1c' }}>
+                    Analyse fehlgeschlagen oder kein verwertbarer Text erkannt.
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPreviewFileId(file.id);
+                    }}
+                  >
+                    👁 Vorschau
+                  </Button>
+
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFileInContext(file.id);
+                    }}
+                    style={{ background: file.inContext ? '#eef6f7' : '#fff' }}
+                  >
+                    🧠 {file.inContext ? 'Im Kontext' : 'Nicht im Kontext'}
+                  </Button>
+
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeUploadedFile(file.id);
+                    }}
+                    style={{ background: '#fff1f2', color: '#b91c1c' }}
+                  >
+                    🗑 Entfernen
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {uploadedFiles.length === 0 && attachments.length > 0 && (
+          <div style={{ marginTop: '10px', fontSize: '13px' }}>{attachments.length} Datei(en) im Legacy-Kontext</div>
         )}
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
-        <button
+        <Button
           onClick={generate}
+          variant='primary'
           style={{
             padding: '12px',
             background: brand.primary,
             color: '#fff',
-            borderRadius: '10px',
-            border: 'none'
+            fontWeight: 700
           }}
         >
-          {loading ? '...' : '🧠 Generieren'}
-        </button>
+          {loading ? '...' : '🧠 VetMind generieren'}
+        </Button>
 
-        <button
+        <Button
           onClick={saveCase}
           disabled={saving}
+          variant='secondary'
           style={{
             padding: '12px',
             background: '#fff',
-            color: '#111827',
-            borderRadius: '10px',
-            border: '1px solid #E5E7EB',
             fontWeight: 600,
-            cursor: saving ? 'wait' : 'pointer'
+            color: '#111827'
           }}
         >
           {saving ? 'Speichert...' : '💾 Konsultation speichern'}
-        </button>
+        </Button>
 
-        <button
+        <Button
+          onClick={() => router.push(`/konsultation/${caseId}/live`)}
+          variant='secondary'
+          style={{
+            padding: '12px',
+            background: '#fff',
+            fontWeight: 600,
+            color: '#111827'
+          }}
+        >
+          🎙 Live-Anamnese fortsetzen
+        </Button>
+
+        <Button
           onClick={() => router.push('/konsultation/start')}
+          variant='secondary'
           style={{
             padding: '12px',
             background: '#fff',
             color: '#111827',
-            borderRadius: '10px',
-            border: '1px solid #E5E7EB',
-            fontWeight: 600,
-            cursor: 'pointer'
+            fontWeight: 600
           }}
         >
           ➕ Neue Aufnahme
-        </button>
+        </Button>
       </div>
 
       <div
@@ -1428,6 +2119,7 @@ export default function ResultPage() {
           border: `1px solid ${brand.border}`
         }}
       >
+        <div style={{ marginBottom: '10px', fontSize: '13px', color: '#64748b' }}>Konsultationsbereich</div>
         <div
           style={{
             marginBottom: '12px',
@@ -1443,7 +2135,7 @@ export default function ResultPage() {
           }}
         >
           <div style={{ fontSize: '13px', color: '#334155' }}>
-            🧠 Konsultation: {caseTitle || 'Unbenannt'}
+            📄 Konsultation: {caseTitle || 'Unbenannt'}
             {' — '}
             {formatPatientLabel(selectedPatient)}
             {' — '}
@@ -1454,64 +2146,54 @@ export default function ResultPage() {
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
+            <Button
               onClick={() => setShowTranscriptEditor((v) => !v)}
+              variant='secondary'
+              size='sm'
               style={{
-                border: '1px solid #d1dbe4',
-                borderRadius: '8px',
                 background: showTranscriptEditor ? '#eef6f7' : '#fff',
-                padding: '6px 10px',
-                cursor: 'pointer',
                 fontSize: '12px'
               }}
             >
               📝 Transkript bearbeiten
-            </button>
+            </Button>
 
-            <button
+            <Button
               onClick={recording ? stopRecording : startRecording}
+              variant='secondary'
+              size='sm'
               style={{
-                border: '1px solid #d1dbe4',
-                borderRadius: '8px',
                 background: recording ? '#fff1f2' : '#fff',
-                padding: '6px 10px',
-                cursor: 'pointer',
                 fontSize: '12px'
               }}
             >
               {recording ? '⏹ Aufnahme stoppen' : '🎤 Weiter aufnehmen'}
-            </button>
+            </Button>
 
-            <button
+            <Button
               onClick={() => recordingAudioUrl && window.open(recordingAudioUrl, '_blank', 'noopener,noreferrer')}
               disabled={!recordingAudioUrl}
+              variant='secondary'
+              size='sm'
               style={{
-                border: '1px solid #d1dbe4',
-                borderRadius: '8px',
                 background: '#fff',
-                padding: '6px 10px',
-                cursor: recordingAudioUrl ? 'pointer' : 'not-allowed',
                 fontSize: '12px',
                 opacity: recordingAudioUrl ? 1 : 0.6
               }}
             >
               🎧 Aufnahme anhören
-            </button>
+            </Button>
           </div>
         </div>
 
         {showTranscriptEditor && (
           <div style={{ marginBottom: '12px' }}>
-            <textarea
+            <TextAreaInput
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
               placeholder='Transkript hier bearbeiten...'
               style={{
-                width: '100%',
                 minHeight: '120px',
-                border: '1px solid #E5E7EB',
-                borderRadius: '10px',
-                padding: '10px',
                 resize: 'vertical',
                 background: '#fff'
               }}
@@ -1529,11 +2211,14 @@ export default function ResultPage() {
             border: '1px solid #E5E7EB',
             borderRadius: '10px',
             padding: '12px',
-            whiteSpace: 'pre-wrap'
+            whiteSpace: 'pre-wrap',
+            background: '#fcfdff'
           }}
         >
           {result}
         </div>
+
+        {result.trim() && <AiDisclaimer />}
 
         <div
           style={{
@@ -1543,24 +2228,21 @@ export default function ResultPage() {
             flexWrap: 'wrap'
           }}
         >
-          <button
+          <Button
             onClick={async () => {
               await navigator.clipboard.writeText(result);
             }}
+            variant='primary'
+            size='lg'
             style={{
-              padding: '14px 24px',
-              borderRadius: '16px',
               background: '#1E6F73',
-              color: '#fff',
-              border: 'none',
-              fontWeight: 600,
-              cursor: 'pointer'
+              color: '#fff'
             }}
           >
             📋 Kopieren
-          </button>
+          </Button>
 
-          <button
+          <Button
             onClick={() => {
               const structuredCase = getStructuredCaseData();
               const payload = {
@@ -1580,6 +2262,7 @@ export default function ResultPage() {
                 transcript,
                 contextData,
                 attachments,
+                attachmentFiles: uploadedFiles,
                 category,
                 notes: caseNotes,
                 createdAt: new Date().toISOString()
@@ -1593,32 +2276,28 @@ export default function ResultPage() {
               localStorage.setItem('last_consultation_case_id', caseId);
               router.push('/vetmind');
             }}
+            variant='secondary'
+            size='lg'
             style={{
-              padding: '14px 24px',
-              borderRadius: '16px',
               background: '#fff',
-              border: '1px solid #E5E7EB',
-              fontWeight: 600,
-              cursor: 'pointer'
+              fontWeight: 600
             }}
           >
             🤖 In VetMind öffnen
-          </button>
+          </Button>
 
-          <button
+          <Button
             onClick={shareText}
+            variant='secondary'
+            size='lg'
             style={{
-              padding: '14px 24px',
-              borderRadius: '16px',
               background: '#fff',
-              border: '1px solid #E5E7EB',
               color: '#111827',
-              fontWeight: 600,
-              cursor: 'pointer'
+              fontWeight: 600
             }}
           >
             📤 Teilen
-          </button>
+          </Button>
 
           {shareMenuOpen && (
             <div
@@ -1642,55 +2321,95 @@ export default function ResultPage() {
                   zIndex: 20
                 }}
               >
-                <button
+                <Button
                   onClick={downloadPdf}
+                  variant='ghost'
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: '#fff',
-                    cursor: 'pointer'
+                    justifyContent: 'flex-start',
+                    background: '#fff'
                   }}
                 >
                   📄 Als PDF herunterladen
-                </button>
+                </Button>
 
-                <button
+                <Button
                   onClick={copyResultText}
+                  variant='ghost'
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: '#fff',
-                    cursor: 'pointer'
+                    justifyContent: 'flex-start',
+                    background: '#fff'
                   }}
                 >
                   📋 Text kopieren
-                </button>
+                </Button>
 
-                <button
+                <Button
                   onClick={openEmailClient}
+                  variant='ghost'
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: '#fff',
-                    cursor: 'pointer'
+                    justifyContent: 'flex-start',
+                    background: '#fff'
                   }}
                 >
                   📧 Per E-Mail öffnen
-                </button>
+                </Button>
               </div>
             </div>
           )}
         </div>
       </div>
+      </div>
+
+      {previewFile && (
+        <div
+          onClick={() => setPreviewFileId(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 160
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(780px, calc(100vw - 24px))',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              background: '#fff',
+              border: '1px solid #e5e7eb',
+              borderRadius: '14px',
+              padding: '14px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+              <div style={{ fontWeight: 700 }}>{previewFile.name}</div>
+              <Button variant='ghost' onClick={() => setPreviewFileId(null)}>✕</Button>
+            </div>
+
+            {previewFile.previewUrl && (
+              <img
+                src={previewFile.previewUrl}
+                alt={previewFile.name}
+                style={{ width: '100%', maxHeight: '320px', objectFit: 'contain', borderRadius: '10px', border: '1px solid #e5e7eb', marginBottom: '10px' }}
+              />
+            )}
+
+            <div style={{ whiteSpace: 'pre-wrap', fontSize: '14px', color: '#1f2937', lineHeight: 1.5 }}>
+              {previewFile.extractedText || 'Kein extrahierter Text verfügbar.'}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

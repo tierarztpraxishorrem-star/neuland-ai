@@ -16,25 +16,102 @@ const [selectedCase, setSelectedCase] = useState<any | null>(null);
 
 const handleLogin = async () => {
   const { error } = await supabase.auth.signInWithPassword({
-    email,
+    email: email.trim(),
     password
   });
 
   if (error) alert(error.message);
 };
 
+const persistConsentAudit = async (token: string) => {
+  const acceptedAt = new Date().toISOString();
+  try {
+    await fetch('/api/auth/consent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        consents: [
+          { type: 'terms', accepted: acceptTerms, acceptedAt },
+          { type: 'privacy', accepted: acceptPrivacy, acceptedAt },
+          { type: 'product_updates', accepted: acceptProductUpdates, acceptedAt },
+        ],
+        source: 'registration',
+      }),
+    });
+  } catch {
+    // Do not block signup if audit persistence fails.
+  }
+};
+
 const handleRegister = async () => {
-  const { error } = await supabase.auth.signUp({
-    email,
-    password
+  const normalizedFirstName = firstName.trim();
+  const normalizedLastName = lastName.trim();
+
+  if (!normalizedFirstName || !normalizedLastName) {
+    alert('Bitte Vorname und Nachname angeben.');
+    return;
+  }
+
+  if (!acceptTerms || !acceptPrivacy) {
+    alert('Bitte AGB und Datenschutz akzeptieren.');
+    return;
+  }
+
+  if (!passwordStrong) {
+    alert('Passwort erfüllt die Mindestanforderungen noch nicht.');
+    return;
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+    options: {
+      data: {
+        first_name: normalizedFirstName,
+        last_name: normalizedLastName,
+        full_name: `${normalizedFirstName} ${normalizedLastName}`,
+        accepted_terms: acceptTerms,
+        accepted_privacy: acceptPrivacy,
+        accepted_product_updates: acceptProductUpdates,
+        registration_completed_at: new Date().toISOString(),
+      },
+    },
   });
 
-  if (error) alert(error.message);
-  else alert("Registriert! Jetzt einloggen.");
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  if (!data.session) {
+    alert('Registrierung erfolgreich. Bitte E-Mail bestaetigen und danach einloggen.');
+    return;
+  }
+
+  await persistConsentAudit(data.session.access_token);
+
+  alert("Registriert! Jetzt einloggen.");
 };
 
 const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
+const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+const [firstName, setFirstName] = useState("");
+const [lastName, setLastName] = useState("");
+const [acceptTerms, setAcceptTerms] = useState(false);
+const [acceptPrivacy, setAcceptPrivacy] = useState(false);
+const [acceptProductUpdates, setAcceptProductUpdates] = useState(false);
+const passwordRules = {
+  minLength: password.length >= 10,
+  lower: /[a-z]/.test(password),
+  upper: /[A-Z]/.test(password),
+  digit: /\d/.test(password),
+  special: /[^A-Za-z0-9]/.test(password),
+};
+const passwordStrong = Object.values(passwordRules).every(Boolean);
 
   const [species, setSpecies] = useState('');
   const [patientName, setPatientName] = useState('');
@@ -890,21 +967,88 @@ if (loadingAuth) return <div>Lade...</div>;
 if (!user) {
   return (
     <div style={{ padding: "40px" }}>
-      <h2>Login</h2>
+      <h2>{authMode === 'login' ? 'Login' : 'Registrierung'}</h2>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <button onClick={() => setAuthMode('login')}>Login</button>
+        <button onClick={() => setAuthMode('register')}>Registrieren</button>
+      </div>
 
       <input
         placeholder="Email"
+        value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
 
       <input
         placeholder="Passwort"
         type="password"
+        value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
 
-      <button onClick={handleLogin}>Login</button>
-      <button onClick={handleRegister}>Registrieren</button>
+      {authMode === 'register' && (
+        <>
+          <input
+            placeholder="Vorname"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+          />
+
+          <input
+            placeholder="Nachname"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+          />
+
+          <div style={{ marginTop: 8, marginBottom: 8, fontSize: 12, color: '#475569' }}>
+            Passwortregeln: mind. 10 Zeichen, Groß-/Kleinbuchstabe, Zahl, Sonderzeichen.
+          </div>
+          <div style={{ marginTop: 0, marginBottom: 12, fontSize: 12, color: '#475569', display: 'grid', gap: 3 }}>
+            <div style={{ color: passwordRules.minLength ? '#166534' : '#b91c1c' }}>• Mindestens 10 Zeichen</div>
+            <div style={{ color: passwordRules.upper ? '#166534' : '#b91c1c' }}>• Mindestens 1 Großbuchstabe</div>
+            <div style={{ color: passwordRules.lower ? '#166534' : '#b91c1c' }}>• Mindestens 1 Kleinbuchstabe</div>
+            <div style={{ color: passwordRules.digit ? '#166534' : '#b91c1c' }}>• Mindestens 1 Zahl</div>
+            <div style={{ color: passwordRules.special ? '#166534' : '#b91c1c' }}>• Mindestens 1 Sonderzeichen</div>
+          </div>
+
+          <label style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={acceptTerms}
+              onChange={(e) => setAcceptTerms(e.target.checked)}
+              style={{ marginRight: 8 }}
+            />
+            AGB akzeptieren (Pflicht)
+          </label>
+
+          <label style={{ display: 'block', marginTop: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={acceptPrivacy}
+              onChange={(e) => setAcceptPrivacy(e.target.checked)}
+              style={{ marginRight: 8 }}
+            />
+            Datenschutz akzeptieren (Pflicht)
+          </label>
+
+          <label style={{ display: 'block', marginTop: 8, marginBottom: 12, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={acceptProductUpdates}
+              onChange={(e) => setAcceptProductUpdates(e.target.checked)}
+              style={{ marginRight: 8 }}
+            />
+            Produkt-Updates per E-Mail erhalten (optional)
+          </label>
+        </>
+      )}
+
+      {authMode === 'login' ? (
+        <button onClick={handleLogin}>Login</button>
+      ) : (
+        <button onClick={handleRegister} disabled={!passwordStrong || !acceptTerms || !acceptPrivacy}>Registrieren</button>
+      )}
     </div>
   );
 }
@@ -1266,7 +1410,7 @@ background:'#fff'
                 fontSize: isMobile ? '14px' : 'inherit',
               }}
             >
-              Zusätzlicher Wunsch an die KI (optional)
+              Zusätzlicher Wunsch an VetMind (optional)
             </label>
 
             <textarea
@@ -1297,7 +1441,7 @@ background:'#fff'
                 lineHeight: 1.4,
               }}
             >
-              Hier kannst du einen zusätzlichen Arbeitsauftrag an die KI ergänzen. Dieser wird getrennt von den fallbezogenen Zusatzinformationen behandelt.
+              Hier kannst du einen zusätzlichen Arbeitsauftrag an VetMind ergänzen. Dieser wird getrennt von den fallbezogenen Zusatzinformationen behandelt.
 
 
             </div>
@@ -1334,7 +1478,7 @@ background:'#fff'
 
        const data = await res.json();
 
-// 🔥 NEU: Bildanalyse speichern (für KI!)
+// Bildanalyse speichern (fuer VetMind)
 setImageAnalysis(data.result);
 
 setResult(prev =>
@@ -1697,7 +1841,7 @@ In Zwischenablage kopiert
 )}
 <div style={{marginTop:"30px"}}>
 
-<h3 style={{color:brand.primary}}>KI-Diskussion zum Fall</h3>
+<h3 style={{color:brand.primary}}>VetMind-Diskussion zum Fall</h3>
 
 <div
 style={{
@@ -1713,12 +1857,12 @@ marginBottom:"12px"
 
 {chatMessages.map((m,i)=>(
 <div key={i} style={{marginBottom:"10px"}}>
-<b>{m.role==="user"?"Du":"KI"}:</b>
+<b>{m.role==="user"?"Du":"VetMind"}:</b>
 <div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
 </div>
 ))}
 
-{chatLoading && <div>KI denkt nach...</div>}
+{chatLoading && <div>VetMind denkt nach...</div>}
 
 </div>
 

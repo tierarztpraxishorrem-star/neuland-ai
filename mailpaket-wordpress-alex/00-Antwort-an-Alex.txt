@@ -1,0 +1,36 @@
+Betreff: Chatbot-Integration WordPress - Unterlagen und zwei Integrationswege
+
+Hallo Alex,
+
+vielen Dank fuer dein Feedback und die Einordnung.
+
+Perfekt, dass die Vercel-Angaben ausreichen. Den Punkt zu den fehlenden Verarbeitungsangaben koennen wir damit vorerst streichen.
+Als Grundlage fuer die Datenschutzangaben nutzen wir die Informationen unter:
+https://vercel.com/legal
+
+Wie gewuenscht, schicke ich dir fuer die WordPress-Integration zwei konkrete Wege zur Pruefung und Umsetzung mit:
+
+1) WordPress-Plugin/Widget-Integration (empfohlen)
+2) Script-Integration (Fallback)
+
+Zusatzlich enthalten:
+- Cookie-Consent-Einordnung fuer beide Wege
+- Technische Voraussetzungen
+- Konkrete Einbauschritte
+- Betriebs- und Wartungshinweise
+
+Kurze Einordnung zum Cookie-Consent:
+Der Chatbot ist consent-gesteuert umgesetzt. Vor Einwilligung bleibt die Funktion inaktiv (kein Script-Load, keine Chat-Requests, keine Insights-Verarbeitung). Erst nach aktiver Zustimmung wird der Chatbot initialisiert. Bei Widerruf erfolgt keine erneute Initialisierung.
+
+Anhaenge:
+- 01-WordPress-Integration-Plugin-Widget.txt
+- 02-WordPress-Integration-Script-Fallback.txt
+- 03-Cookie-Consent-Einordnung.txt
+- 04-Exakte-Empfehlung-und-Anforderungen.txt
+- 05-Sofort-Umsetzung-Alex-komplett.txt
+
+Wenn ihr einen temporaeren Plattformzugang braucht, richte ich euch diesen gerne ein.
+Auf Wunsch koennen wir auch einen kurzen Abstimmungstermin machen, damit wir den finalen Integrationsweg gemeinsam freigeben.
+
+Viele Gruesse
+Lennart
