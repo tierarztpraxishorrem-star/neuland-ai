@@ -19,9 +19,14 @@ export async function GET(req: Request) {
   const auth = await getUserPractice(req, { allowedRoles: ['owner', 'admin'] });
   if (!auth.ok) return auth.response;
 
-  const { practiceId, supabase } = auth.context;
+  const { practiceId } = auth.context;
 
-  const membershipsRes = await supabase
+  const service = getServiceSupabaseClient();
+  if (!service) {
+    return NextResponse.json({ error: 'Server-Konfiguration unvollstaendig.' }, { status: 500 });
+  }
+
+  const membershipsRes = await service
     .from('practice_memberships')
     .select('user_id, role')
     .eq('practice_id', practiceId)
@@ -35,11 +40,6 @@ export async function GET(req: Request) {
   const memberships = (membershipsRes.data || []) as MembershipRow[];
   if (memberships.length === 0) {
     return NextResponse.json({ users: [] as AdminUserRow[] });
-  }
-
-  const service = getServiceSupabaseClient();
-  if (!service) {
-    return NextResponse.json({ error: 'Server-Konfiguration unvollständig.' }, { status: 500 });
   }
 
   const usersById = new Map<string, { email: string | null }>();
