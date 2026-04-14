@@ -349,6 +349,23 @@ export default function RecordPage() {
     }
   };
 
+  const safeStorageGet = (key: string) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  const safeStorageSet = (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const goToDocumentation = async () => {
     let activeSegments = [...segments];
 
@@ -397,7 +414,7 @@ export default function RecordPage() {
       ].join('\n');
 
       const finalTranscript = combinedTranscript || fallbackTranscript;
-      const template = localStorage.getItem('selectedTemplate') || '';
+      const template = safeStorageGet('selectedTemplate') || '';
 
       const previewSegment = activeSegments[0] || null;
       let previewAudioUrl = '';
@@ -420,16 +437,16 @@ export default function RecordPage() {
         segment_count: activeSegments.length
       };
 
-      localStorage.setItem('consultation_result', finalTranscript);
-      localStorage.setItem('consultation_template', template);
-      localStorage.setItem(`case_${caseId}_autosave_recording_session`, JSON.stringify(recordingSession));
-      localStorage.setItem(`case_${caseId}_transcription_warnings`, JSON.stringify(failedSegments));
+      safeStorageSet('consultation_result', finalTranscript);
+      safeStorageSet('consultation_template', template);
+      safeStorageSet(`case_${caseId}_autosave_recording_session`, JSON.stringify(recordingSession));
+      safeStorageSet(`case_${caseId}_transcription_warnings`, JSON.stringify(failedSegments));
 
-      const existingContext = localStorage.getItem(`case_context_${caseId}`);
+      const existingContext = safeStorageGet(`case_context_${caseId}`);
       if (existingContext) {
         try {
           const parsed = JSON.parse(existingContext);
-          localStorage.setItem(
+          safeStorageSet(
             `case_context_${caseId}`,
             JSON.stringify({
               ...parsed,
@@ -450,8 +467,18 @@ export default function RecordPage() {
       router.push(`/konsultation/${caseId}/result`);
     } catch (error) {
       console.error(error);
-      alert('Fehler bei der Verarbeitung der Segmente.');
-      setStatus('Fehler bei der Verarbeitung');
+      const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+      const emergencyTranscript = [
+        'Hinweis: Die Verarbeitung der Segmente ist fehlgeschlagen.',
+        'Bitte die Audiosegmente sichern und in kleinere Teile aufteilen.',
+        '',
+        `Technischer Hinweis: ${message}`
+      ].join('\n');
+
+      safeStorageSet('consultation_result', emergencyTranscript);
+      safeStorageSet(`case_${caseId}_transcription_warnings`, JSON.stringify([message]));
+      setStatus('Fehler bei der Verarbeitung - wechsle zur Dokumentation');
+      router.push(`/konsultation/${caseId}/result`);
     } finally {
       setProcessing(false);
     }
