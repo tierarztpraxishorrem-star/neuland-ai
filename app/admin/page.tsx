@@ -77,6 +77,14 @@ type PracticeMembershipRow = {
   created_at: string | null;
 };
 
+type PracticeOption = {
+  id: string;
+  name: string;
+  slug: string | null;
+  role: string;
+  created_at: string | null;
+};
+
 type AdminUsersResponse = {
   users?: UserRow[];
   error?: string;
@@ -120,6 +128,7 @@ export default function AdminPage() {
   const [privacyLabel, setPrivacyLabel] = useState('Datenschutz akzeptieren (Pflicht)');
   const [productUpdatesLabel, setProductUpdatesLabel] = useState('Produkt-Updates per E-Mail erhalten (optional)');
   const [activePracticeId, setActivePracticeId] = useState<string | null>(null);
+  const [practiceOptions, setPracticeOptions] = useState<PracticeOption[]>([]);
   const [invitations, setInvitations] = useState<InvitationRow[]>([]);
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
   const [inviteExpiryDays, setInviteExpiryDays] = useState('14');
@@ -140,19 +149,60 @@ export default function AdminPage() {
       .order('created_at', { ascending: true });
 
     if (error || !data || data.length === 0) {
+      setPracticeOptions([]);
       setActivePracticeId(null);
       return null;
     }
 
+    const memberships = (data as PracticeMembershipRow[]).filter((entry) => Boolean(entry.practice_id));
+    if (memberships.length === 0) {
+      setPracticeOptions([]);
+      setActivePracticeId(null);
+      return null;
+    }
+
+    const practiceIds = memberships
+      .map((entry) => entry.practice_id)
+      .filter((value): value is string => Boolean(value));
+
+    const practicesRes = await supabase
+      .from('practices')
+      .select('id, name, slug')
+      .in('id', practiceIds);
+
+    const practicesById = new Map<string, { id: string; name: string | null; slug: string | null }>();
+    (practicesRes.data || []).forEach((practice) => {
+      practicesById.set(practice.id, {
+        id: practice.id,
+        name: practice.name || null,
+        slug: practice.slug || null,
+      });
+    });
+
     const rank: Record<string, number> = { owner: 0, admin: 1, member: 2 };
-    const selected = [...(data as PracticeMembershipRow[])].sort((a, b) => {
+    const options = memberships
+      .map((entry) => {
+        const practice = practicesById.get(entry.practice_id || '');
+        return {
+          id: entry.practice_id || '',
+          name: practice?.name || 'Unbenannte Praxis',
+          slug: practice?.slug || null,
+          role: entry.role || 'member',
+          created_at: entry.created_at,
+        } as PracticeOption;
+      })
+      .filter((entry) => Boolean(entry.id));
+
+    const sortedOptions = [...options].sort((a, b) => {
       const ra = rank[a.role || ''] ?? 99;
       const rb = rank[b.role || ''] ?? 99;
       if (ra !== rb) return ra - rb;
       return String(a.created_at || '').localeCompare(String(b.created_at || ''));
-    })[0];
+    });
 
-    const practiceId = selected?.practice_id || null;
+    setPracticeOptions(sortedOptions);
+
+    const practiceId = sortedOptions[0]?.id || null;
     setActivePracticeId(practiceId);
     return practiceId;
   };
@@ -510,7 +560,7 @@ export default function AdminPage() {
 
   // Load all users (if admin)
   useEffect(() => {
-    if (!user) return;
+    if (!user || !activePracticeId) return;
     const loadUsers = async () => {
       setUsersLoading(true);
       setUsersError(null);
@@ -531,6 +581,7 @@ export default function AdminPage() {
           method: 'GET',
           headers: {
             Authorization: `Bearer ${session.access_token}`,
+            'X-Practice-Id': activePracticeId,
           },
         });
 
@@ -556,7 +607,7 @@ export default function AdminPage() {
     };
 
     void loadUsers();
-  }, [user]);
+  }, [user, activePracticeId]);
 
   if (loading) {
     return <div style={{ padding: uiTokens.pagePadding }}>Lade...</div>;
@@ -580,6 +631,22 @@ export default function AdminPage() {
         <div style={{ marginTop: 6, fontSize: 14, color: uiTokens.textSecondary }}>
           Praxisverwaltung, Einladungen und Konfigurationen zentral verwalten.
         </div>
+        {practiceOptions.length > 0 ? (
+          <div style={{ marginTop: 12, maxWidth: 520 }}>
+            <label style={{ display: 'block', fontSize: 13, color: '#475569', marginBottom: 6 }}>Aktive Praxis</label>
+            <select
+              value={activePracticeId || ''}
+              onChange={(e) => setActivePracticeId(e.target.value || null)}
+              style={fieldStyle}
+            >
+              {practiceOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name} ({option.role})
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <a
           href="/admin/statistik"
           style={{

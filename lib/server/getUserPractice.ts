@@ -118,12 +118,19 @@ export async function getUserPractice(req: Request, options?: GetUserPracticeOpt
     };
   }
 
-  const selected = [...rows].sort((a, b) => {
-    const ra = rankRole(a.role);
-    const rb = rankRole(b.role);
-    if (ra !== rb) return ra - rb;
-    return String(a.created_at || '').localeCompare(String(b.created_at || ''));
-  })[0];
+  const requestedPracticeId =
+    req.headers.get('x-practice-id') ||
+    req.headers.get('X-Practice-Id') ||
+    null;
+
+  const selected = requestedPracticeId
+    ? rows.find((entry) => entry.practice_id === requestedPracticeId)
+    : [...rows].sort((a, b) => {
+        const ra = rankRole(a.role);
+        const rb = rankRole(b.role);
+        if (ra !== rb) return ra - rb;
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      })[0];
 
   if (!selected?.practice_id) {
     return {
