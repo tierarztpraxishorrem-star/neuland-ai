@@ -49,9 +49,21 @@ const resolveAccess = async (req: Request) => {
   }
 
   const userRes = await supabase.auth.getUser(token);
-  if (!userRes.data.user) {
+  const user = userRes.data.user;
+  if (!user) {
     return { error: NextResponse.json({ error: 'Ungültige Sitzung.' }, { status: 401 }) };
   }
+
+  const userMeta = (user.user_metadata || {}) as {
+    full_name?: string;
+    first_name?: string;
+    last_name?: string;
+  };
+  const metaFullName = String(userMeta.full_name || '').trim();
+  const metaFirstName = String(userMeta.first_name || '').trim();
+  const metaLastName = String(userMeta.last_name || '').trim();
+  const senderName =
+    metaFullName || [metaFirstName, metaLastName].filter(Boolean).join(' ') || user.email || 'Unbekannt';
 
   const membershipsRes = await supabase
     .from('practice_memberships')
@@ -75,7 +87,7 @@ const resolveAccess = async (req: Request) => {
     return { error: NextResponse.json({ error: 'Praxis-ID fehlt.' }, { status: 403 }) };
   }
 
-  return { practiceId };
+  return { practiceId, senderName };
 };
 
 export async function POST(req: Request) {
@@ -94,7 +106,7 @@ export async function POST(req: Request) {
   }
 
   const payload = {
-    text,
+    text: `Von ${access.senderName}: ${text}`,
     username: 'Neuland Kommunikation',
     icon_emoji: ':telephone_receiver:',
   };
@@ -115,5 +127,5 @@ export async function POST(req: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, practiceId: access.practiceId });
+  return NextResponse.json({ ok: true, practiceId: access.practiceId, senderName: access.senderName });
 }
