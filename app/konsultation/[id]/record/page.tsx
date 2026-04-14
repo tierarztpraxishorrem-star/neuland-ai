@@ -314,13 +314,20 @@ export default function RecordPage() {
     const formData = new FormData();
     const extension = segment.source === 'upload' ? 'upload' : 'webm';
     formData.append('file', segment.blob, `${segment.id}.${extension}`);
+    formData.append('mode', 'live');
 
     const res = await fetch('/api/transcribe', {
       method: 'POST',
       body: formData
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const errorText = typeof data?.error === 'string' ? data.error : 'Transkription fehlgeschlagen';
+      throw new Error(errorText);
+    }
+
     return (data?.text || '').trim();
   };
 
@@ -362,17 +369,34 @@ export default function RecordPage() {
 
     try {
       const transcripts: string[] = [];
+      const failedSegments: string[] = [];
 
       for (let i = 0; i < activeSegments.length; i++) {
         const segment = activeSegments[i];
         setStatus(`Transkribiere ${segment.label} (${i + 1}/${activeSegments.length}) ...`);
-        const text = await transcribeSegment(segment);
-        if (text) {
-          transcripts.push(text);
+        try {
+          const text = await transcribeSegment(segment);
+          if (text) {
+            transcripts.push(text);
+          } else {
+            failedSegments.push(`${segment.label}: kein Text erkannt`);
+          }
+        } catch (segmentError) {
+          const message = segmentError instanceof Error ? segmentError.message : 'Unbekannter Fehler';
+          failedSegments.push(`${segment.label}: ${message}`);
         }
       }
 
       const combinedTranscript = transcripts.join('\n\n').trim();
+      const fallbackTranscript = [
+        'Hinweis: Die automatische Transkription ist fehlgeschlagen.',
+        'Bitte Audiosegment(e) manuell pruefen oder in kleinere Teile aufteilen und erneut hochladen.',
+        '',
+        'Fehlerdetails:',
+        ...(failedSegments.length ? failedSegments.map((line) => `- ${line}`) : ['- Keine Details verfuegbar'])
+      ].join('\n');
+
+      const finalTranscript = combinedTranscript || fallbackTranscript;
       const template = localStorage.getItem('selectedTemplate') || '';
 
       const previewSegment = activeSegments[0] || null;
@@ -396,9 +420,10 @@ export default function RecordPage() {
         segment_count: activeSegments.length
       };
 
-      localStorage.setItem('consultation_result', combinedTranscript);
+      localStorage.setItem('consultation_result', finalTranscript);
       localStorage.setItem('consultation_template', template);
       localStorage.setItem(`case_${caseId}_autosave_recording_session`, JSON.stringify(recordingSession));
+      localStorage.setItem(`case_${caseId}_transcription_warnings`, JSON.stringify(failedSegments));
 
       const existingContext = localStorage.getItem(`case_context_${caseId}`);
       if (existingContext) {
@@ -414,6 +439,12 @@ export default function RecordPage() {
         } catch {
           // Ignore broken context payload and keep dedicated recording-session autosave key.
         }
+      }
+
+      if (failedSegments.length > 0) {
+        setStatus('Teilweise verarbeitet - siehe Hinweis in der Dokumentation');
+      } else {
+        setStatus('Verarbeitung abgeschlossen');
       }
 
       router.push(`/konsultation/${caseId}/result`);
