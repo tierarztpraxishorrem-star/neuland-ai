@@ -15,6 +15,11 @@ type AdminUserRow = {
   role: 'owner' | 'admin' | 'member';
 };
 
+type UpdateRoleBody = {
+  userId?: string;
+  role?: 'admin' | 'member';
+};
+
 export async function GET(req: Request) {
   const auth = await getUserPractice(req, { allowedRoles: ['owner', 'admin'] });
   if (!auth.ok) return auth.response;
@@ -70,4 +75,63 @@ export async function GET(req: Request) {
   result.sort((a, b) => a.email.localeCompare(b.email));
 
   return NextResponse.json({ users: result });
+}
+
+export async function PATCH(req: Request) {
+  const auth = await getUserPractice(req, { allowedRoles: ['owner', 'admin'] });
+  if (!auth.ok) return auth.response;
+
+  const { practiceId, userId: actorId } = auth.context;
+
+  const service = getServiceSupabaseClient();
+  if (!service) {
+    return NextResponse.json({ error: 'Server-Konfiguration unvollstaendig.' }, { status: 500 });
+  }
+
+  const body = (await req.json().catch(() => ({}))) as UpdateRoleBody;
+  const targetUserId = String(body.userId || '').trim();
+  const targetRole = body.role;
+
+  if (!targetUserId) {
+    return NextResponse.json({ error: 'Benutzer fehlt.' }, { status: 400 });
+  }
+
+  if (targetRole !== 'admin' && targetRole !== 'member') {
+    return NextResponse.json({ error: 'Ungueltige Rolle.' }, { status: 400 });
+  }
+
+  if (targetUserId === actorId) {
+    return NextResponse.json({ error: 'Eigene Rolle kann hier nicht geaendert werden.' }, { status: 400 });
+  }
+
+  const existing = await service
+    .from('practice_memberships')
+    .select('user_id, role')
+    .eq('practice_id', practiceId)
+    .eq('user_id', targetUserId)
+    .maybeSingle();
+
+  if (existing.error) {
+    return NextResponse.json({ error: 'Mitglied konnte nicht geladen werden.' }, { status: 500 });
+  }
+
+  if (!existing.data) {
+    return NextResponse.json({ error: 'Mitglied nicht gefunden.' }, { status: 404 });
+  }
+
+  if (existing.data.role === 'owner') {
+    return NextResponse.json({ error: 'Owner-Rolle kann nicht geaendert werden.' }, { status: 403 });
+  }
+
+  const updated = await service
+    .from('practice_memberships')
+    .update({ role: targetRole })
+    .eq('practice_id', practiceId)
+    .eq('user_id', targetUserId);
+
+  if (updated.error) {
+    return NextResponse.json({ error: 'Rolle konnte nicht geaendert werden.' }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, userId: targetUserId, role: targetRole });
 }

@@ -8,7 +8,7 @@ import type { User } from "@supabase/supabase-js";
 type UserRow = {
   id: string;
   email: string;
-  role?: string;
+  role?: 'owner' | 'admin' | 'member';
 };
 
 type PracticeSettingsRow = {
@@ -90,6 +90,13 @@ type AdminUsersResponse = {
   error?: string;
 };
 
+type AdminUserRoleUpdateResponse = {
+  ok?: boolean;
+  userId?: string;
+  role?: 'admin' | 'member';
+  error?: string;
+};
+
 const generateInviteCode = () => {
   const random = Math.random().toString(36).slice(2, 10).toUpperCase();
   return `PRAXIS-${random}`;
@@ -101,6 +108,9 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, 'admin' | 'member'>>({});
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
+  const [roleUpdateMessage, setRoleUpdateMessage] = useState<string | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
@@ -396,6 +406,58 @@ export default function AdminPage() {
     }
   };
 
+  const setRoleDraft = (targetUserId: string, role: 'admin' | 'member') => {
+    setRoleUpdateMessage(null);
+    setRoleDrafts((prev) => ({ ...prev, [targetUserId]: role }));
+  };
+
+  const updateUserRole = async (targetUserId: string) => {
+    if (!activePracticeId) return;
+    const nextRole = roleDrafts[targetUserId];
+    if (nextRole !== 'admin' && nextRole !== 'member') return;
+
+    setUpdatingRoleId(targetUserId);
+    setRoleUpdateMessage(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setRoleUpdateMessage('Nicht angemeldet.');
+        return;
+      }
+
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'X-Practice-Id': activePracticeId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: targetUserId, role: nextRole }),
+      });
+
+      const json = (await res.json().catch(() => ({}))) as AdminUserRoleUpdateResponse;
+      if (!res.ok) {
+        setRoleUpdateMessage(json.error || 'Rolle konnte nicht geaendert werden.');
+        return;
+      }
+
+      setUsers((prev) => prev.map((entry) => (
+        entry.id === targetUserId
+          ? { ...entry, role: nextRole }
+          : entry
+      )));
+      setRoleUpdateMessage('Rolle gespeichert.');
+    } catch {
+      setRoleUpdateMessage('Rolle konnte nicht geaendert werden.');
+    } finally {
+      setUpdatingRoleId(null);
+    }
+  };
+
   useEffect(() => {
     if (!user || !activePracticeId) return;
 
@@ -595,6 +657,13 @@ export default function AdminPage() {
 
         const rows = Array.isArray(json.users) ? json.users : [];
         setUsers(rows);
+        const defaults: Record<string, 'admin' | 'member'> = {};
+        rows.forEach((row) => {
+          if (row.role === 'admin' || row.role === 'member') {
+            defaults[row.id] = row.role;
+          }
+        });
+        setRoleDrafts(defaults);
         if (rows.length === 0) {
           setUsersError('Noch keine Benutzer in dieser Praxis.');
         }
@@ -1072,6 +1141,9 @@ export default function AdminPage() {
       {/* Benutzerverwaltung */}
       <section style={{ marginBottom: 40 }}>
         <h2 style={{ fontSize: 20, marginBottom: 12 }}>Benutzerverwaltung 👥</h2>
+        {roleUpdateMessage ? (
+          <div style={{ marginBottom: 10, fontSize: 13, color: '#0f766e' }}>{roleUpdateMessage}</div>
+        ) : null}
         {usersLoading ? (
           <div>Lade Benutzer...</div>
         ) : usersError ? (
@@ -1089,11 +1161,37 @@ export default function AdminPage() {
               {users.map((u) => (
                 <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                   <td style={{ padding: 12 }}>{u.email}</td>
-                  <td style={{ padding: 12 }}>{u.role}</td>
+                  <td style={{ padding: 12 }}>{u.role || '-'}</td>
                   <td style={{ padding: 12 }}>
-                    <button style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "#e11d48", color: "#fff", cursor: "pointer" }} disabled>
-                      Löschen
-                    </button>
+                    {u.role === 'owner' ? (
+                      <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }}>Owner ist fix</span>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <select
+                          value={roleDrafts[u.id] || (u.role === 'admin' ? 'admin' : 'member')}
+                          onChange={(e) => setRoleDraft(u.id, e.target.value as 'admin' | 'member')}
+                          style={{ ...fieldStyle, minWidth: 140, padding: '6px 10px' }}
+                        >
+                          <option value="member">member</option>
+                          <option value="admin">admin</option>
+                        </select>
+                        <button
+                          onClick={() => updateUserRole(u.id)}
+                          disabled={updatingRoleId === u.id || !activePracticeId}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            border: 'none',
+                            background: '#0F6B74',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {updatingRoleId === u.id ? 'Speichere...' : 'Rolle speichern'}
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
