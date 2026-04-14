@@ -25,6 +25,17 @@ type HrStartResponse = {
   error?: string;
 };
 
+type MotivationResponse = {
+  message?: string;
+  error?: string;
+};
+
+const FALLBACK_MOTIVATION_MESSAGES = [
+  'Ein ruhiger Start bringt Struktur in den ganzen Tag.',
+  'Bleib bei einem klaren Ablauf, dann bleibt auch im Stress der Fokus.',
+  'Heute zaehlt Schritt fuer Schritt sauber zu arbeiten.',
+];
+
 const getDaytimeGreeting = () => {
   const hour = new Date().getHours();
   if (hour >= 6 && hour < 11) return 'Guten Morgen 👋';
@@ -60,6 +71,7 @@ export default function Home() {
   const [showHrStartPrompt, setShowHrStartPrompt] = useState(false);
   const [startingHr, setStartingHr] = useState(false);
   const [hrStartHint, setHrStartHint] = useState<string | null>(null);
+  const [motivationMessage, setMotivationMessage] = useState<string>('');
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -304,6 +316,32 @@ export default function Home() {
 
     void loadHrPrompt();
   }, [user, hasPracticeMembership]);
+
+  useEffect(() => {
+    const loadMotivation = async () => {
+      if (!showHrStartPrompt) return;
+
+      try {
+        const res = await fetch('/api/motivation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context: 'start' }),
+        });
+
+        const data = (await res.json().catch(() => ({}))) as MotivationResponse;
+        if (!res.ok || !data.message) {
+          throw new Error(data.error || 'fallback');
+        }
+
+        setMotivationMessage(data.message);
+      } catch {
+        const pick = FALLBACK_MOTIVATION_MESSAGES[Math.floor(Math.random() * FALLBACK_MOTIVATION_MESSAGES.length)];
+        setMotivationMessage(pick);
+      }
+    };
+
+    void loadMotivation();
+  }, [showHrStartPrompt]);
 
   const startWorkingDay = async () => {
     setStartingHr(true);
@@ -702,6 +740,9 @@ export default function Home() {
             <div style={{ marginTop: 4, fontSize: 13, color: '#166534' }}>
               Ein Klick reicht, dann startet deine Zeiterfassung.
             </div>
+            {motivationMessage ? (
+              <div style={{ marginTop: 6, fontSize: 13, color: '#14532d' }}>{motivationMessage}</div>
+            ) : null}
           </div>
           <button
             onClick={startWorkingDay}
