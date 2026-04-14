@@ -11,6 +11,13 @@ import DiamondInterpretation from './DiamondInterpretation';
 type PersistedDiamondProfile = {
   answers_json: DiamondAnswerMap | null;
   completed: boolean | null;
+  result_json: {
+    dominant?: { cluster: string; label: string; percent: number } | null;
+    topThree?: Array<{ cluster: string; label: string; percent: number }>;
+    summaryText?: string;
+  } | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 const PAGE_SIZE = 5;
@@ -52,8 +59,10 @@ export default function DiamondQuiz() {
 
         const { data, error } = await supabase
           .from('personal_diamond_profiles')
-          .select('answers_json, completed')
+          .select('answers_json, completed, result_json, created_at, updated_at')
           .eq('user_id', authData.user.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
 
         if (error) {
@@ -63,6 +72,14 @@ export default function DiamondQuiz() {
         const profile = data as PersistedDiamondProfile | null;
         if (profile?.answers_json && typeof profile.answers_json === 'object') {
           setAnswers(profile.answers_json);
+        }
+
+        if (profile?.result_json && typeof profile.result_json === 'object') {
+          setStatusText((prev) => {
+            if (prev) return prev;
+            const summary = profile.result_json?.summaryText;
+            return summary ? `Letztes Ergebnis geladen: ${summary}` : 'Gespeichertes Ergebnis geladen.';
+          });
         }
 
         if (profile?.completed) {
@@ -107,11 +124,25 @@ export default function DiamondQuiz() {
         label: entry.label,
         percent: entry.percent,
       }));
+      const resultJson = {
+        dominant: result.dominant
+          ? {
+              cluster: result.dominant.cluster,
+              label: result.dominant.label,
+              percent: result.dominant.percent,
+            }
+          : null,
+        topThree,
+        summaryText: result.summaryText,
+        completionPercent: result.completionPercent,
+        totalAnswered: result.totalAnswered,
+      };
 
       const { error } = await supabase.from('personal_diamond_profiles').upsert(
         {
           user_id: authData.user.id,
           answers_json: answers,
+          result_json: resultJson,
           scores_json: toPersistedScores(result.scores),
           dominant_cluster: result.dominant?.cluster || null,
           top_values_json: topThree,

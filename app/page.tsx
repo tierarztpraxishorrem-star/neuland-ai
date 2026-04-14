@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import {
   DEFAULT_REGISTRATION_CONFIG,
@@ -16,9 +17,11 @@ export default function Home() {
   const router = useRouter();
   const diamondEnabled = isPersonalDiamondEnabled();
 
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [checkingMembership, setCheckingMembership] = useState(false);
+  const [hasPracticeMembership, setHasPracticeMembership] = useState(false);
+  const [activePracticeName, setActivePracticeName] = useState<string | null>(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,6 +35,7 @@ export default function Home() {
 
   const passwordRules = evaluatePasswordRules(password, registrationConfig);
   const passwordStrong = isPasswordValid(passwordRules, registrationConfig);
+  const canRegister = passwordStrong && acceptTerms && acceptPrivacy;
 
   // 🎨 STYLES
   const inputStyle = {
@@ -112,7 +116,7 @@ export default function Home() {
       return;
     }
 
-    if ((registrationConfig.requireTerms && !acceptTerms) || (registrationConfig.requirePrivacy && !acceptPrivacy)) {
+    if (!acceptTerms || !acceptPrivacy) {
       alert('Bitte AGB und Datenschutz akzeptieren.');
       return;
     }
@@ -202,30 +206,38 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const ensureMembership = async () => {
-      if (!user) return;
+    const loadMembership = async () => {
+      if (!user) {
+        setHasPracticeMembership(false);
+        setActivePracticeName(null);
+        return;
+      }
 
       setCheckingMembership(true);
       try {
         const { data, error } = await supabase
           .from('practice_memberships')
-          .select('id')
+          .select('id, practice:practices(name)')
+          .order('created_at', { ascending: true })
           .limit(1);
 
         if (error) {
+          setHasPracticeMembership(false);
+          setActivePracticeName(null);
           return;
         }
 
-        if (!data || data.length === 0) {
-          router.push('/onboarding');
-        }
+        const row = data?.[0] as { id: string; practice?: Array<{ name: string }> | null } | undefined;
+        const practiceName = row?.practice?.[0]?.name || null;
+        setHasPracticeMembership(Boolean(row?.id));
+        setActivePracticeName(practiceName);
       } finally {
         setCheckingMembership(false);
       }
     };
 
-    ensureMembership();
-  }, [router, user]);
+    loadMembership();
+  }, [user]);
 
   // ⏳ LOADING
   if (loadingAuth || checkingMembership) {
@@ -263,6 +275,11 @@ export default function Home() {
             </h1>
             <p style={{ color: "#6b7280", marginTop: "6px" }}>
               {authMode === 'login' ? 'Login zur Praxisplattform' : registrationConfig.registrationSubtitle}
+            </p>
+            <p style={{ color: '#6b7280', marginTop: '10px', marginBottom: 0, fontSize: 13 }}>
+              <Link href='/was-ist-neuland' style={{ color: '#0F6B74', textDecoration: 'none', fontWeight: 600 }}>
+                Was ist Neuland AI?
+              </Link>
             </p>
           </div>
 
@@ -364,27 +381,33 @@ export default function Home() {
                 )}
               </div>
 
-              {registrationConfig.requireTerms && (
-                <label style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 13, color: '#475569' }}>
-                  <input
-                    type="checkbox"
-                    checked={acceptTerms}
-                    onChange={(e) => setAcceptTerms(e.target.checked)}
-                  />
-                  {registrationConfig.termsLabel}
-                </label>
-              )}
+              <label style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 13, color: '#475569' }}>
+                <input
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                />
+                <span>
+                  Ich akzeptiere die{' '}
+                  <Link href='/legal/agb' style={{ color: '#0F6B74', fontWeight: 600 }}>
+                    AGB
+                  </Link>
+                </span>
+              </label>
 
-              {registrationConfig.requirePrivacy && (
-                <label style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 13, color: '#475569' }}>
-                  <input
-                    type="checkbox"
-                    checked={acceptPrivacy}
-                    onChange={(e) => setAcceptPrivacy(e.target.checked)}
-                  />
-                  {registrationConfig.privacyLabel}
-                </label>
-              )}
+              <label style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 13, color: '#475569' }}>
+                <input
+                  type="checkbox"
+                  checked={acceptPrivacy}
+                  onChange={(e) => setAcceptPrivacy(e.target.checked)}
+                />
+                <span>
+                  Ich akzeptiere die{' '}
+                  <Link href='/legal/datenschutz' style={{ color: '#0F6B74', fontWeight: 600 }}>
+                    Datenschutzerklärung
+                  </Link>
+                </span>
+              </label>
 
               {registrationConfig.allowProductUpdates && (
                 <label style={{ display: 'flex', gap: 8, marginBottom: 12, fontSize: 13, color: '#475569' }}>
@@ -408,14 +431,11 @@ export default function Home() {
             ) : (
               <button
                 onClick={handleRegister}
+                disabled={!canRegister}
                 style={{
                   ...primaryButton,
-                  opacity:
-                    passwordStrong
-                    && (!registrationConfig.requireTerms || acceptTerms)
-                    && (!registrationConfig.requirePrivacy || acceptPrivacy)
-                      ? 1
-                      : 0.7,
+                  opacity: canRegister ? 1 : 0.7,
+                  cursor: canRegister ? 'pointer' : 'not-allowed',
                 }}
               >
                 Registrieren
@@ -423,6 +443,53 @@ export default function Home() {
             )}
           </div>
         </div>
+      </main>
+    );
+  }
+
+  if (!hasPracticeMembership) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(180deg, #f4f7f8 0%, #eef3f4 100%)',
+          padding: '40px',
+          fontFamily: 'Arial, sans-serif',
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        <section
+          style={{
+            width: 'min(760px, 100%)',
+            border: '1px solid #dbe5e6',
+            borderRadius: '16px',
+            background: '#fff',
+            padding: '24px',
+            display: 'grid',
+            gap: '12px',
+          }}
+        >
+          <h1 style={{ margin: 0, color: '#0f172a' }}>Du bist noch keiner Praxis zugeordnet</h1>
+          <p style={{ margin: 0, color: '#64748b', lineHeight: 1.5 }}>
+            Bitte wähle oder erstelle eine Praxis, damit du mit Fällen, VetMind und HR arbeiten kannst.
+          </p>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Link href='/onboarding?mode=search' style={{ textDecoration: 'none' }}>
+              <button style={{ ...secondaryButton, minWidth: 170 }}>Praxis suchen</button>
+            </Link>
+            <Link href='/onboarding?mode=create' style={{ textDecoration: 'none' }}>
+              <button style={{ ...primaryButton, minWidth: 170 }}>Praxis erstellen</button>
+            </Link>
+          </div>
+
+          <div style={{ fontSize: 13, color: '#64748b' }}>
+            <Link href='/was-ist-neuland' style={{ color: '#0F6B74', fontWeight: 600, textDecoration: 'none' }}>
+              Was ist Neuland AI?
+            </Link>
+          </div>
+        </section>
       </main>
     );
   }
@@ -490,6 +557,9 @@ export default function Home() {
           </h1>
           <div style={{ color: "#6b7280", fontSize: "14px" }}>
             Wählen Sie, womit Sie arbeiten möchten
+          </div>
+          <div style={{ color: '#0f6b74', fontSize: '13px', marginTop: 6, fontWeight: 600 }}>
+            Du arbeitest aktuell in: {activePracticeName || 'deiner Praxis'}
           </div>
         </div>
 
@@ -598,33 +668,3 @@ export default function Home() {
     </main>
   );
 }
-
-const inputStyle = {
-  width: "100%",
-  padding: "12px",
-  marginBottom: "12px",
-  borderRadius: "10px",
-  border: "1px solid #E5E7EB",
-  fontSize: "14px"
-};
-
-const primaryButton = {
-  flex: 1,
-  padding: "12px",
-  borderRadius: "10px",
-  border: "none",
-  background: "#0F6B74",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: "pointer"
-};
-
-const secondaryButton = {
-  flex: 1,
-  padding: "12px",
-  borderRadius: "10px",
-  border: "1px solid #E5E7EB",
-  background: "#fff",
-  fontWeight: 600,
-  cursor: "pointer"
-};

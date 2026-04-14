@@ -27,6 +27,12 @@ type PracticeSearchResult = {
   lon: string;
 };
 
+type PracticeDirectoryResult = {
+  id: string;
+  name: string;
+  slug: string | null;
+};
+
 const FREE_MAIL_DOMAINS = new Set([
   'gmail.com',
   'googlemail.com',
@@ -68,6 +74,12 @@ export default function OnboardingPage() {
   const [searchingPlaces, setSearchingPlaces] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<PracticeSearchResult | null>(null);
   const [inviteCode, setInviteCode] = useState('');
+  const [practiceDirectoryQuery, setPracticeDirectoryQuery] = useState('');
+  const [practiceDirectoryResults, setPracticeDirectoryResults] = useState<PracticeDirectoryResult[]>([]);
+  const [searchingPractices, setSearchingPractices] = useState(false);
+  const [selectedPractice, setSelectedPractice] = useState<PracticeDirectoryResult | null>(null);
+  const [requestingJoin, setRequestingJoin] = useState(false);
+  const [joinMessage, setJoinMessage] = useState<string | null>(null);
 
   const hasMembership = memberships.length > 0;
 
@@ -110,6 +122,22 @@ export default function OnboardingPage() {
 
     setMemberships(mapped);
     setLoading(false);
+  };
+
+  const fetchWithAuth = async (path: string, init?: RequestInit) => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const headers = new Headers(init?.headers);
+    if (session?.access_token) {
+      headers.set('Authorization', `Bearer ${session.access_token}`);
+    }
+
+    return fetch(path, {
+      ...init,
+      headers,
+    });
   };
 
   useEffect(() => {
@@ -267,6 +295,75 @@ export default function OnboardingPage() {
     }
   };
 
+  const searchExistingPractices = async () => {
+    setSearchingPractices(true);
+    setJoinMessage(null);
+
+    try {
+      const query = practiceDirectoryQuery.trim();
+      const res = await fetchWithAuth(`/api/practices/search?q=${encodeURIComponent(query)}`);
+      const json = (await res.json().catch(() => ({}))) as {
+        results?: PracticeDirectoryResult[];
+        error?: string;
+      };
+
+      if (!res.ok) {
+        setPracticeDirectoryResults([]);
+        setJoinMessage(json.error || 'Praxisliste konnte nicht geladen werden.');
+        return;
+      }
+
+      const results = Array.isArray(json.results) ? json.results : [];
+      setPracticeDirectoryResults(results);
+
+      if (results.length === 0) {
+        setJoinMessage('Praxis nicht gefunden. Bitte wähle oder erstelle eine Praxis.');
+      }
+    } catch {
+      setPracticeDirectoryResults([]);
+      setJoinMessage('Praxisliste konnte nicht geladen werden.');
+    } finally {
+      setSearchingPractices(false);
+    }
+  };
+
+  const requestPracticeJoin = async () => {
+    if (!selectedPractice) {
+      setJoinMessage('Bitte wähle oder erstelle eine Praxis.');
+      return;
+    }
+
+    setRequestingJoin(true);
+    setJoinMessage(null);
+
+    try {
+      const res = await fetchWithAuth('/api/practices/request-join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceId: selectedPractice.id }),
+      });
+
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string };
+      if (!res.ok) {
+        setJoinMessage(json.error || 'Beitrittsanfrage konnte nicht gesendet werden.');
+        return;
+      }
+
+      setJoinMessage(json.message || 'Beitrittsanfrage wurde gesendet.');
+    } catch {
+      setJoinMessage('Beitrittsanfrage konnte nicht gesendet werden.');
+    } finally {
+      setRequestingJoin(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!loading && !hasMembership) {
+      void searchExistingPractices();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, hasMembership]);
+
   if (loading) {
     return <main style={{ padding: 32 }}>Lade Onboarding...</main>;
   }
@@ -329,6 +426,104 @@ export default function OnboardingPage() {
         ) : (
           <>
             <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>Praxis suchen</h2>
+              <p style={{ margin: 0, color: '#64748b', fontSize: 13 }}>
+                Suche ist nicht case-sensitiv und findet auch Teilbegriffe (z. B. TZN).
+              </p>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={practiceDirectoryQuery}
+                  onChange={(e) => setPracticeDirectoryQuery(e.target.value)}
+                  placeholder='Praxisname eingeben'
+                  style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14, flex: 1 }}
+                />
+                <button
+                  onClick={searchExistingPractices}
+                  disabled={searchingPractices}
+                  style={{
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 10,
+                    background: '#fff',
+                    padding: '10px 12px',
+                    fontWeight: 600,
+                    cursor: searchingPractices ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {searchingPractices ? 'Suche...' : 'Suchen'}
+                </button>
+              </div>
+
+              {practiceDirectoryResults.length > 0 ? (
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, maxHeight: 220, overflow: 'auto' }}>
+                  {practiceDirectoryResults.map((practice) => (
+                    <button
+                      key={practice.id}
+                      onClick={() => setSelectedPractice(practice)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        border: 'none',
+                        borderBottom: '1px solid #f1f5f9',
+                        background: selectedPractice?.id === practice.id ? '#eff6ff' : '#fff',
+                        padding: '10px 12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{practice.name}</div>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>{practice.slug || 'ohne Kürzel'}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {joinMessage ? (
+                <div style={{ border: '1px solid #fcd34d', borderRadius: 10, background: '#fffbeb', color: '#92400e', padding: '10px 12px', fontSize: 13 }}>
+                  {joinMessage}
+                </div>
+              ) : null}
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  onClick={requestPracticeJoin}
+                  disabled={requestingJoin || !selectedPractice}
+                  style={{
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 10,
+                    background: '#fff',
+                    color: '#0f172a',
+                    padding: '10px 14px',
+                    fontWeight: 600,
+                    cursor: requestingJoin || !selectedPractice ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {requestingJoin ? 'Sende...' : 'Beitrittsanfrage senden'}
+                </button>
+
+                {practiceDirectoryResults.length === 0 ? (
+                  <button
+                    onClick={() => {
+                      const el = document.getElementById('create-practice');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    style={{
+                      border: 'none',
+                      borderRadius: 10,
+                      background: '#0f6b74',
+                      color: '#fff',
+                      padding: '10px 14px',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Neue Praxis anlegen
+                  </button>
+                ) : null}
+              </div>
+            </section>
+
+            <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
+              <div id='create-practice' />
               <h2 style={{ margin: 0, fontSize: 18 }}>Neue Praxis erstellen</h2>
 
               <div style={{ display: 'grid', gap: 8 }}>
