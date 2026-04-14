@@ -12,6 +12,41 @@ import {
   type RegistrationConfig,
 } from '../lib/registrationConfig';
 import { isPersonalDiamondEnabled } from '../lib/features';
+import { showToast } from '../lib/toast';
+
+type DebugSystemStateResponse = {
+  work_sessions?: Array<{ ended_at: string | null }>;
+  error?: string;
+};
+
+type HrStartResponse = {
+  ok?: boolean;
+  session?: { id: string; started_at: string; ended_at: string | null };
+  error?: string;
+};
+
+const getDaytimeGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour >= 6 && hour < 11) return 'Guten Morgen 👋';
+  if (hour >= 11 && hour < 17) return 'Guten Tag 👋';
+  return 'Arbeitest du noch oder hast du vergessen auszustempeln? 😉';
+};
+
+async function fetchWithAuth(path: string, init?: RequestInit) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers = new Headers(init?.headers);
+  if (session?.access_token) {
+    headers.set('Authorization', `Bearer ${session.access_token}`);
+  }
+
+  return fetch(path, {
+    ...init,
+    headers,
+  });
+}
 
 export default function Home() {
   const router = useRouter();
@@ -22,6 +57,9 @@ export default function Home() {
   const [checkingMembership, setCheckingMembership] = useState(false);
   const [hasPracticeMembership, setHasPracticeMembership] = useState(false);
   const [activePracticeName, setActivePracticeName] = useState<string | null>(null);
+  const [showHrStartPrompt, setShowHrStartPrompt] = useState(false);
+  const [startingHr, setStartingHr] = useState(false);
+  const [hrStartHint, setHrStartHint] = useState<string | null>(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -238,6 +276,61 @@ export default function Home() {
 
     loadMembership();
   }, [user]);
+
+  useEffect(() => {
+    const loadHrPrompt = async () => {
+      if (!user || !hasPracticeMembership) {
+        setShowHrStartPrompt(false);
+        return;
+      }
+
+      try {
+        const res = await fetchWithAuth('/api/debug/system-state', { method: 'GET' });
+        const data = (await res.json().catch(() => ({}))) as DebugSystemStateResponse;
+        if (!res.ok) {
+          setShowHrStartPrompt(false);
+          return;
+        }
+
+        const hasOpenSession = Array.isArray(data.work_sessions)
+          ? data.work_sessions.some((entry) => entry?.ended_at === null)
+          : false;
+
+        setShowHrStartPrompt(!hasOpenSession);
+      } catch {
+        setShowHrStartPrompt(false);
+      }
+    };
+
+    void loadHrPrompt();
+  }, [user, hasPracticeMembership]);
+
+  const startWorkingDay = async () => {
+    setStartingHr(true);
+    setHrStartHint(null);
+    try {
+      const res = await fetchWithAuth('/api/hr/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'dashboard_prompt' }),
+      });
+      const data = (await res.json().catch(() => ({}))) as HrStartResponse;
+
+      if (!res.ok || !data.session) {
+        throw new Error(data.error || 'Arbeitszeit konnte nicht gestartet werden.');
+      }
+
+      setShowHrStartPrompt(false);
+      setHrStartHint('Arbeitszeit laeuft jetzt');
+      showToast({ message: 'Arbeitszeit gestartet', type: 'success' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Fehler beim Starten';
+      setHrStartHint(message);
+      showToast({ message: 'Fehler beim Stempeln', type: 'error' });
+    } finally {
+      setStartingHr(false);
+    }
+  };
 
   // ⏳ LOADING
   if (loadingAuth || checkingMembership) {
@@ -586,6 +679,52 @@ export default function Home() {
           Logout
         </button>
       </div>
+
+      {showHrStartPrompt ? (
+        <section
+          style={{
+            marginBottom: '24px',
+            border: '1px solid #bbf7d0',
+            background: 'linear-gradient(180deg, #f0fdf4 0%, #ecfdf5 100%)',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#166534' }}>
+              {getDaytimeGreeting()} Möchtest du deinen Arbeitstag starten?
+            </div>
+            <div style={{ marginTop: 4, fontSize: 13, color: '#166534' }}>
+              Ein Klick reicht, dann startet deine Zeiterfassung.
+            </div>
+          </div>
+          <button
+            onClick={startWorkingDay}
+            disabled={startingHr}
+            style={{
+              padding: '10px 14px',
+              borderRadius: '10px',
+              border: 'none',
+              background: '#166534',
+              color: '#fff',
+              fontWeight: 600,
+              cursor: 'pointer',
+              minWidth: 180,
+            }}
+          >
+            {startingHr ? 'Starte...' : 'Arbeitszeit starten'}
+          </button>
+        </section>
+      ) : null}
+
+      {hrStartHint ? (
+        <div style={{ marginBottom: '14px', fontSize: 13, color: '#166534' }}>{hrStartHint}</div>
+      ) : null}
 
       {/* CARDS */}
       <div

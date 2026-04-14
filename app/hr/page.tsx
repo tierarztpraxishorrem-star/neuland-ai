@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { showToast } from "../../lib/toast";
 
 type Session = {
   id: string;
@@ -201,6 +202,15 @@ export default function HrPage() {
     return formatElapsedClock(currentSessionStart, now);
   }, [isRunning, currentSessionStart, now]);
 
+  const runningDurationMs = useMemo(() => {
+    if (!isRunning || !currentSessionStart) return 0;
+    const start = new Date(currentSessionStart).getTime();
+    if (Number.isNaN(start)) return 0;
+    return Math.max(0, now - start);
+  }, [isRunning, currentSessionStart, now]);
+
+  const showStopReminder = isRunning && runningDurationMs >= 8 * 60 * 60 * 1000;
+
   const todayMs = useMemo(() => {
     const nowDate = new Date(now);
 
@@ -258,8 +268,10 @@ export default function HrPage() {
       if (data.warning) {
         setWarning(data.warning);
       }
+      showToast({ message: "Arbeitszeit gestartet", type: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler beim Start.");
+      showToast({ message: "Fehler beim Stempeln", type: "error" });
     } finally {
       setActionState(null);
     }
@@ -293,12 +305,27 @@ export default function HrPage() {
       if (data.warning) {
         setWarning(data.warning);
       }
+      showToast({ message: "Arbeitszeit beendet", type: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler beim Stop.");
+      showToast({ message: "Fehler beim Stempeln", type: "error" });
     } finally {
       setActionState(null);
     }
   }
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isRunning) return;
+      event.preventDefault();
+      event.returnValue = "Deine Arbeitszeit laeuft noch. Wirklich verlassen?";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isRunning]);
 
   return (
     <main className="mx-auto w-full max-w-[800px] px-4 py-10">
@@ -315,6 +342,22 @@ export default function HrPage() {
           <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
             <p className="text-sm text-green-700">Aktiv seit</p>
             <p className="text-2xl font-semibold tracking-wide text-green-700">{runningClock}</p>
+          </div>
+        ) : null}
+
+        {showStopReminder ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+            <p className="text-sm font-medium text-amber-800">
+              Du arbeitest seit ueber 8 Stunden - moechtest du deinen Tag beenden?
+            </p>
+            <button
+              type="button"
+              onClick={handleStop}
+              disabled={loading || actionState !== null || !isRunning}
+              className="mt-2 inline-flex min-h-10 items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {actionState === "stop" ? "Stoppt..." : "Arbeitszeit stoppen"}
+            </button>
           </div>
         ) : null}
 

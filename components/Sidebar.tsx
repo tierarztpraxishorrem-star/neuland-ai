@@ -34,6 +34,41 @@ export default function Sidebar() {
   const expandedWidth = 260;
   const collapsedWidth = 86;
   const diamondEnabled = isPersonalDiamondEnabled();
+  const [hrRunning, setHrRunning] = useState(false);
+
+  const loadHrStatus = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setHrRunning(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/debug/system-state", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const data = (await res.json().catch(() => ({}))) as { work_sessions?: Array<{ ended_at: string | null }> };
+      if (!res.ok) {
+        setHrRunning(false);
+        return;
+      }
+
+      const hasOpenSession = Array.isArray(data.work_sessions)
+        ? data.work_sessions.some((entry) => entry?.ended_at === null)
+        : false;
+
+      setHrRunning(hasOpenSession);
+    } catch {
+      setHrRunning(false);
+    }
+  };
 
   useEffect(() => {
     const getUser = async () => {
@@ -41,6 +76,28 @@ export default function Sidebar() {
       setUserEmail(data.user?.email || "");
     };
     getUser();
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadHrStatus();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void loadHrStatus();
+    };
+
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   const toggleCollapsed = () => {
@@ -140,6 +197,31 @@ export default function Sidebar() {
               <div style={{ fontSize: "12px", color: "#94a3b8" }}>
                 Tierärztezentrum
               </div>
+              <Link
+                href="/hr"
+                style={{
+                  marginTop: "8px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "12px",
+                  color: "#cbd5e1",
+                  textDecoration: "none",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(148, 163, 184, 0.35)",
+                  padding: "4px 10px",
+                }}
+              >
+                <span
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "999px",
+                    background: hrRunning ? "#22c55e" : "#94a3b8",
+                  }}
+                />
+                {hrRunning ? "Arbeitszeit läuft" : "Nicht aktiv"}
+              </Link>
             </div>
           )}
 

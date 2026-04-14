@@ -1,15 +1,17 @@
 'use client';
 
 import { useEffect, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import Sidebar from "./Sidebar";
+import ToastHost from "./ToastHost";
 
 export default function SidebarWrapper({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -65,6 +67,7 @@ export default function SidebarWrapper({
   return (
     <>
       {user && <Sidebar />}
+      <ToastHost />
       <main
         style={{
           display: "block",

@@ -175,11 +175,13 @@ export default function HrAdminPage() {
     return new Set(
       employees
         .filter((emp) => {
-          const hasTodayTime = sessions.some((session) => {
+          const hasSessionStartedToday = sessions.some((session) => {
             if (session.employee_id !== emp.id) return false;
-            return getClampedDurationMs(session.started_at, session.ended_at, dayRange.start, dayRange.end) > 0;
+            const started = new Date(session.started_at).getTime();
+            if (Number.isNaN(started)) return false;
+            return started >= dayRange.start.getTime() && started <= dayRange.end.getTime();
           });
-          return !hasTodayTime;
+          return !hasSessionStartedToday;
         })
         .map((emp) => emp.id),
     );
@@ -195,13 +197,12 @@ export default function HrAdminPage() {
         .filter((session) => {
           const startedMs = new Date(session.started_at).getTime();
           if (Number.isNaN(startedMs)) return false;
-          const isFromBeforeToday = startedMs < dayRange.start.getTime();
           const isOpenTooLong = nowMs - startedMs > maxOpenMs;
-          return isFromBeforeToday || isOpenTooLong;
+          return isOpenTooLong;
         })
         .map((session) => session.employee_id),
     );
-  }, [sessions, dayRange, now]);
+  }, [sessions, now]);
 
   const reminderCount = missingStartEmployees.size + missingStopEmployees.size;
 
@@ -260,10 +261,10 @@ export default function HrAdminPage() {
                 <p className="font-medium">Mitarbeiter {emp.id.slice(0, 6)}</p>
                 <p className="text-sm text-gray-500">Heute: {formatHours(today)}</p>
                 {forgotStop ? (
-                  <p className="mt-1 text-xs text-amber-700">Hinweis: moeglicherweise vergessen auszustempeln.</p>
+                  <p className="mt-1 text-xs text-amber-700">Hat wahrscheinlich vergessen auszustempeln.</p>
                 ) : null}
                 {!forgotStop && missingStart ? (
-                  <p className="mt-1 text-xs text-amber-700">Hinweis: heute noch keine Stempelung erfasst.</p>
+                  <p className="mt-1 text-xs text-amber-700">Hat heute noch nicht gestempelt.</p>
                 ) : null}
               </div>
 
