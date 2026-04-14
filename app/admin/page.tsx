@@ -77,16 +77,9 @@ type PracticeMembershipRow = {
   created_at: string | null;
 };
 
-type ListedAuthUser = {
-  id: string;
-  email?: string | null;
-  role?: string | null;
-};
-
-type ListUsersResponse = {
-  data?: {
-    users?: ListedAuthUser[];
-  };
+type AdminUsersResponse = {
+  users?: UserRow[];
+  error?: string;
 };
 
 const generateInviteCode = () => {
@@ -518,29 +511,51 @@ export default function AdminPage() {
   // Load all users (if admin)
   useEffect(() => {
     if (!user) return;
-    setUsersLoading(true);
-    setUsersError(null);
-    // Supabase Admin API: list all users (requires service role key in production)
-    supabase.auth.admin
-      ?.listUsers?.()
-      .then((res: ListUsersResponse) => {
-        if (res?.data?.users) {
-          setUsers(
-            res.data.users.map((u) => ({
-              id: u.id,
-              email: u.email || '-',
-              role: u.role || "-"
-            }))
-          );
-        } else {
-          setUsersError("Keine Benutzer gefunden oder keine Berechtigung.");
+    const loadUsers = async () => {
+      setUsersLoading(true);
+      setUsersError(null);
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) {
+          setUsers([]);
+          setUsersError('Nicht angemeldet.');
+          setUsersLoading(false);
+          return;
         }
+
+        const res = await fetch('/api/admin/users', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        const json = (await res.json().catch(() => ({}))) as AdminUsersResponse;
+        if (!res.ok) {
+          setUsers([]);
+          setUsersError(json.error || 'Benutzer konnten nicht geladen werden.');
+          setUsersLoading(false);
+          return;
+        }
+
+        const rows = Array.isArray(json.users) ? json.users : [];
+        setUsers(rows);
+        if (rows.length === 0) {
+          setUsersError('Noch keine Benutzer in dieser Praxis.');
+        }
+      } catch {
+        setUsers([]);
+        setUsersError('Fehler beim Laden der Benutzer.');
+      } finally {
         setUsersLoading(false);
-      })
-      .catch(() => {
-        setUsersError("Fehler beim Laden der Benutzer.");
-        setUsersLoading(false);
-      });
+      }
+    };
+
+    void loadUsers();
   }, [user]);
 
   if (loading) {
