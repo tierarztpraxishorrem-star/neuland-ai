@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 
 type FonioCallItem = {
@@ -44,7 +45,6 @@ export default function KommunikationPage() {
 
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
-  const [phone, setPhone] = useState("");
   const [callbackNumber, setCallbackNumber] = useState("");
   const [activePracticeId, setActivePracticeId] = useState<string | null>(null);
   const [fonioEnabled, setFonioEnabled] = useState(false);
@@ -449,25 +449,19 @@ export default function KommunikationPage() {
         </div>
 
         {/* 📱 WHATSAPP */}
-        <div style={card}>
-          <h3>📱 WhatsApp</h3>
-
-          <input
-            placeholder="Telefonnummer"
-            onChange={(e) => setPhone(e.target.value)}
-            style={input}
-          />
-
-          <textarea
-            placeholder="Nachricht"
-            onChange={(e) => setMessage(e.target.value)}
-            style={textarea}
-          />
-
-          <button style={primaryBtn}>
-            Senden (kommt bald)
-          </button>
-        </div>
+        <Link href="/kommunikation/whatsapp" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ ...card, cursor: 'pointer', transition: 'box-shadow 0.15s ease', position: 'relative' }}
+               onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)')}
+               onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+            <h3>📱 WhatsApp Inbox</h3>
+            <div style={{ fontSize: '14px', color: '#6b7280' }}>
+              Eingehende WhatsApp-Nachrichten anzeigen, beantworten und KI-Antwortvorschläge erhalten.
+            </div>
+            <div style={{ ...primaryBtn, textAlign: 'center', marginTop: '4px' }}>
+              Zum WhatsApp-Posteingang →
+            </div>
+          </div>
+        </Link>
 
         {/* ☎️ TELEFON (FONIO) */}
         <div style={card}>
@@ -842,7 +836,6 @@ export default function KommunikationPage() {
       }}>
         <h3>🚀 Nächste Ausbaustufe</h3>
         <ul style={{ color: "#6b7280", lineHeight: "1.8" }}>
-          <li>Automatische WhatsApp-Benachrichtigungen</li>
           <li>Follow-up Erinnerungen für Patienten</li>
           <li>Direkte Übergabe von Fällen ins Team</li>
         </ul>

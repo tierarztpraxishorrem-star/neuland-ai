@@ -23,7 +23,6 @@ import {
   PanelLeftOpen,
   CalendarDays,
   Briefcase,
-  MessageSquare,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -38,6 +37,23 @@ export default function Sidebar() {
   const collapsedWidth = 86;
   const diamondEnabled = isPersonalDiamondEnabled();
   const [hrRunning, setHrRunning] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState<{ whatsapp: number; total: number }>({ whatsapp: 0, total: 0 });
+
+  const loadUnreadCounts = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+      const res = await fetch("/api/kommunikation/unread", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUnreadCounts({ whatsapp: data.whatsapp || 0, total: data.total || 0 });
+      }
+    } catch {
+      // silently ignore
+    }
+  };
 
   const loadHrStatus = async () => {
     const {
@@ -94,6 +110,7 @@ export default function Sidebar() {
   useEffect(() => {
     const onFocus = () => {
       void loadHrStatus();
+      void loadUnreadCounts();
     };
 
     window.addEventListener("focus", onFocus);
@@ -101,6 +118,13 @@ export default function Sidebar() {
     return () => {
       window.removeEventListener("focus", onFocus);
     };
+  }, []);
+
+  // Load unread counts on mount and poll every 30s
+  useEffect(() => {
+    void loadUnreadCounts();
+    const interval = setInterval(() => void loadUnreadCounts(), 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const toggleCollapsed = () => {
@@ -147,8 +171,7 @@ export default function Sidebar() {
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "Konsultation", href: "/konsultation/start", icon: Stethoscope },
         { name: "Letzte Konsultation", href: "/konsultation/last", icon: History },
-        { name: "Kommunikation", href: "/kommunikation", icon: MessageCircle },
-        { name: "WhatsApp", href: "/kommunikation/whatsapp", icon: MessageSquare },
+        { name: "Kommunikation", href: "/kommunikation", icon: MessageCircle, badge: unreadCounts.total },
         { name: "Patienten", href: "/patienten", icon: PawPrint },
         { name: "Termine", href: "/termine", icon: CalendarDays },
         { name: "Vorlagen", href: "/vorlagen", icon: FileText },
@@ -322,7 +345,33 @@ export default function Sidebar() {
 
                   <Icon size={18} />
 
-                  {!collapsed && <span>{link.name}</span>}
+                  {!collapsed && (
+                    <span style={{ flex: 1 }}>{link.name}</span>
+                  )}
+
+                  {/* UNREAD BADGE */}
+                  {"badge" in link && typeof link.badge === "number" && link.badge > 0 && (
+                    <span
+                      style={{
+                        minWidth: "18px",
+                        height: "18px",
+                        borderRadius: "999px",
+                        background: "#ef4444",
+                        color: "#fff",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 5px",
+                        position: collapsed ? "absolute" : "static",
+                        top: collapsed ? "4px" : undefined,
+                        right: collapsed ? "4px" : undefined,
+                      }}
+                    >
+                      {link.badge > 99 ? "99+" : link.badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}
