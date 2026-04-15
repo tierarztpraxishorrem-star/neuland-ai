@@ -11,6 +11,13 @@ if [[ -f ".env.local" ]]; then
   set +a
 fi
 
+if [[ -f ".env.supabase.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.supabase.local
+  set +a
+fi
+
 if command -v supabase >/dev/null 2>&1; then
   SUPABASE_CMD=(supabase)
   CLI_SOURCE="global"
@@ -32,6 +39,12 @@ fi
 if [[ -n "${SUPABASE_PROJECT_REF-}" ]]; then
   echo "[supabase-deploy] linking project from SUPABASE_PROJECT_REF"
   "${SUPABASE_CMD[@]}" link --project-ref "$SUPABASE_PROJECT_REF"
+fi
+
+if [[ -z "${SUPABASE_DB_PASSWORD-}" ]]; then
+  echo "[supabase-deploy] ERROR: SUPABASE_DB_PASSWORD fehlt."
+  echo "Lege .env.supabase.local an (siehe .env.supabase.local.example) oder exportiere die Variable in der Shell."
+  exit 1
 fi
 
 echo "[supabase-deploy] pushing migrations"

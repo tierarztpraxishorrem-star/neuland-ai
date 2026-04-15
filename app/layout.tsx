@@ -1,4 +1,5 @@
 import SidebarWrapper from "@/components/SidebarWrapper";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import "./globals.css";
 
 export default function RootLayout({
@@ -10,7 +11,9 @@ export default function RootLayout({
     <html lang="de">
       <body style={{ margin: 0 }}>
         <SidebarWrapper>
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </SidebarWrapper>
       </body>
     </html>

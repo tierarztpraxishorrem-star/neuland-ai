@@ -20,7 +20,10 @@ import {
   Gem,
   LogOut,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  CalendarDays,
+  Briefcase,
+  MessageSquare,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -145,9 +148,11 @@ export default function Sidebar() {
         { name: "Konsultation", href: "/konsultation/start", icon: Stethoscope },
         { name: "Letzte Konsultation", href: "/konsultation/last", icon: History },
         { name: "Kommunikation", href: "/kommunikation", icon: MessageCircle },
+        { name: "WhatsApp", href: "/kommunikation/whatsapp", icon: MessageSquare },
         { name: "Patienten", href: "/patienten", icon: PawPrint },
+        { name: "Termine", href: "/termine", icon: CalendarDays },
         { name: "Vorlagen", href: "/vorlagen", icon: FileText },
-        ...(diamondEnabled ? [{ name: "Persönlicher Diamant", href: "/diamant", icon: Gem }] : []),
+        { name: "HR", href: "/hr", icon: Briefcase },
         { name: "VetMind", href: "/vetmind", icon: Bot, highlight: true },
       ],
     },

@@ -485,7 +485,7 @@ export default function PatientDetailPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 7fr) minmax(280px, 3fr)', gap: '16px', alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: '16px' }}>
-          <Section title='Konsultationen'>
+          <Section title='Konsultationen – Zeitverlauf'>
 
             {loading && <div style={{ color: '#64748b' }}>Lade ...</div>}
 
@@ -497,34 +497,91 @@ export default function PatientDetailPage() {
               />
             )}
 
-            <div style={{ display: 'grid', gap: '12px' }}>
-              {consultations.map((entry) => (
-                <ListItem
-                  key={entry.id}
-                  style={{ background: '#fbfdff' }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>🧾 {entry.title || 'Konsultation'}</div>
-                      <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
-                        {formatDateTime(entry.created_at)} · Dauer: {formatDuration(consultationDurations[entry.id] || 0)}
+            {!loading && consultations.length > 0 && (() => {
+              const groups: { label: string; entries: Consultation[] }[] = [];
+              let currentLabel = '';
+              for (const entry of consultations) {
+                const d = new Date(entry.created_at);
+                const label = d.toLocaleString('de-DE', { month: 'long', year: 'numeric' });
+                if (label !== currentLabel) {
+                  groups.push({ label, entries: [entry] });
+                  currentLabel = label;
+                } else {
+                  groups[groups.length - 1].entries.push(entry);
+                }
+              }
+              return (
+                <div>
+                  {groups.map((group) => (
+                    <div key={group.label} style={{ marginBottom: '20px' }}>
+                      <div style={{
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: '#0F6B74',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        marginBottom: '10px',
+                        paddingLeft: '28px'
+                      }}>
+                        {group.label}
+                      </div>
+
+                      <div style={{ position: 'relative', paddingLeft: '28px' }}>
+                        <div style={{
+                          position: 'absolute',
+                          left: '7px',
+                          top: '4px',
+                          bottom: '4px',
+                          width: '2px',
+                          background: 'linear-gradient(180deg, #0F6B74 0%, #d1e4e6 100%)',
+                          borderRadius: '2px'
+                        }} />
+
+                        <div style={{ display: 'grid', gap: '12px' }}>
+                          {group.entries.map((entry, idx) => (
+                            <div key={entry.id} style={{ position: 'relative' }}>
+                              <div style={{
+                                position: 'absolute',
+                                left: '-25px',
+                                top: '14px',
+                                width: '10px',
+                                height: '10px',
+                                borderRadius: '50%',
+                                background: idx === 0 ? '#0F6B74' : '#94a3b8',
+                                border: '2px solid #fff',
+                                boxShadow: '0 0 0 2px #d1e4e6'
+                              }} />
+
+                              <ListItem style={{ background: '#fbfdff' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
+                                  <div>
+                                    <div style={{ fontWeight: 700 }}>🧾 {entry.title || 'Konsultation'}</div>
+                                    <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
+                                      {formatDateTime(entry.created_at)} · Dauer: {formatDuration(consultationDurations[entry.id] || 0)}
+                                    </div>
+                                  </div>
+
+                                  <Button
+                                    variant='secondary'
+                                    size='sm'
+                                    onClick={() => router.push(`/konsultation/${entry.id}/result`)}
+                                  >
+                                    Öffnen
+                                  </Button>
+                                </div>
+                                <div style={{ color: '#334155', fontSize: '13px', marginTop: '8px', lineHeight: 1.45 }}>
+                                  {buildPreview(entry) || 'Keine Vorschau'}
+                                </div>
+                              </ListItem>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
-
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      onClick={() => router.push(`/konsultation/${entry.id}/result`)}
-                    >
-                      Öffnen
-                    </Button>
-                  </div>
-                  <div style={{ color: '#334155', fontSize: '13px', marginTop: '8px', lineHeight: 1.45 }}>
-                    {buildPreview(entry) || 'Keine Vorschau'}
-                  </div>
-                </ListItem>
-              ))}
-            </div>
+                  ))}
+                </div>
+              );
+            })()}
           </Section>
 
           <Section

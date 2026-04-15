@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 
 type FonioCallItem = {
@@ -25,6 +25,21 @@ type YeastarWebhookEvent = {
   number: string;
 };
 
+type CallRecording = {
+  id: string;
+  caller: string;
+  callee: string;
+  direction: string;
+  duration_seconds: number;
+  started_at: string | null;
+  ended_at: string | null;
+  transcript: string | null;
+  summary: string | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+};
+
 export default function KommunikationPage() {
 
   const [email, setEmail] = useState("");
@@ -47,6 +62,10 @@ export default function KommunikationPage() {
   const [webhookLoading, setWebhookLoading] = useState(true);
   const [webhookStatus, setWebhookStatus] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [callRecordings, setCallRecordings] = useState<CallRecording[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(true);
+  const [recordingsStatus, setRecordingsStatus] = useState('');
+  const [expandedRecording, setExpandedRecording] = useState<string | null>(null);
 
   const safeFetchJson = async (input: RequestInfo | URL, init?: RequestInit) => {
     try {
@@ -310,10 +329,74 @@ export default function KommunikationPage() {
     }
   };
 
+  const loadCallRecordings = async () => {
+    setRecordingsLoading(true);
+    setRecordingsStatus('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        setCallRecordings([]);
+        setRecordingsStatus('Bitte einloggen, um Anruf-Protokolle zu sehen.');
+        return;
+      }
+
+      const response = await safeFetchJson('/api/yeastar/recordings?limit=30', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        setCallRecordings([]);
+        setRecordingsStatus('Anruf-Protokolle konnten nicht geladen werden.');
+        return;
+      }
+
+      const { res, payload } = response;
+      if (!res.ok) {
+        setCallRecordings([]);
+        setRecordingsStatus(payload?.error || 'Anruf-Protokolle konnten nicht geladen werden.');
+        return;
+      }
+
+      const recs = Array.isArray(payload?.recordings) ? payload.recordings : [];
+      setCallRecordings(recs);
+      if (recs.length === 0) {
+        setRecordingsStatus('Noch keine Anruf-Protokolle vorhanden. Aufnahmen werden automatisch verarbeitet, sobald Telefonate über Yeastar beendet werden.');
+      }
+    } catch (error) {
+      console.error('loadCallRecordings failed', error);
+      setCallRecordings([]);
+      setRecordingsStatus('Anruf-Protokolle konnten nicht geladen werden.');
+    } finally {
+      setRecordingsLoading(false);
+    }
+  };
+
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const statusLabel = (status: string) => {
+    const map: Record<string, { label: string; color: string; bg: string }> = {
+      pending: { label: 'Wartend', color: '#92400e', bg: '#fef3c7' },
+      downloading: { label: 'Download…', color: '#1e40af', bg: '#dbeafe' },
+      transcribing: { label: 'Transkription…', color: '#6d28d9', bg: '#ede9fe' },
+      summarizing: { label: 'KI-Zusammenfassung…', color: '#0e7490', bg: '#cffafe' },
+      done: { label: 'Fertig', color: '#065f46', bg: '#d1fae5' },
+      failed: { label: 'Fehlgeschlagen', color: '#991b1b', bg: '#fee2e2' },
+    };
+    return map[status] || { label: status, color: '#6b7280', bg: '#f3f4f6' };
+  };
+
   useEffect(() => {
     loadFonioData();
     loadYeastarData();
     loadWebhookEvents();
+    loadCallRecordings();
     if (typeof window !== 'undefined') {
       setWebhookUrl(`${window.location.origin}/api/yeastar/webhook`);
     }
@@ -574,6 +657,181 @@ export default function KommunikationPage() {
 
       </div>
 
+      {/* 📞 ANRUF-PROTOKOLLE */}
+      <div style={{
+        marginTop: '24px',
+        padding: '24px',
+        borderRadius: '16px',
+        background: '#fff',
+        border: '1px solid #e5e7eb',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ margin: 0, color: '#0F6B74' }}>📞 Anruf-Protokolle & KI-Zusammenfassungen</h3>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#6b7280' }}>
+              Automatische Transkription und Zusammenfassung aller Telefonate über Yeastar PBX
+            </p>
+          </div>
+          <button style={secondaryBtn} onClick={loadCallRecordings}>
+            🔄 Aktualisieren
+          </button>
+        </div>
+
+        {recordingsLoading ? (
+          <div style={{ fontSize: '13px', color: '#6b7280', padding: '12px 0' }}>Lade Anruf-Protokolle…</div>
+        ) : callRecordings.length === 0 ? (
+          <div style={{
+            fontSize: '13px',
+            color: '#6b7280',
+            background: '#f8fafc',
+            border: '1px solid #e5e7eb',
+            borderRadius: '10px',
+            padding: '16px',
+          }}>
+            {recordingsStatus}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '12px' }}>
+            {callRecordings.map((rec) => {
+              const st = statusLabel(rec.status);
+              const isExpanded = expandedRecording === rec.id;
+              return (
+                <div
+                  key={rec.id}
+                  style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '12px',
+                    background: '#fafbfc',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Header row */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '14px 16px',
+                      cursor: rec.status === 'done' ? 'pointer' : 'default',
+                    }}
+                    onClick={() => rec.status === 'done' && setExpandedRecording(isExpanded ? null : rec.id)}
+                  >
+                    <div style={{
+                      fontSize: '20px',
+                      flexShrink: 0,
+                    }}>
+                      {rec.direction === 'inbound' ? '📥' : rec.direction === 'outbound' ? '📤' : '🔄'}
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                        {rec.caller} → {rec.callee}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                        {rec.started_at ? new Date(rec.started_at).toLocaleString('de-DE') : rec.created_at ? new Date(rec.created_at).toLocaleString('de-DE') : '–'}
+                        {rec.duration_seconds > 0 && ` · ${formatDuration(rec.duration_seconds)}`}
+                      </div>
+                    </div>
+
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '3px 10px',
+                      borderRadius: '99px',
+                      background: st.bg,
+                      color: st.color,
+                      flexShrink: 0,
+                    }}>
+                      {st.label}
+                    </span>
+
+                    {rec.status === 'done' && (
+                      <span style={{ fontSize: '14px', color: '#9ca3af', flexShrink: 0 }}>
+                        {isExpanded ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Summary preview (always visible for done) */}
+                  {rec.status === 'done' && rec.summary && !isExpanded && (
+                    <div style={{
+                      padding: '0 16px 12px',
+                      fontSize: '13px',
+                      color: '#374151',
+                      lineHeight: '1.5',
+                    }}>
+                      {rec.summary.length > 180 ? rec.summary.slice(0, 180) + '…' : rec.summary}
+                    </div>
+                  )}
+
+                  {/* Error message */}
+                  {rec.status === 'failed' && rec.error_message && (
+                    <div style={{
+                      padding: '0 16px 12px',
+                      fontSize: '12px',
+                      color: '#991b1b',
+                    }}>
+                      Fehler: {rec.error_message}
+                    </div>
+                  )}
+
+                  {/* Expanded detail */}
+                  {isExpanded && rec.status === 'done' && (
+                    <div style={{ borderTop: '1px solid #e5e7eb', padding: '16px' }}>
+                      {rec.summary && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{ fontWeight: 700, fontSize: '13px', color: '#0F6B74', marginBottom: '6px' }}>
+                            🤖 KI-Zusammenfassung
+                          </div>
+                          <div style={{
+                            fontSize: '13px',
+                            color: '#1f2937',
+                            lineHeight: '1.6',
+                            background: '#f0fdf4',
+                            border: '1px solid #bbf7d0',
+                            borderRadius: '10px',
+                            padding: '12px',
+                            whiteSpace: 'pre-wrap',
+                          }}>
+                            {rec.summary}
+                          </div>
+                        </div>
+                      )}
+
+                      {rec.transcript && (
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '13px', color: '#374151', marginBottom: '6px' }}>
+                            📝 Vollständiges Transkript
+                          </div>
+                          <div style={{
+                            fontSize: '12px',
+                            color: '#4b5563',
+                            lineHeight: '1.6',
+                            background: '#f8fafc',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '10px',
+                            padding: '12px',
+                            maxHeight: '300px',
+                            overflowY: 'auto',
+                            whiteSpace: 'pre-wrap',
+                          }}>
+                            {rec.transcript}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {recordingsStatus && callRecordings.length > 0 && (
+          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>{recordingsStatus}</div>
+        )}
+      </div>
+
       {/* FUTURE SECTION */}
       <div style={{
         marginTop: "40px",
@@ -585,7 +843,6 @@ export default function KommunikationPage() {
         <h3>🚀 Nächste Ausbaustufe</h3>
         <ul style={{ color: "#6b7280", lineHeight: "1.8" }}>
           <li>Automatische WhatsApp-Benachrichtigungen</li>
-          <li>VetMind-Zusammenfassung von Telefonaten</li>
           <li>Follow-up Erinnerungen für Patienten</li>
           <li>Direkte Übergabe von Fällen ins Team</li>
         </ul>

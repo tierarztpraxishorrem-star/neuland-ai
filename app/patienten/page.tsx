@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { searchBreeds } from '../../lib/patientBreeds';
@@ -26,10 +26,12 @@ type CaseLite = {
 
 export default function PatientenPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [cases, setCases] = useState<CaseLite[]>([]);
+  const [latestByPatient, setLatestByPatient] = useState<Record<string, string>>({});
   const [dataError, setDataError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newPatient, setNewPatient] = useState({
@@ -41,6 +43,46 @@ export default function PatientenPage() {
     external_id: ''
   });
   const router = useRouter();
+  const PAGE_SIZE = 50;
+  const activePracticeIdRef = useRef<string | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadPatients = useCallback(async (practiceId: string, searchTerm: string, offset: number) => {
+    let query = supabase
+      .from('patients')
+      .select('id, name, tierart, rasse, alter, geschlecht, owner_name, external_id, created_at')
+      .eq('practice_id', practiceId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (searchTerm.trim()) {
+      const term = `%${searchTerm.trim()}%`;
+      query = query.or(`name.ilike.${term},external_id.ilike.${term},tierart.ilike.${term},rasse.ilike.${term},owner_name.ilike.${term}`);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data || []) as Patient[];
+  }, []);
+
+  const loadLatestCases = useCallback(async (practiceId: string, patientIds: string[]) => {
+    if (patientIds.length === 0) return {};
+    const { data } = await supabase
+      .from('cases')
+      .select('patient_id, created_at')
+      .eq('practice_id', practiceId)
+      .in('patient_id', patientIds)
+      .order('created_at', { ascending: false })
+      .limit(patientIds.length * 3);
+
+    const result: Record<string, string> = {};
+    for (const entry of (data || []) as CaseLite[]) {
+      if (entry.patient_id && !result[entry.patient_id]) {
+        result[entry.patient_id] = entry.created_at;
+      }
+    }
+    return result;
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -61,7 +103,6 @@ export default function PatientenPage() {
 
       if (membershipsError) {
         setPatients([]);
-        setCases([]);
         setDataError(`Praxiszuordnung konnte nicht geladen werden: ${membershipsError.message || 'Unbekannter Fehler'}`);
         setLoading(false);
         return;
@@ -89,65 +130,68 @@ export default function PatientenPage() {
         return;
       }
 
-      const [patientsRes, casesRes] = await Promise.all([
-        supabase
-          .from('patients')
-          .select('id, name, tierart, rasse, alter, geschlecht, owner_name, external_id, created_at')
-          .eq('practice_id', activePracticeId)
-          .order('created_at', { ascending: false })
-          .limit(500),
-        supabase
-          .from('cases')
-          .select('id, patient_id, created_at')
-          .eq('practice_id', activePracticeId)
-          .not('patient_id', 'is', null)
-          .order('created_at', { ascending: false })
-          .limit(2000)
-      ]);
+      activePracticeIdRef.current = activePracticeId;
 
-      if (patientsRes.error) {
+      try {
+        const loaded = await loadPatients(activePracticeId, '', 0);
+        setPatients(loaded);
+        setHasMore(loaded.length >= PAGE_SIZE);
+        const caseMap = await loadLatestCases(activePracticeId, loaded.map((p) => p.id));
+        setLatestByPatient(caseMap);
+      } catch {
         setPatients([]);
         setDataError('Patienten konnten nicht geladen werden.');
-      } else {
-        setPatients((patientsRes.data || []) as Patient[]);
-      }
-
-      if (casesRes.error) {
-        setCases([]);
-        setDataError((prev) => prev || 'Konsultationen konnten nicht geladen werden.');
-      } else {
-        setCases((casesRes.data || []) as CaseLite[]);
       }
 
       setLoading(false);
     };
 
     loadData();
-  }, [router]);
+  }, [router, loadPatients, loadLatestCases]);
 
-  const latestByPatient = cases.reduce<Record<string, string>>((acc, entry) => {
-    if (!entry.patient_id) return acc;
-    if (!acc[entry.patient_id]) {
-      acc[entry.patient_id] = entry.created_at;
+  // Server-side debounced search
+  useEffect(() => {
+    const practiceId = activePracticeIdRef.current;
+    if (!practiceId) return;
+
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const loaded = await loadPatients(practiceId, search, 0);
+        setPatients(loaded);
+        setHasMore(loaded.length >= PAGE_SIZE);
+        const caseMap = await loadLatestCases(practiceId, loaded.map((p) => p.id));
+        setLatestByPatient(caseMap);
+      } catch {
+        setDataError('Suche fehlgeschlagen.');
+      }
+      setLoading(false);
+    }, 300);
+
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [search, loadPatients, loadLatestCases]);
+
+  const loadMore = async () => {
+    const practiceId = activePracticeIdRef.current;
+    if (!practiceId || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const loaded = await loadPatients(practiceId, search, patients.length);
+      setPatients((prev) => [...prev, ...loaded]);
+      setHasMore(loaded.length >= PAGE_SIZE);
+      const caseMap = await loadLatestCases(practiceId, loaded.map((p) => p.id));
+      setLatestByPatient((prev) => ({ ...prev, ...caseMap }));
+    } catch {
+      setDataError('Weitere Patienten konnten nicht geladen werden.');
     }
-    return acc;
-  }, {});
+    setLoadingMore(false);
+  };
 
-  const filteredPatients = patients.filter((patient) => {
-    const haystack = [
-      patient.name,
-      patient.external_id || '',
-      patient.tierart || '',
-      patient.rasse || '',
-      patient.alter || '',
-      patient.geschlecht || '',
-      patient.owner_name || ''
-    ]
-      .join(' ')
-      .toLowerCase();
-
-    return haystack.includes(search.toLowerCase());
-  });
+  const filteredPatients = patients;
 
   const breedSuggestions = searchBreeds(newPatient.rasse);
 
@@ -269,6 +313,14 @@ export default function PatientenPage() {
           </ListItem>
         ))}
       </div>
+
+      {hasMore && (
+        <div style={{ textAlign: 'center', marginTop: '16px' }}>
+          <Button variant='secondary' onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Lade ...' : 'Mehr laden'}
+          </Button>
+        </div>
+      )}
 
       {showCreateModal && (
         <div

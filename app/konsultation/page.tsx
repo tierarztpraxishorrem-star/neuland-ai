@@ -11,6 +11,11 @@ import {
   isPasswordValid,
   type RegistrationConfig,
 } from '../../lib/registrationConfig';
+import { brand, practices, type CaseRecord } from './_brand';
+import CaseList from './_components/CaseList';
+import CaseDetailPanel from './_components/CaseDetailPanel';
+import PatientLetterEditor from './_components/PatientLetterEditor';
+import ReportActions from './_components/ReportActions';
 
 
 export default function Home() {
@@ -326,51 +331,6 @@ const downloadReport = () => {
   const [followUp, setFollowUp] = useState('');
 const [imageAnalysis, setImageAnalysis] = useState("");
 
-
-  const webhookUrl = 'https://hook.eu1.make.com/8o7mx5p6w9obyytl1e151ii7grmylc3x';
-
-  const brand = {
-    dark: '#12353D',
-    primary: '#0F6B74',
-    soft: '#EAF4F5',
-    border: '#D7E6E8',
-    text: '#1F2937',
-    muted: '#5F6B73',
-    danger: '#A12D2F',
-    warning: '#D98C10',
-    card: '#FFFFFF',
-    page: '#F4F7F8',
-  };
-  const practices = {
-
-  TZN: {
-    name: "Tierärztezentrum Neuland",
-    logo: "/tzn-logo.jpg",
-    address: "Kopernikusstraße 35\n50126 Bergheim",
-    phone: "+49 2271 5885269",
-    website: "tzn-bergheim.de",
-    contact: "https://app.petsxl.com/#/signin/appointment-registration-start/64fe56cd-427b-4757-ad0a-c0a7ad3f7b53?branch=3"
-  },
-
- TPH: {
-  name: "Tierarztpraxis Horrem",
-  logo: "/tph-logo.jpg",
-  address: "Ina-Seidel-Str. 1a\n50169 Kerpen",
-  phone: "02273 4088",
-  website: "tierarztpraxis-horrem.de",
-  contact: "https://tierarztpraxis-horrem.de/kontakt"
-},
-
-TPW: {
-  name: "Tierarztpraxis Weiden",
-  logo: "/tpw-logo.jpg",
-  address: "Aachener Str. 1248\n50859 Köln",
-  phone: "02234 74661",
-  website: "tp-weiden.de",
-  contact: "https://tp-weiden.de/354-2/"
-}
-
-};
   const currentPractice = practices[practice];
 
   useEffect(() => {
@@ -518,7 +478,26 @@ const mediaRecorder = new MediaRecorder(stream, {
         }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.onerror = () => {
+        console.error('[Recording] MediaRecorder Fehler – Notfall-Sicherung');
+        if (chunksRef.current.length > 0) {
+          const emergencyBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+          const emergencyUrl = URL.createObjectURL(emergencyBlob);
+          setAudioBlob(emergencyBlob);
+          setAudioURL(emergencyUrl);
+          setReviewReady(true);
+        }
+        setRecording(false);
+        setPaused(false);
+        setStatus('Aufnahme wurde unterbrochen – bisherige Daten gesichert');
+
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+      };
+
+      mediaRecorder.start(10000);
       setRecording(true);
       setPaused(false);
       setStatus('Aufnahme läuft ...');
@@ -1604,291 +1583,46 @@ fontSize: isMobile ? '22px' : '28px',  }}
 {/* danach kommt dein Patientenbrief Bereich */}
 
 {patientLetter && (
-  <div
-    style={{
-      ...sectionCardStyle,
-      marginTop: '20px',
-      padding: '20px',
-    }}
-  >
-    <h2 style={{ color: brand.primary }}>Patientenbrief</h2>
-
-    <textarea
-      value={patientLetter}
-      onChange={(e) => setPatientLetter(e.target.value)}
-      style={{
-        width: '100%',
-        minHeight: '200px',
-        padding: '12px',
-        borderRadius: '8px',
-        border: '1px solid #ccc',
-        fontFamily: 'Arial',
-      }}
-    />
-
-    <div style={{ marginTop: '20px' }}>
-      <label
-        style={{
-          fontWeight: 700,
-          color: brand.primary,
-          display: 'block',
-          marginBottom: '6px',
-        }}
-      >
-        Medikamente
-      </label>
-
-      <textarea
-        value={medication}
-        onChange={(e) => setMedication(e.target.value)}
-        placeholder="z.B. Prednisolon 5 mg – 1x täglich"
-        style={{
-          width: '100%',
-          minHeight: '90px',
-          padding: '12px',
-          borderRadius: '8px',
-          border: '1px solid #ccc',
-          fontFamily: 'Arial',
-        }}
-      />
-    </div>
-
-    <div style={{ marginTop: '16px' }}>
-      <label
-        style={{
-          fontWeight: 700,
-          color: brand.primary,
-          display: 'block',
-          marginBottom: '6px',
-        }}
-      >
-        Empfohlene Kontrolle
-      </label>
-
-      <input
-        value={followUp}
-        onChange={(e) => setFollowUp(e.target.value)}
-        placeholder="z.B. Kontrolle in 7 Tagen"
-        style={{
-          width: '100%',
-          padding: '12px',
-          borderRadius: '8px',
-          border: '1px solid #ccc',
-        }}
-      />
-    </div>
-  </div>
-)}
-
-<div
-  style={{
-    display: 'flex',
-    gap: '12px',
-    marginTop: '16px',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  }}
->
-  <button
-    onClick={copyResult}
-    style={{
-      ...buttonStyle(brand.primary, 'white', false),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Bericht kopieren
-  </button>
-
-  <button
-    onClick={extractPatientLetter}
-    style={{
-      ...buttonStyle(brand.primary, 'white', false),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Patientenbrief erstellen
-  </button>
-
-  {patientLetter && (
-    <button
-      onClick={printPatientLetter}
-      style={{
-        ...buttonStyle('#0F6B74', 'white', false),
-        width: isMobile ? '100%' : 'auto',
-      }}
-    >
-      Patientenbrief drucken
-    </button>
-  )}
-
-  <button
-    onClick={shareResult}
-    style={{
-      ...buttonStyle(brand.primary, 'white', false),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Bericht teilen
-  </button>
-
-  <button
-    onClick={downloadReport}
-    style={{
-      ...buttonStyle('#fff', brand.primary, false, true),
-      width: isMobile ? '100%' : 'auto',
-    }}
-  >
-    Als Datei speichern
-  </button>
-
-  {copied && (
-    <span style={{ color: '#1f7a1f', fontSize: '14px' }}>
-      In Zwischenablage kopiert
-    </span>
-  )}
-</div>
-
-{selectedCase && (
-  <div
-    style={{
-      marginTop: '20px',
-      marginBottom: '20px',
-      padding: '20px',
-      border: '2px solid #0F6B74',
-      borderRadius: '12px',
-      background: '#f0f9fa',
-    }}
-  >
-    <h2 style={{ color: brand.primary }}>Aktiver Fall</h2>
-
-    <div><b>Patient:</b> {selectedCase.patient_name}</div>
-    <div><b>Tierart:</b> {selectedCase.species}</div>
-    <div><b>Tierarzt:</b> {selectedCase.vet}</div>
-    <div><b>Praxis:</b> {selectedCase.practice}</div>
-
-    <div style={{ marginTop: '10px' }}>
-      <b>Ergebnis:</b>
-
-      <textarea
-        value={selectedCase.result || ''}
-        onChange={(e) =>
-          setSelectedCase({ ...selectedCase, result: e.target.value })
-        }
-        style={{
-          width: '100%',
-          minHeight: '150px',
-          marginTop: '6px',
-          padding: '10px',
-        }}
-      />
-
-      <button
-        onClick={async () => {
-          const { error } = await supabase
-            .from('cases')
-            .update({
-              result: selectedCase.result,
-            })
-            .eq('id', selectedCase.id);
-
-          if (error) {
-            console.error('❌ Fehler beim Speichern', error);
-          } else {
-            alert('✅ Gespeichert');
-          }
-        }}
-        style={{
-          marginTop: '10px',
-          padding: '10px 16px',
-          background: brand.primary,
-          color: '#fff',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-        }}
-      >
-        Änderungen speichern
-      </button>
-    </div>
-  </div>
-)}
-
-<div
-  style={{
-    ...sectionCardStyle,
-    marginTop: '30px',
-    padding: '20px',
-  }}
->
-  <input
-    type="text"
-    placeholder="Fall suchen (Name, Tierart, Tierarzt...)"
-    value={search}
-    onChange={(e) => setSearch(e.target.value)}
-    style={{
-      width: '100%',
-      padding: '10px',
-      marginBottom: '12px',
-      borderRadius: '8px',
-      border: '1px solid #ccc',
-    }}
+  <PatientLetterEditor
+    patientLetter={patientLetter}
+    onPatientLetterChange={setPatientLetter}
+    medication={medication}
+    onMedicationChange={setMedication}
+    followUp={followUp}
+    onFollowUpChange={setFollowUp}
+    sectionCardStyle={sectionCardStyle}
   />
+)}
 
-  <h2 style={{ color: brand.primary }}>Letzte Fälle</h2>
+<ReportActions
+  result={result}
+  patientLetter={patientLetter}
+  copied={copied}
+  isMobile={isMobile}
+  onCopy={copyResult}
+  onExtractLetter={extractPatientLetter}
+  onPrintLetter={printPatientLetter}
+  onShare={shareResult}
+  onDownload={downloadReport}
+  buttonStyle={buttonStyle}
+/>
 
-  <div style={{ marginBottom: '12px' }}>
-    <label style={{ cursor: 'pointer', fontSize: '14px' }}>
-      <input
-        type="checkbox"
-        checked={showAllCases}
-        onChange={(e) => setShowAllCases(e.target.checked)}
-        style={{ marginRight: '6px' }}
-      />
-      Alle Fälle der Praxis anzeigen
-    </label>
-  </div>
+<CaseDetailPanel
+  selectedCase={selectedCase}
+  onCaseChange={setSelectedCase}
+/>
 
-  {loadingCases && <div>Lade Fälle...</div>}
-
-  {!loadingCases && (!cases || cases.length === 0) && (
-    <div style={{ color: brand.muted }}>
-      Noch keine Fälle vorhanden
-    </div>
-  )}
-
-  {cases
-    .filter((c) => {
-      const s = search.toLowerCase();
-
-      return (
-        c.patient_name?.toLowerCase().includes(s) ||
-        c.species?.toLowerCase().includes(s) ||
-        c.vet?.toLowerCase().includes(s)
-      );
-    })
-    .map((c, i) => (
-      <div
-        key={i}
-        onClick={() => setSelectedCase(c)}
-        style={{
-          cursor: 'pointer',
-          padding: '12px',
-          borderBottom: '1px solid #eee',
-          marginBottom: '8px',
-        }}
-      >
-        <b>{c.patient_name || 'Unbekannt'}</b> – {c.species || '—'}
-
-        <div style={{ fontSize: '13px', color: brand.muted }}>
-          {c.vet || '—'} · {c.practice || '—'}
-        </div>
-
-        <div style={{ fontSize: '12px', color: '#999' }}>
-          {new Date(c.created_at).toLocaleString('de-DE')}
-        </div>
-      </div>
-    ))}
-</div>
+<CaseList
+  cases={cases}
+  loadingCases={loadingCases}
+  search={search}
+  onSearchChange={setSearch}
+  showAllCases={showAllCases}
+  onShowAllCasesChange={setShowAllCases}
+  onSelectCase={setSelectedCase}
+  isMobile={isMobile}
+  sectionCardStyle={sectionCardStyle}
+/>
 
       </div>
     </div>

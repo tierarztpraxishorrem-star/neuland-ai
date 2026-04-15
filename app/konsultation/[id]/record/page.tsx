@@ -14,6 +14,86 @@ type RecordingSegment = {
   durationSeconds: number;
 };
 
+/* ── IndexedDB Offline-Puffer für Aufnahme-Chunks ── */
+const IDB_NAME = 'neuland_recording_buffer';
+const IDB_VERSION = 1;
+const IDB_STORE = 'chunks';
+
+function openIdb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbAppendChunk(caseId: string, chunk: Blob): Promise<void> {
+  try {
+    const db = await openIdb();
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).add({ caseId, blob: chunk, ts: Date.now() });
+    await new Promise<void>((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+    db.close();
+  } catch { /* best effort */ }
+}
+
+async function idbRecoverChunks(caseId: string): Promise<Blob[]> {
+  try {
+    const db = await openIdb();
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const store = tx.objectStore(IDB_STORE);
+    const all: { caseId: string; blob: Blob; ts: number }[] = await new Promise((res, rej) => {
+      const req = store.getAll();
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+    db.close();
+    return all
+      .filter((r) => r.caseId === caseId)
+      .sort((a, b) => a.ts - b.ts)
+      .map((r) => r.blob);
+  } catch {
+    return [];
+  }
+}
+
+async function idbClearChunks(caseId: string): Promise<void> {
+  try {
+    const db = await openIdb();
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    const store = tx.objectStore(IDB_STORE);
+    const keys: IDBValidKey[] = [];
+    const all: { caseId: string }[] = await new Promise((res, rej) => {
+      const entries: { caseId: string }[] = [];
+      const cursorReq = store.openCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          entries.push(cursor.value);
+          if ((cursor.value as { caseId: string }).caseId === caseId) {
+            keys.push(cursor.key);
+          }
+          cursor.continue();
+        } else {
+          res(entries);
+        }
+      };
+      cursorReq.onerror = () => rej(cursorReq.error);
+    });
+    for (const key of keys) {
+      store.delete(key);
+    }
+    await new Promise<void>((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+    db.close();
+  } catch { /* best effort */ }
+}
+
 export default function RecordPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -28,11 +108,14 @@ export default function RecordPage() {
   const [status, setStatus] = useState('Bereit fuer eine neue Session');
   const [dragActive, setDragActive] = useState(false);
 
+  const MAX_SEGMENT_SECONDS = 25 * 60; // Auto-Pause nach 25 Min pro Segment
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const segmentsRef = useRef<RecordingSegment[]>([]);
+  const autoPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -58,6 +141,30 @@ export default function RecordPage() {
 
     return () => window.clearInterval(interval);
   }, [recording]);
+
+  // Recover orphaned chunks from IndexedDB after browser crash
+  const [recoveredSegment, setRecoveredSegment] = useState<RecordingSegment | null>(null);
+  useEffect(() => {
+    if (!caseId) return;
+    idbRecoverChunks(caseId).then((chunks) => {
+      if (chunks.length === 0) return;
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      if (blob.size < 1000) {
+        idbClearChunks(caseId);
+        return;
+      }
+      const recovered: RecordingSegment = {
+        id: `${Date.now()}_recovered`,
+        label: 'Wiederhergestellt',
+        source: 'recording',
+        blob,
+        url: URL.createObjectURL(blob),
+        durationSeconds: Math.max(1, Math.floor(chunks.length * 10)) // ~10s per chunk
+      };
+      setRecoveredSegment(recovered);
+      setStatus('Nicht gespeicherte Aufnahme gefunden – bitte bestätigen');
+    });
+  }, [caseId]);
 
   const formatTime = (seconds: number) => {
     const safe = Math.max(0, Math.floor(seconds));
@@ -189,10 +296,46 @@ export default function RecordPage() {
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         chunksRef.current.push(event.data);
+        idbAppendChunk(caseId, event.data);
       }
     };
 
-    recorder.start();
+    recorder.onerror = () => {
+      console.error('[Recording] MediaRecorder Fehler – Notfall-Sicherung des Segments');
+      const emergencyBlob = chunksRef.current.length
+        ? new Blob(chunksRef.current, { type: 'audio/webm' })
+        : null;
+
+      closeMediaResources();
+      drawIdleLine();
+
+      if (emergencyBlob) {
+        const segmentNumber = segmentsRef.current.length + 1;
+        const elapsed = currentSegmentStartedAtMs
+          ? Math.max(1, Math.floor((Date.now() - currentSegmentStartedAtMs) / 1000))
+          : 1;
+        const emergencySegment: RecordingSegment = {
+          id: `${Date.now()}_emergency_${segmentNumber}`,
+          label: `Segment ${segmentNumber} (gerettet)`,
+          source: 'recording',
+          blob: emergencyBlob,
+          url: URL.createObjectURL(emergencyBlob),
+          durationSeconds: elapsed
+        };
+        setSegments((prev) => [...prev, emergencySegment]);
+        setStatus('Aufnahme wurde unterbrochen – Segment gerettet');
+      } else {
+        setStatus('Aufnahme wurde unterbrochen – keine Daten vorhanden');
+      }
+
+      setRecording(false);
+      setPaused(true);
+      setCurrentSegmentStartedAtMs(null);
+      chunksRef.current = [];
+      mediaRecorderRef.current = null;
+    };
+
+    recorder.start(10000);
 
     const audioContext = new AudioContext();
     audioContextRef.current = audioContext;
@@ -208,10 +351,24 @@ export default function RecordPage() {
     setCurrentSegmentStartedAtMs(Date.now());
     setRecording(true);
     setPaused(false);
-    setStatus('Aufnahme laeuft');
+    setStatus('Aufnahme läuft');
+
+    // Auto-Pause nach MAX_SEGMENT_SECONDS, damit kein Datenverlust bei sehr langen Aufnahmen
+    if (autoPauseTimerRef.current) clearTimeout(autoPauseTimerRef.current);
+    autoPauseTimerRef.current = setTimeout(() => {
+      if (recordingRef.current) {
+        setStatus('Auto-Pause: Segment-Limit erreicht – Segment wird gesichert');
+        pauseRecording();
+      }
+    }, MAX_SEGMENT_SECONDS * 1000);
   };
 
   const endCurrentSegment = async () => {
+    if (autoPauseTimerRef.current) {
+      clearTimeout(autoPauseTimerRef.current);
+      autoPauseTimerRef.current = null;
+    }
+
     const recorder = mediaRecorderRef.current;
     if (!recorder) return null;
 
@@ -235,6 +392,9 @@ export default function RecordPage() {
     drawIdleLine();
     setRecording(false);
     setCurrentSegmentStartedAtMs(null);
+
+    // Segment erfolgreich erstellt – IDB-Puffer leeren
+    idbClearChunks(caseId);
 
     if (!blob) return null;
 
@@ -503,6 +663,7 @@ export default function RecordPage() {
     drawIdleLine();
 
     return () => {
+      if (autoPauseTimerRef.current) clearTimeout(autoPauseTimerRef.current);
       closeMediaResources();
       segmentsRef.current.forEach((segment) => {
         if (previewAudioUrlRef.current && segment.url === previewAudioUrlRef.current) return;
@@ -539,6 +700,62 @@ export default function RecordPage() {
       <div style={{ fontSize: '14px', marginBottom: '18px', opacity: 0.9 }}>
         🎙️ {segments.length} Segmente aufgenommen · {formatTime(totalSeconds)} min
       </div>
+
+      {recording && liveSeconds > MAX_SEGMENT_SECONDS - 120 && (
+        <div style={{
+          background: 'rgba(245,158,11,0.9)',
+          color: '#fff',
+          padding: '8px 16px',
+          borderRadius: '8px',
+          fontSize: '14px',
+          fontWeight: 600,
+          marginBottom: '12px',
+          textAlign: 'center'
+        }}>
+          ⚠️ Auto-Pause in {formatTime(MAX_SEGMENT_SECONDS - liveSeconds)} – Segment wird automatisch gesichert
+        </div>
+      )}
+
+      {recoveredSegment && (
+        <div style={{
+          background: 'rgba(59,130,246,0.9)',
+          color: '#fff',
+          padding: '10px 16px',
+          borderRadius: '8px',
+          fontSize: '14px',
+          fontWeight: 600,
+          marginBottom: '12px',
+          textAlign: 'center',
+          display: 'flex',
+          gap: '10px',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          justifyContent: 'center'
+        }}>
+          <span>💾 Nicht gespeicherte Aufnahme gefunden ({(recoveredSegment.blob.size / 1024 / 1024).toFixed(1)} MB)</span>
+          <button
+            onClick={() => {
+              setSegments((prev) => [...prev, recoveredSegment]);
+              setRecoveredSegment(null);
+              idbClearChunks(caseId);
+              setStatus('Wiederhergestelltes Segment übernommen');
+            }}
+            style={{ background: '#fff', color: '#1e40af', border: 'none', borderRadius: '6px', padding: '4px 12px', fontWeight: 700, cursor: 'pointer' }}
+          >
+            Übernehmen
+          </button>
+          <button
+            onClick={() => {
+              setRecoveredSegment(null);
+              idbClearChunks(caseId);
+              setStatus('Wiederherstellung verworfen');
+            }}
+            style={{ background: 'transparent', color: '#fff', border: '1px solid #fff', borderRadius: '6px', padding: '4px 12px', fontWeight: 600, cursor: 'pointer' }}
+          >
+            Verwerfen
+          </button>
+        </div>
+      )}
 
       {/* 🌊 VISUAL */}
       <canvas
