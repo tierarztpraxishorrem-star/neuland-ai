@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserPractice } from "@/lib/server/getUserPractice";
 import { getUnreadCounts as getSlackUnread, isSlackConfigured } from "@/lib/server/slack";
+import { getUnreadCount as getMailUnread } from "@/lib/server/mail";
+import { isMsGraphConfigured } from "@/lib/server/msGraph";
 
 /**
  * GET /api/kommunikation/unread
@@ -33,9 +35,20 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Mail unread count (nur wenn Microsoft Graph konfiguriert ist)
+  let mail = 0;
+  if (isMsGraphConfigured() && process.env.MICROSOFT_MAILBOX_EMAIL) {
+    try {
+      mail = await getMailUnread();
+    } catch {
+      // ignore — Graph kann zeitweise 429/5xx liefern, nicht blockieren
+    }
+  }
+
   return NextResponse.json({
     whatsapp,
     slack,
-    total: whatsapp + slack,
+    mail,
+    total: whatsapp + slack + mail,
   });
 }

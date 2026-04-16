@@ -36,7 +36,7 @@ export default function Sidebar() {
   const collapsedWidth = 86;
   const diamondEnabled = isPersonalDiamondEnabled();
   const [hrRunning, setHrRunning] = useState(false);
-  const [unreadCounts, setUnreadCounts] = useState<{ whatsapp: number; slack: number; total: number }>({ whatsapp: 0, slack: 0, total: 0 });
+  const [unreadCounts, setUnreadCounts] = useState<{ whatsapp: number; slack: number; mail: number; total: number }>({ whatsapp: 0, slack: 0, mail: 0, total: 0 });
 
   const loadUnreadCounts = async () => {
     try {
@@ -47,7 +47,7 @@ export default function Sidebar() {
       });
       if (res.ok) {
         const data = await res.json();
-        setUnreadCounts({ whatsapp: data.whatsapp || 0, slack: data.slack || 0, total: data.total || 0 });
+        setUnreadCounts({ whatsapp: data.whatsapp || 0, slack: data.slack || 0, mail: data.mail || 0, total: data.total || 0 });
       }
     } catch {
       // silently ignore

@@ -322,6 +322,58 @@ export default function VetMind() {
     setSpEditItem(null);
   };
 
+  // ───── Mail state ─────
+  type MailItem = {
+    id: string;
+    subject: string;
+    bodyPreview: string;
+    from?: { name?: string; address: string };
+    receivedDateTime: string;
+    isRead: boolean;
+    hasAttachments: boolean;
+  };
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailLoading, setMailLoading] = useState(false);
+  const [mailError, setMailError] = useState<string | null>(null);
+  const [mailItems, setMailItems] = useState<MailItem[]>([]);
+  const [mailDraftingId, setMailDraftingId] = useState<string | null>(null);
+
+  const loadMailInbox = async () => {
+    setMailError(null);
+    setMailLoading(true);
+    try {
+      const res = await spFetch("/api/mail/messages?folder=inbox&limit=15");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Mails konnten nicht geladen werden.");
+      setMailItems(data.messages || []);
+    } catch (err) {
+      setMailError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setMailLoading(false);
+    }
+  };
+
+  const handleMailDraftInChat = async (m: MailItem) => {
+    setMailError(null);
+    setMailDraftingId(m.id);
+    try {
+      const res = await spFetch("/api/mail/draft-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: m.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "KI-Entwurf fehlgeschlagen.");
+      const sender = m.from?.name || m.from?.address || "Unbekannt";
+      const chatMsg = `[Mail-Entwurf für: ${m.subject}]\nVon: ${sender}\n\nKI-Antwortvorschlag:\n${data.draft || ""}\n\n(Zum Versenden bitte in /kommunikation/mail öffnen.)`;
+      setMessages((prev) => [...prev, { role: "assistant", content: chatMsg }]);
+    } catch (err) {
+      setMailError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setMailDraftingId(null);
+    }
+  };
+
   const takeLastAssistantText = () => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -2872,6 +2924,110 @@ const filteredSessions = sortedSessions.filter((s: any) => {
                       >
                         ✎ Bearbeiten
                       </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════════ MAIL ═══════════════ */}
+      <div className="mt-3 bg-white border border-gray-200 rounded-2xl overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            setMailOpen((v) => {
+              const next = !v;
+              if (next && mailItems.length === 0 && !mailLoading) loadMailInbox();
+              return next;
+            });
+          }}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <span>📧</span>
+            <span>E-Mail Posteingang</span>
+            {mailItems.filter((m) => !m.isRead).length > 0 && (
+              <span className="ml-1 px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                {mailItems.filter((m) => !m.isRead).length}
+              </span>
+            )}
+          </span>
+          <span className={`text-gray-400 transition-transform ${mailOpen ? "rotate-180" : ""}`}>▾</span>
+        </button>
+
+        {mailOpen && (
+          <div className="border-t border-gray-100 p-4 space-y-3">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={loadMailInbox}
+                disabled={mailLoading}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {mailLoading ? "Lädt..." : "🔄 Aktualisieren"}
+              </button>
+              <a
+                href="/kommunikation/mail"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors"
+              >
+                ↗ Volle Mail-Ansicht
+              </a>
+            </div>
+
+            {mailError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {mailError}
+              </div>
+            )}
+
+            {!mailLoading && mailItems.length === 0 && !mailError && (
+              <div className="text-xs text-gray-500">Posteingang ist leer.</div>
+            )}
+
+            {mailItems.length > 0 && (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {mailItems.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`rounded-xl border p-3 ${!m.isRead ? "border-[#0f6b74] bg-teal-50/30" : "border-gray-200"}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className={`text-xs ${!m.isRead ? "font-bold" : "font-semibold"} text-gray-800 truncate`}>
+                          {m.from?.name || m.from?.address || "Unbekannt"}
+                          {m.hasAttachments && <span className="ml-1">📎</span>}
+                        </div>
+                        <div className={`text-sm ${!m.isRead ? "font-semibold" : "font-medium"} text-gray-900 truncate`}>
+                          {m.subject}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate mt-0.5">{m.bodyPreview}</div>
+                      </div>
+                      <div className="text-[10px] text-gray-400 whitespace-nowrap">
+                        {new Date(m.receivedDateTime).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleMailDraftInChat(m)}
+                        disabled={mailDraftingId === m.id}
+                        className="px-2.5 py-1 rounded-lg border border-gray-200 text-[11px] font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {mailDraftingId === m.id ? "Entwurf..." : "✨ KI-Entwurf im Chat"}
+                      </button>
+                      <a
+                        href={`/kommunikation/mail/${encodeURIComponent(m.id)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-lg border border-gray-200 text-[11px] font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors"
+                      >
+                        ↗ Öffnen &amp; antworten
+                      </a>
                     </div>
                   </div>
                 ))}

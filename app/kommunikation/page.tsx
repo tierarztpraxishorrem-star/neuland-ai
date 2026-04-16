@@ -43,8 +43,6 @@ type CallRecording = {
 
 export default function KommunikationPage() {
 
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
   const [callbackNumber, setCallbackNumber] = useState("");
   const [activePracticeId, setActivePracticeId] = useState<string | null>(null);
   const [fonioEnabled, setFonioEnabled] = useState(false);
@@ -413,22 +411,17 @@ export default function KommunikationPage() {
       <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
 
         {/* 📧 EMAIL */}
-        <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5">
-          <h3>📧 E-Mail</h3>
-          <input
-            placeholder="Empfänger"
-            onChange={(e) => setEmail(e.target.value)}
-            className="p-3 rounded-2xl border border-gray-200 w-full"
-          />
-          <textarea
-            placeholder="Nachricht"
-            onChange={(e) => setMessage(e.target.value)}
-            className="p-3 rounded-2xl border border-gray-200 min-h-20 w-full"
-          />
-          <button className="p-3 rounded-2xl bg-[#0f6b74] text-white font-semibold cursor-pointer border-0">
-            Senden
-          </button>
-        </div>
+        <Link href="/kommunikation/mail" className="no-underline text-inherit">
+          <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5 cursor-pointer transition-colors hover:border-[#0f6b74] relative">
+            <h3>📧 E-Mail Inbox</h3>
+            <div className="text-sm text-slate-500">
+              Eingehende E-Mails lesen, beantworten und KI-Antwortvorschläge nutzen.
+            </div>
+            <div className="p-3 rounded-2xl bg-[#0f6b74] text-white font-semibold text-center mt-1">
+              Zum E-Mail-Posteingang →
+            </div>
+          </div>
+        </Link>
 
         {/* 📱 WHATSAPP */}
         <Link href="/kommunikation/whatsapp" className="no-underline text-inherit">
