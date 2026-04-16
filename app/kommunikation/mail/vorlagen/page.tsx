@@ -40,6 +40,78 @@ export default function MailTemplatesPage() {
   const [signatureInitial, setSignatureInitial] = useState("");
   const [signatureSaving, setSignatureSaving] = useState(false);
 
+  // Push-Subscriptions (Admin)
+  type Subscription = { id: string; subscription_id: string; expires_at: string; minutes_until_expiry: number; active: boolean };
+  const [subs, setSubs] = useState<Subscription[]>([]);
+  const [subsLoading, setSubsLoading] = useState(false);
+  const [subActionLoading, setSubActionLoading] = useState(false);
+  const [subsUnavailable, setSubsUnavailable] = useState(false);
+
+  const loadSubs = useCallback(async () => {
+    setSubsLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/mail/subscriptions");
+      if (res.status === 403) { setSubsUnavailable(true); return; }
+      const data = await res.json();
+      if (res.ok) setSubs(data.subscriptions || []);
+    } catch {
+      setSubsUnavailable(true);
+    } finally {
+      setSubsLoading(false);
+    }
+  }, []);
+
+  async function activatePush() {
+    setError(null);
+    setSubActionLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/mail/subscriptions", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Aktivierung fehlgeschlagen.");
+      setInfo("✅ Push-Benachrichtigungen aktiviert.");
+      await loadSubs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSubActionLoading(false);
+    }
+  }
+
+  async function renewAllSubs() {
+    setError(null);
+    setSubActionLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/mail/subscriptions", { method: "PATCH" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Renew fehlgeschlagen.");
+      setInfo(`🔄 ${data.renewed?.length || 0} Subscription(s) erneuert.`);
+      await loadSubs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSubActionLoading(false);
+    }
+  }
+
+  async function deleteSub(id: string) {
+    if (!confirm("Push-Subscription wirklich deaktivieren?")) return;
+    setError(null);
+    setSubActionLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/mail/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Löschen fehlgeschlagen.");
+      }
+      setInfo("Subscription gelöscht.");
+      await loadSubs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSubActionLoading(false);
+    }
+  }
+
   const loadAll = useCallback(async () => {
     try {
       setError(null);
@@ -64,6 +136,7 @@ export default function MailTemplatesPage() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { loadSubs(); }, [loadSubs]);
 
   function startNew() {
     setEditing({ id: "", name: "", subject: null, body: "", created_at: "", updated_at: "" });
@@ -191,6 +264,86 @@ export default function MailTemplatesPage() {
             )}
           </div>
         </Card>
+
+        {/* Push-Benachrichtigungen */}
+        {!subsUnavailable && (
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: uiTokens.textPrimary }}>🔔 Push-Benachrichtigungen</div>
+                <div style={{ fontSize: 12, color: uiTokens.textSecondary, marginTop: 2 }}>
+                  Microsoft Graph schickt Neuigkeiten live, statt alle 5 Minuten zu pollen.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {subs.some((s) => s.active) ? (
+                  <Button variant="secondary" size="sm" onClick={renewAllSubs} disabled={subActionLoading}>
+                    🔄 Erneuern
+                  </Button>
+                ) : (
+                  <Button variant="primary" size="sm" onClick={activatePush} disabled={subActionLoading}>
+                    {subActionLoading ? "…" : "+ Push aktivieren"}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {subsLoading ? (
+              <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Laden…</div>
+            ) : subs.length === 0 ? (
+              <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>
+                {`Noch keine aktive Subscription. Klick „+ Push aktivieren" für Live-Updates.`}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 6 }}>
+                {subs.map((s) => {
+                  const minutes = s.minutes_until_expiry;
+                  const hours = Math.round(minutes / 60);
+                  const days = Math.round(minutes / 1440);
+                  const label = minutes <= 0
+                    ? "abgelaufen"
+                    : minutes < 60
+                      ? `läuft ab in ${minutes} Min.`
+                      : hours < 48
+                        ? `läuft ab in ${hours} Std.`
+                        : `läuft ab in ${days} Tagen`;
+                  return (
+                    <div key={s.id} style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      background: s.active ? "#f0fdf4" : "#fef2f2",
+                      border: `1px solid ${s.active ? "#bbf7d0" : "#fecaca"}`,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      fontSize: 12,
+                    }}>
+                      <div>
+                        <code style={{ fontSize: 11, color: uiTokens.textSecondary }}>
+                          {s.subscription_id.slice(0, 16)}…
+                        </code>
+                        <span style={{ marginLeft: 10, color: s.active ? "#166534" : "#b91c1c", fontWeight: 600 }}>
+                          {s.active ? "aktiv" : "abgelaufen"} · {label}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => deleteSub(s.subscription_id)}
+                        disabled={subActionLoading}
+                        style={{ background: "transparent", border: "none", color: "#b91c1c", cursor: "pointer", fontSize: 11 }}
+                      >
+                        Löschen
+                      </button>
+                    </div>
+                  );
+                })}
+                <div style={{ fontSize: 11, color: uiTokens.textSecondary, marginTop: 4 }}>
+                  Cron-Job erneuert automatisch alle 6h Subscriptions, die in &lt; 24h ablaufen.
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Templates list */}
         <Card>

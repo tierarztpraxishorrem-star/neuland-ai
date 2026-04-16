@@ -159,12 +159,28 @@ export default function MailInboxPage() {
 
   useEffect(() => {
     load();
-    // Poll every 30s (nur Inbox)
+    // Poll alle 5min als Fallback; Push kommt (wenn eingerichtet) via Supabase Realtime weiter unten.
     if (folder === "inbox") {
-      const interval = setInterval(load, 30000);
+      const interval = setInterval(load, 300_000);
       return () => clearInterval(interval);
     }
   }, [load, folder]);
+
+  // Realtime-Push: bei INSERT in mail_notifications neu laden
+  useEffect(() => {
+    if (folder !== "inbox") return;
+    const channel = supabase
+      .channel("mail-notifications-inbox")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "mail_notifications" },
+        () => { load(); }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [folder, load]);
 
   const visibleMessages = categoryFilter
     ? messages.filter((m) => (m.categories || []).includes(categoryFilter))
