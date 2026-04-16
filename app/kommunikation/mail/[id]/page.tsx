@@ -87,8 +87,12 @@ export default function MailDetailPage() {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyAll, setReplyAll] = useState(false);
   const [replyBody, setReplyBody] = useState("");
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [replySending, setReplySending] = useState(false);
   const [replyInfo, setReplyInfo] = useState<string | null>(null);
+
+  const MAX_FILE_MB = 3;
+  const MAX_TOTAL_MB = 10;
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiInstruction, setAiInstruction] = useState("");
@@ -137,17 +141,34 @@ export default function MailDetailPage() {
       setError("Antworttext fehlt.");
       return;
     }
+
+    // Client-side Attachment-Validation
+    const totalSize = replyFiles.reduce((s, f) => s + f.size, 0);
+    const oversized = replyFiles.find((f) => f.size > MAX_FILE_MB * 1024 * 1024);
+    if (oversized) {
+      setError(`Anhang "${oversized.name}" überschreitet ${MAX_FILE_MB} MB.`);
+      return;
+    }
+    if (totalSize > MAX_TOTAL_MB * 1024 * 1024) {
+      setError(`Gesamtgröße der Anhänge überschreitet ${MAX_TOTAL_MB} MB.`);
+      return;
+    }
+
     try {
       setReplySending(true);
+      const form = new FormData();
+      form.append("body", replyBody);
+      form.append("replyAll", String(replyAll));
+      for (const f of replyFiles) form.append("files", f);
       const res = await fetchWithAuth(`/api/mail/messages/${encodeURIComponent(messageId)}/reply`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: replyBody, replyAll }),
+        body: form,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Versand fehlgeschlagen.");
       setReplyInfo("✅ Antwort gesendet.");
       setReplyBody("");
+      setReplyFiles([]);
       setTimeout(() => { setReplyOpen(false); setReplyInfo(null); }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
@@ -419,6 +440,57 @@ export default function MailDetailPage() {
                   onChange={(e) => setReplyBody(e.target.value)}
                   style={{ minHeight: 200 }}
                 />
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: uiTokens.textSecondary }}>
+                    Anhänge (max. {MAX_FILE_MB} MB pro Datei, insgesamt {MAX_TOTAL_MB} MB)
+                  </span>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => {
+                      const list = Array.from(e.target.files || []);
+                      setReplyFiles((prev) => [...prev, ...list]);
+                      e.target.value = "";
+                    }}
+                    style={{ fontSize: 13 }}
+                  />
+                </label>
+                {replyFiles.length > 0 && (
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {replyFiles.map((f, i) => {
+                      const tooBig = f.size > MAX_FILE_MB * 1024 * 1024;
+                      return (
+                        <div key={`${f.name}-${i}`} style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontSize: 12,
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          background: tooBig ? "#fef2f2" : "#f8fafc",
+                          border: `1px solid ${tooBig ? "#fca5a5" : "#e2e8f0"}`,
+                        }}>
+                          <span style={{ color: tooBig ? "#b91c1c" : uiTokens.textPrimary }}>
+                            📎 {f.name}
+                            <span style={{ color: uiTokens.textSecondary, marginLeft: 6 }}>
+                              ({formatSize(f.size)}{tooBig ? ` – zu groß, max. ${MAX_FILE_MB} MB` : ""})
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
+                            style={{ background: "transparent", border: "none", color: uiTokens.textSecondary, cursor: "pointer", fontSize: 14, padding: "0 4px" }}
+                            aria-label="Anhang entfernen"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {replyInfo && (
                   <div style={{ fontSize: 12, color: "#166534" }}>{replyInfo}</div>
                 )}
@@ -426,7 +498,7 @@ export default function MailDetailPage() {
                   <Button type="submit" variant="primary" disabled={replySending || !replyBody.trim()}>
                     {replySending ? "Sendet…" : "Senden"}
                   </Button>
-                  <Button type="button" variant="ghost" onClick={() => setReplyOpen(false)} disabled={replySending}>
+                  <Button type="button" variant="ghost" onClick={() => { setReplyOpen(false); setReplyFiles([]); }} disabled={replySending}>
                     Schließen
                   </Button>
                 </div>

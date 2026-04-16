@@ -70,8 +70,17 @@ export default function MailInboxPage() {
   const [composeCc, setComposeCc] = useState("");
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
+  const [composeFiles, setComposeFiles] = useState<File[]>([]);
   const [composeSending, setComposeSending] = useState(false);
   const [composeInfo, setComposeInfo] = useState<string | null>(null);
+
+  const MAX_FILE_MB = 3;
+  const MAX_TOTAL_MB = 10;
+  function formatSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   const load = useCallback(async () => {
     try {
@@ -119,18 +128,27 @@ export default function MailInboxPage() {
       setError("Inhalt fehlt.");
       return;
     }
+    // Client-side Attachment-Validation (Server validiert nochmal)
+    const totalSize = composeFiles.reduce((s, f) => s + f.size, 0);
+    const oversized = composeFiles.find((f) => f.size > MAX_FILE_MB * 1024 * 1024);
+    if (oversized) {
+      setError(`Anhang "${oversized.name}" überschreitet ${MAX_FILE_MB} MB.`);
+      return;
+    }
+    if (totalSize > MAX_TOTAL_MB * 1024 * 1024) {
+      setError(`Gesamtgröße der Anhänge überschreitet ${MAX_TOTAL_MB} MB.`);
+      return;
+    }
+
     try {
       setComposeSending(true);
-      const res = await fetchWithAuth("/api/mail/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: composeTo,
-          cc: composeCc,
-          subject: composeSubject,
-          body: composeBody,
-        }),
-      });
+      const form = new FormData();
+      form.append("to", composeTo);
+      form.append("cc", composeCc);
+      form.append("subject", composeSubject);
+      form.append("body", composeBody);
+      for (const f of composeFiles) form.append("files", f);
+      const res = await fetchWithAuth("/api/mail/send", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Versand fehlgeschlagen.");
       setComposeInfo("✅ Gesendet.");
@@ -138,6 +156,7 @@ export default function MailInboxPage() {
       setComposeCc("");
       setComposeSubject("");
       setComposeBody("");
+      setComposeFiles([]);
       setTimeout(() => { setShowCompose(false); setComposeInfo(null); }, 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
@@ -209,6 +228,64 @@ export default function MailInboxPage() {
                 style={{ minHeight: 200 }}
                 required
               />
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 12, color: uiTokens.textSecondary }}>
+                  Anhänge (max. {MAX_FILE_MB} MB pro Datei, insgesamt {MAX_TOTAL_MB} MB)
+                </span>
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => {
+                    const list = Array.from(e.target.files || []);
+                    setComposeFiles((prev) => [...prev, ...list]);
+                    e.target.value = "";
+                  }}
+                  style={{ fontSize: 13 }}
+                />
+              </label>
+              {composeFiles.length > 0 && (
+                <div style={{ display: "grid", gap: 4 }}>
+                  {composeFiles.map((f, i) => {
+                    const tooBig = f.size > MAX_FILE_MB * 1024 * 1024;
+                    return (
+                      <div key={`${f.name}-${i}`} style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        background: tooBig ? "#fef2f2" : "#f8fafc",
+                        border: `1px solid ${tooBig ? "#fca5a5" : "#e2e8f0"}`,
+                      }}>
+                        <span style={{ color: tooBig ? "#b91c1c" : uiTokens.textPrimary }}>
+                          📎 {f.name}
+                          <span style={{ color: uiTokens.textSecondary, marginLeft: 6 }}>
+                            ({formatSize(f.size)}{tooBig ? ` – zu groß, max. ${MAX_FILE_MB} MB` : ""})
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setComposeFiles((prev) => prev.filter((_, j) => j !== i))}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: uiTokens.textSecondary,
+                            cursor: "pointer",
+                            fontSize: 14,
+                            padding: "0 4px",
+                          }}
+                          aria-label="Anhang entfernen"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {composeInfo && (
                 <div style={{ fontSize: 12, color: "#166534" }}>{composeInfo}</div>
               )}
@@ -216,7 +293,7 @@ export default function MailInboxPage() {
                 <Button type="submit" variant="primary" disabled={composeSending}>
                   {composeSending ? "Sendet…" : "Senden"}
                 </Button>
-                <Button type="button" variant="ghost" onClick={() => setShowCompose(false)} disabled={composeSending}>
+                <Button type="button" variant="ghost" onClick={() => { setShowCompose(false); setComposeFiles([]); }} disabled={composeSending}>
                   Verwerfen
                 </Button>
               </div>

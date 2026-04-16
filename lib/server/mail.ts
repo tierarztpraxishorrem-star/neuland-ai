@@ -254,6 +254,17 @@ export async function getAttachmentContent(
   };
 }
 
+export type OutgoingAttachment = {
+  name: string;
+  contentType: string;
+  contentBytes: string; // base64
+};
+
+// Graph erlaubt im /sendMail + /reply Payload FileAttachments bis max. 3 MB pro Anhang
+// (größere Anhänge brauchen upload-sessions – noch nicht implementiert).
+export const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+export const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
 export type SendMailInput = {
   to: string[] | MailAddress[];
   cc?: string[] | MailAddress[];
@@ -262,6 +273,7 @@ export type SendMailInput = {
   body: string;
   isHtml?: boolean;
   saveToSentItems?: boolean;
+  attachments?: OutgoingAttachment[];
 };
 
 function toRecipientArray(list?: string[] | MailAddress[]): Array<{ emailAddress: { address: string; name?: string } }> {
@@ -274,11 +286,38 @@ function toRecipientArray(list?: string[] | MailAddress[]): Array<{ emailAddress
   }).filter((r) => r.emailAddress.address);
 }
 
+function toGraphAttachments(list?: OutgoingAttachment[]) {
+  if (!list || list.length === 0) return undefined;
+  let total = 0;
+  return list.map((a) => {
+    if (!a.name || !a.contentBytes) {
+      throw new MsGraphError(`Ungültiger Anhang: ${a.name || '(ohne Name)'}`);
+    }
+    // Base64-Länge grob in Bytes umrechnen (≈ 3/4 der String-Länge)
+    const approxBytes = Math.floor((a.contentBytes.length * 3) / 4);
+    if (approxBytes > MAX_ATTACHMENT_BYTES) {
+      throw new MsGraphError(`Anhang "${a.name}" überschreitet ${Math.floor(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB.`);
+    }
+    total += approxBytes;
+    if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
+      throw new MsGraphError(`Gesamtgröße der Anhänge überschreitet ${Math.floor(MAX_TOTAL_ATTACHMENT_BYTES / 1024 / 1024)} MB.`);
+    }
+    return {
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: a.name,
+      contentType: a.contentType || 'application/octet-stream',
+      contentBytes: a.contentBytes,
+    };
+  });
+}
+
 export async function sendMail(input: SendMailInput): Promise<void> {
   const to = toRecipientArray(input.to);
   if (to.length === 0) throw new MsGraphError('Mindestens ein Empfänger ist erforderlich.');
   if (!input.subject?.trim()) throw new MsGraphError('Betreff ist erforderlich.');
   if (!input.body?.trim()) throw new MsGraphError('Inhalt ist erforderlich.');
+
+  const attachments = toGraphAttachments(input.attachments);
 
   const payload = {
     message: {
@@ -290,6 +329,7 @@ export async function sendMail(input: SendMailInput): Promise<void> {
       toRecipients: to,
       ccRecipients: toRecipientArray(input.cc),
       bccRecipients: toRecipientArray(input.bcc),
+      attachments,
     },
     saveToSentItems: input.saveToSentItems !== false,
   };
@@ -315,12 +355,65 @@ export type ReplyInput = {
   isHtml?: boolean;
   replyAll?: boolean;
   additionalTo?: string[] | MailAddress[];
+  attachments?: OutgoingAttachment[];
 };
 
 export async function replyToMessage(input: ReplyInput): Promise<void> {
   if (!input.messageId) throw new MsGraphError('Nachrichten-ID fehlt.');
   if (!input.body?.trim()) throw new MsGraphError('Antworttext fehlt.');
 
+  const attachments = toGraphAttachments(input.attachments);
+
+  // Bei Anhängen: createReply → attachments hinzufügen → send (mehrstufig).
+  // Ohne Anhänge: einfaches /reply mit comment funktioniert einstufig.
+  if (attachments && attachments.length > 0) {
+    const action = input.replyAll ? 'createReplyAll' : 'createReply';
+    const createPath = buildUserPath(`/messages/${encodeURIComponent(input.messageId)}/${action}`);
+    const createRes = await graphFetch(createPath, {
+      method: 'POST',
+      body: JSON.stringify({ comment: input.body }),
+    });
+    if (!createRes.ok) {
+      let message = `Antwortentwurf konnte nicht erstellt werden (${createRes.status}).`;
+      try {
+        const body = await createRes.json();
+        if (body?.error?.message) message = `Graph: ${body.error.message}`;
+      } catch {}
+      throw new MsGraphError(message, createRes.status);
+    }
+    const draft = (await createRes.json()) as { id?: string };
+    if (!draft.id) throw new MsGraphError('Antwortentwurf ohne ID.');
+
+    for (const att of attachments) {
+      const attPath = buildUserPath(`/messages/${encodeURIComponent(draft.id)}/attachments`);
+      const attRes = await graphFetch(attPath, {
+        method: 'POST',
+        body: JSON.stringify(att),
+      });
+      if (!attRes.ok) {
+        let message = `Anhang konnte nicht angehängt werden (${attRes.status}).`;
+        try {
+          const body = await attRes.json();
+          if (body?.error?.message) message = `Graph: ${body.error.message}`;
+        } catch {}
+        throw new MsGraphError(message, attRes.status);
+      }
+    }
+
+    const sendPath = buildUserPath(`/messages/${encodeURIComponent(draft.id)}/send`);
+    const sendRes = await graphFetch(sendPath, { method: 'POST' });
+    if (!sendRes.ok && sendRes.status !== 202) {
+      let message = `Antwort konnte nicht gesendet werden (${sendRes.status}).`;
+      try {
+        const body = await sendRes.json();
+        if (body?.error?.message) message = `Graph: ${body.error.message}`;
+      } catch {}
+      throw new MsGraphError(message, sendRes.status);
+    }
+    return;
+  }
+
+  // Kein Anhang → einstufige /reply Action
   const action = input.replyAll ? 'replyAll' : 'reply';
   const message: Record<string, unknown> = {};
   const additional = toRecipientArray(input.additionalTo);
