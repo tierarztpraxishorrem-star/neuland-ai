@@ -23,6 +23,21 @@ const HISTORY_PER_CHANNEL = 200;
 const MAX_RESULTS = 40;
 const WORKSPACE_SUBDOMAIN = "tphorrem";
 
+function normalizeForSearch(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/_([^_\n]+)_/g, "$1")
+    .replace(/~([^~\n]+)~/g, "$1")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/<@[^|>]+\|([^>]+)>/g, "$1")
+    .replace(/<#[^|>]+\|([^>]+)>/g, "$1")
+    .replace(/<[^|>]+\|([^>]+)>/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await getUserPractice(req);
@@ -44,7 +59,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const needle = q.toLowerCase();
+    const needle = normalizeForSearch(q);
 
     const [channels, users] = await Promise.all([listChannels(200), listUsers()]);
     const userMap: Record<string, string> = {};
@@ -61,7 +76,7 @@ export async function GET(req: NextRequest) {
           const { messages } = await getChannelHistory(ch.id, HISTORY_PER_CHANNEL);
           for (const m of messages) {
             if (!m.text) continue;
-            if (!m.text.toLowerCase().includes(needle)) continue;
+            if (!normalizeForSearch(m.text).includes(needle)) continue;
             const tsNum = parseFloat(m.ts);
             matches.push({
               id: `${ch.id}-${m.ts}`,
