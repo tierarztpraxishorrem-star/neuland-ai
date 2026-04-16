@@ -135,6 +135,87 @@ export default function VetMind() {
   const [openPromptDropdown, setOpenPromptDropdown] = useState<PromptCategory | null>(null);
   const [lastPromptId, setLastPromptId] = useState("");
 
+  const [ttsOpen, setTtsOpen] = useState(false);
+  const [ttsText, setTtsText] = useState("");
+  const [ttsVoice, setTtsVoice] = useState<"alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer">("nova");
+  const [ttsSpeed, setTtsSpeed] = useState(1.0);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [ttsAudioUrl, setTtsAudioUrl] = useState<string | null>(null);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const ttsAudioUrlRef = useRef<string | null>(null);
+
+  const TTS_VOICES: Array<{ value: typeof ttsVoice; label: string; hint: string }> = [
+    { value: "nova", label: "Nova", hint: "Natürlich, professionell" },
+    { value: "alloy", label: "Alloy", hint: "Neutral, ausgewogen" },
+    { value: "echo", label: "Echo", hint: "Männlich, klar" },
+    { value: "onyx", label: "Onyx", hint: "Männlich, tief" },
+    { value: "shimmer", label: "Shimmer", hint: "Weich, freundlich" },
+    { value: "fable", label: "Fable", hint: "Britisch, ausdrucksstark" },
+  ];
+
+  useEffect(() => () => {
+    if (ttsAudioUrlRef.current) URL.revokeObjectURL(ttsAudioUrlRef.current);
+  }, []);
+
+  const takeLastAssistantText = () => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m && m.role === "assistant" && typeof m.content === "string" && m.content.trim().length > 0) {
+        const plain = m.content.replace(/[*_`#>\-]{1,}/g, "").trim();
+        setTtsText(plain.slice(0, 4096));
+        setTtsError(null);
+        return;
+      }
+    }
+    setTtsError("Noch keine KI-Antwort im Chat vorhanden.");
+  };
+
+  const generateTts = async () => {
+    const trimmed = ttsText.trim();
+    if (!trimmed) {
+      setTtsError("Bitte Text eingeben.");
+      return;
+    }
+    if (trimmed.length > 4096) {
+      setTtsError(`Text ist zu lang (${trimmed.length} / 4096 Zeichen).`);
+      return;
+    }
+    setTtsError(null);
+    setTtsLoading(true);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: trimmed, voice: ttsVoice, speed: ttsSpeed }),
+      });
+      if (!res.ok) {
+        let message = `Fehler ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) message = data.error;
+        } catch {}
+        throw new Error(message);
+      }
+      const blob = await res.blob();
+      if (ttsAudioUrlRef.current) URL.revokeObjectURL(ttsAudioUrlRef.current);
+      const url = URL.createObjectURL(blob);
+      ttsAudioUrlRef.current = url;
+      setTtsAudioUrl(url);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `vetmind-${Date.now()}.mp3`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
+      setTtsError(msg);
+    } finally {
+      setTtsLoading(false);
+    }
+  };
+
   const getContextFileType = (name: string): UploadedContextFile['fileType'] => {
     const lower = name.toLowerCase();
     if (lower.endsWith('.pdf')) return 'pdf';
@@ -2420,6 +2501,103 @@ const filteredSessions = sortedSessions.filter((s: any) => {
           </Button>
         </div>
       )}
+
+      {/* ═══════════════ TEXT-TO-SPEECH ═══════════════ */}
+      <div className="mt-3 bg-white border border-gray-200 rounded-2xl overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setTtsOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <span>🔊</span>
+            <span>Text zu Sprache</span>
+          </span>
+          <span className={`text-gray-400 transition-transform ${ttsOpen ? "rotate-180" : ""}`}>▾</span>
+        </button>
+
+        {ttsOpen && (
+          <div className="border-t border-gray-100 p-4 space-y-3">
+            <div className="relative">
+              <textarea
+                value={ttsText}
+                onChange={(e) => {
+                  const next = e.target.value.slice(0, 4096);
+                  setTtsText(next);
+                  if (ttsError) setTtsError(null);
+                }}
+                placeholder="Text eingeben oder aus Chat übernehmen..."
+                className="w-full min-h-[110px] p-3 pr-16 rounded-xl border border-gray-200 text-sm outline-none focus:border-[#0f6b74] focus:ring-2 focus:ring-[#0f6b74]/15 resize-y"
+              />
+              <div className="absolute bottom-2 right-3 text-xs text-gray-400 pointer-events-none">
+                {ttsText.length} / 4096
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <span className="font-semibold">Stimme</span>
+                <select
+                  value={ttsVoice}
+                  onChange={(e) => setTtsVoice(e.target.value as typeof ttsVoice)}
+                  className="px-2 py-1.5 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-[#0f6b74]"
+                >
+                  {TTS_VOICES.map((v) => (
+                    <option key={v.value} value={v.value}>
+                      {v.label} – {v.hint}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs text-gray-600 flex-1 min-w-[220px]">
+                <span className="font-semibold">Tempo</span>
+                <input
+                  type="range"
+                  min={0.75}
+                  max={1.5}
+                  step={0.05}
+                  value={ttsSpeed}
+                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
+                  className="flex-1 accent-[#0f6b74]"
+                />
+                <span className="w-12 text-right tabular-nums">{ttsSpeed.toFixed(2)}x</span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={takeLastAssistantText}
+                className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors"
+              >
+                📥 Aus letzter KI-Antwort übernehmen
+              </button>
+              <button
+                type="button"
+                onClick={generateTts}
+                disabled={ttsLoading || !ttsText.trim()}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#0f6b74] hover:bg-[#0d5c64] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                {ttsLoading ? "⏳ Wird generiert..." : "🎙️ Generieren & Herunterladen"}
+              </button>
+            </div>
+
+            {ttsError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {ttsError}
+              </div>
+            )}
+
+            {ttsAudioUrl && !ttsLoading && (
+              <div className="rounded-xl bg-gray-50 border border-gray-200 p-3">
+                <div className="text-xs text-gray-500 mb-2">Vorschau</div>
+                <audio controls src={ttsAudioUrl} className="w-full" />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   </div>
 
