@@ -55,11 +55,31 @@ export function buildPatientMailSubject(patientName?: string): string {
   return 'Informationen zur Behandlung Ihres Tieres';
 }
 
+// Wählt die passende Anrede anhand eines Titel-Präfix im Empfänger-Namen.
+// "Frau Müller" → "Liebe Frau Müller,"
+// "Herr Schmidt" / "Herrn Schmidt" → "Lieber Herr Schmidt,"
+// Ohne eindeutiges Präfix → "Guten Tag {Name},"
+// Kein Name → "Guten Tag,"
+export function buildGreeting(rawName?: string): string {
+  const name = rawName?.trim();
+  if (!name) return 'Guten Tag,';
+  const lower = name.toLowerCase();
+  if (lower.startsWith('frau ')) {
+    return `Liebe ${escapeHtml(name)},`;
+  }
+  if (lower.startsWith('herrn ')) {
+    const fixed = 'Herr ' + name.slice('Herrn '.length);
+    return `Lieber ${escapeHtml(fixed)},`;
+  }
+  if (lower.startsWith('herr ')) {
+    return `Lieber ${escapeHtml(name)},`;
+  }
+  return `Guten Tag ${escapeHtml(name)},`;
+}
+
 export function buildPatientMailHtml(opts: PatientMailOptions): string {
   const color = opts.practice.primaryColor || DEFAULT_COLOR;
-  const greeting = opts.ownerName?.trim()
-    ? `Liebe/r ${escapeHtml(opts.ownerName.trim())},`
-    : 'Guten Tag,';
+  const greeting = buildGreeting(opts.ownerName);
   const intro = opts.introLine
     ? escapeHtml(opts.introLine)
     : opts.patientName?.trim()
