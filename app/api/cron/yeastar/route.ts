@@ -25,9 +25,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Supabase Service-Client nicht konfiguriert.' }, { status: 500 });
   }
 
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
+  const appUrl = (process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
   if (!appUrl) {
-    return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL fehlt.' }, { status: 500 });
+    return NextResponse.json({ error: 'PUBLIC_APP_URL fehlt.' }, { status: 500 });
   }
 
   const { data: pending, error } = await service

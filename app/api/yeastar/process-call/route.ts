@@ -214,7 +214,7 @@ export async function POST(req: Request) {
     if (slackChannel && summary && isSlackConfigured()) {
       try {
         const durationMin = Math.round((row.duration_seconds || 0) / 60);
-        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
+        const appUrl = (process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
         const linkLine = appUrl ? `\n→ <${appUrl}/kommunikation|In Neuland AI öffnen>` : '';
         const preview = summary.length > 500 ? `${summary.slice(0, 500)}…` : summary;
         const text =
