@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { downloadRecording } from '../../../../lib/yeastarApi';
+import { postMessage, isSlackConfigured } from '../../../../lib/server/slack';
 
 export const maxDuration = 300;
 export const runtime = 'nodejs';
@@ -207,6 +208,25 @@ export async function POST(req: Request) {
       summary: summary || 'Zusammenfassung konnte nicht erstellt werden.',
       recording_url: null, // We don't persist the audio URL for privacy
     });
+
+    // --- 5. Slack-Benachrichtigung (optional) ---
+    const slackChannel = process.env.YEASTAR_SLACK_CHANNEL;
+    if (slackChannel && summary && isSlackConfigured()) {
+      try {
+        const durationMin = Math.round((row.duration_seconds || 0) / 60);
+        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
+        const linkLine = appUrl ? `\n→ <${appUrl}/kommunikation|In Neuland AI öffnen>` : '';
+        const preview = summary.length > 500 ? `${summary.slice(0, 500)}…` : summary;
+        const text =
+          `📞 *Neuer Anruf zusammengefasst*\n` +
+          `Von: ${row.caller || 'Unbekannt'} → ${row.callee || 'Unbekannt'}\n` +
+          `Dauer: ${durationMin} Min\n\n` +
+          `*Zusammenfassung:*\n${preview}${linkLine}`;
+        await postMessage(slackChannel, text);
+      } catch (slackErr) {
+        console.error('[process-call] Slack-Benachrichtigung fehlgeschlagen:', slackErr);
+      }
+    }
 
     return NextResponse.json({ ok: true, transcript: transcript.slice(0, 200) + '...', hasSummary: !!summary });
   } catch (err: any) {
