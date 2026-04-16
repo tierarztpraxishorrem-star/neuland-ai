@@ -121,6 +121,24 @@ Analytics-Fehler dürfen nie den Chat-Response blockieren.
   - UI: /app/kommunikation/slack/
   - API: /app/api/slack/ (route, channels, send)
   - Lib: /lib/server/slack.ts
+- E-Mail (Microsoft Graph): Posteingang lesen, versenden, antworten, KI-Entwurf
+  - UI: /app/kommunikation/mail/ (Liste + Detail mit Reply & AI-Draft)
+  - API: /app/api/mail/ (messages GET, [id] GET/PATCH, [id]/reply POST, [id]/attachments/[aid] GET, send POST, draft-ai POST)
+  - Lib: /lib/server/mail.ts
+  - Auch in Vetmind: aufklappbare Sektion "E-Mail Posteingang" mit KI-Entwurf im Chat
+
+### Microsoft Graph Integration
+- Geteilter Client für SharePoint + Mail (Client-Credentials-Flow, Token-Cache 55min)
+- Lib: /lib/server/msGraph.ts (getAccessToken, graphFetch, graphJson, MsGraphError)
+- Konsumenten: /lib/server/sharepoint.ts, /lib/server/mail.ts
+- SharePoint: Suche (Query-Splitting + Parallel-Requests), Folder, Read (docx/pdf/xlsx), Create, Update
+  - UI: Vetmind-Sektion "SharePoint" unterhalb TTS
+  - API: /app/api/sharepoint/ (search, files, files/[itemId], site, setup)
+- Setup-Check: /api/sharepoint/setup (admin-only Diagnose: env + Token + Site)
+- Azure App-Permissions: Sites.Read.All, Sites.ReadWrite.All, Files.ReadWrite.All, Sites.Search.All, Mail.Read, Mail.Send
+- Env vars: MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET,
+  MICROSOFT_SHAREPOINT_SITE_ID (optional), MICROSOFT_MAILBOX_EMAIL (geteiltes Postfach),
+  MICROSOFT_GRAPH_REGION (default DEU)
 
 ### Yeastar Telefonanlage
 - Webhook-Empfang, Call Recordings, Auto-Record-Konfiguration
