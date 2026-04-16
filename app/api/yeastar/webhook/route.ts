@@ -26,9 +26,10 @@ function getServiceClient() {
 
 /**
  * Handle Yeastar event 30012 (Call End Details):
- * Insert a new call_recordings row and trigger background processing.
+ * Insert a new call_recordings row as `pending`. The cron worker picks it up
+ * every 5 min and runs the transcription/summary pipeline.
  */
-async function handleCallEnd(payload: Record<string, unknown>, origin: string) {
+async function handleCallEnd(payload: Record<string, unknown>) {
   const sb = getServiceClient();
   if (!sb) {
     console.error('[Yeastar Webhook] Supabase Service-Client fehlt – call_recordings können nicht gespeichert werden.');
@@ -63,7 +64,7 @@ async function handleCallEnd(payload: Record<string, unknown>, origin: string) {
     return;
   }
 
-  const { data, error } = await sb.from('call_recordings').insert({
+  const { error } = await sb.from('call_recordings').insert({
     practice_id: practiceId,
     yeastar_call_id: callId,
     yeastar_recording_id: recording,
@@ -75,22 +76,11 @@ async function handleCallEnd(payload: Record<string, unknown>, origin: string) {
     ended_at: timeEnd || null,
     status: 'pending',
     raw_event: payload,
-  }).select('id').single();
+  });
 
   if (error) {
     console.error('[Yeastar Webhook] call_recordings insert Fehler:', error.message);
-    return;
   }
-
-  // Trigger background processing (fire-and-forget)
-  const processUrl = `${origin}/api/yeastar/process-call`;
-  fetch(processUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recordingId: data.id }),
-  }).catch((err) => {
-    console.error('[Yeastar Webhook] process-call Trigger fehlgeschlagen:', err);
-  });
 }
 
 export async function GET() {
@@ -127,10 +117,9 @@ export async function POST(req: Request) {
       payload,
     });
 
-    // Handle call-end event (30012) → trigger recording + transcription pipeline
+    // Handle call-end event (30012) → store `pending` row; cron worker processes it.
     if (eventType === '30012' || eventType === 'CallEndDetails' || eventType === 'call_end') {
-      const origin = url.origin;
-      handleCallEnd(payload, origin);
+      await handleCallEnd(payload);
     }
 
     return NextResponse.json({ ok: true });
