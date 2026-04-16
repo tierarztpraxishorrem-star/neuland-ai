@@ -111,6 +111,7 @@ export default function VetMind() {
   const [copied, setCopied] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
+  const [mailText, setMailText] = useState("");
   const [shareLoading, setShareLoading] = useState(false);
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -2229,6 +2230,24 @@ const filteredSessions = sortedSessions.filter((s: any) => {
                   >
                     📋 Kopieren
                   </button>
+                  <button
+                    onClick={() => { setMailText(String(m.content || '')); setMailDialogOpen(true); }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "11px",
+                      color: brand.muted,
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      fontWeight: 500,
+                      transition: "color 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = brand.text; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = brand.muted as string; }}
+                  >
+                    ✉️ Per Mail senden
+                  </button>
                 </div>
               )}
             </div>
@@ -2718,7 +2737,7 @@ const filteredSessions = sortedSessions.filter((s: any) => {
           <Button onClick={handleShare} disabled={shareLoading} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
             {shareLoading ? "⏳ Teilen..." : "↗ Teilen"}
           </Button>
-          <Button onClick={() => setMailDialogOpen(true)} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
+          <Button onClick={() => { setMailText(result); setMailDialogOpen(true); }} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
             ✉️ Per Mail
           </Button>
         </div>
@@ -2727,7 +2746,7 @@ const filteredSessions = sortedSessions.filter((s: any) => {
       <PatientInfoMailDialog
         open={mailDialogOpen}
         onClose={() => setMailDialogOpen(false)}
-        defaultText={result}
+        defaultText={mailText || result}
         practice={{
           name: practiceProfile?.practiceName || 'Tierärztezentrum Neuland',
           address: practiceProfile?.address,
