@@ -168,7 +168,7 @@ export default function PatientInfoMailDialog({
               ✉️ Patienteninformation per Mail senden
             </div>
             <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-              Versand über <strong>empfang@tzn-bergheim.de</strong>
+              Versand über <strong>empfang@tierarztpraxis-horrem.de</strong>
             </div>
           </div>
           <button

@@ -9,7 +9,7 @@ export { MsGraphError as MailError };
 // Festgelegtes geteiltes Postfach für Neuland AI.
 // Empfang UND Versand laufen ausschließlich über diese Adresse.
 // Bewusst im Code hart verdrahtet, damit kein anderes Postfach versehentlich per ENV reingeschleust wird.
-export const MAILBOX_ADDRESS = 'empfang@tzn-bergheim.de';
+export const MAILBOX_ADDRESS = 'empfang@tierarztpraxis-horrem.de';
 
 export type MailAddress = {
   name?: string;
