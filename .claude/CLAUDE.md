@@ -2,18 +2,61 @@
 
 ## Projekt
 Veterinärpraxis-Software für TZN Bergheim.
-Stack: Next.js App Router, Supabase, Vercel, TypeScript, Tailwind CSS.
+Stack: Next.js 16, React 19, Supabase, Vercel, TypeScript, Tailwind CSS v4.
 Deployment: Vercel via GitHub.
+KI: OpenAI Responses API (`/v1/responses`, Modell `gpt-4.1-mini`), AssemblyAI (Transkription), OpenAI Whisper
+Storage: Supabase DB + RLS, Cloudflare R2 (Medien/Uploads), Vercel Blob (Insights)
+Monitoring: Sentry (`@sentry/nextjs`)
 
 ## Ordnerstruktur
 - /app                    → Seiten (Next.js App Router)
 - /app/api                → API Routes
-- /lib                    → supabase.ts, toast.ts, features.ts, etc.
-- /lib/server             → Server-only Utilities (supabase, whatsapp, slack, r2Upload, hrUtils, getUserPractice)
-- /lib/hr                 → HR Hilfsfunktionen (permissions.ts, workdays.ts)
-- /lib/diamond            → Diamond-Modul Logik (types, questions, scoring)
+- /lib                    → Client-seitige Utilities
+- /lib/server             → Server-only Utilities (getUserPractice, hrUtils, r2Upload, slack, whatsapp)
+- /lib/hr                 → HR-Hilfsfunktionen (permissions.ts, workdays.ts)
+- /lib/diamond            → Diamond-Modul Logik (types.ts, questions.ts, scoring.ts)
 - /components             → React Komponenten
 - /supabase/migrations    → SQL Migrations (Format: YYYYMMDDHHMMSS_name.sql)
+
+## Wichtige lib/-Dateien
+| Datei | Zweck |
+|-------|-------|
+| lib/supabase.ts | Supabase-Client + fetchWithAuth() Helper |
+| lib/toast.ts | Toast-Benachrichtigungen |
+| lib/features.ts | Feature-Flags |
+| lib/liveAnamnesis.ts | Live-Anamnese Hilfsfunktionen |
+| lib/pdfReport.ts | PDF-Report-Generierung (jsPDF) |
+| lib/yeastarApi.ts | Yeastar Telefonanlage API-Wrapper |
+| lib/yeastarWebhookStore.ts | ⚠️ Datei-basierter Webhook-Store (nicht persistent auf Vercel!) |
+| lib/chatbotAnalytics.ts | Chatbot-Nutzungsanalyse |
+| lib/ownerCommunicationTemplate.ts | Tierbesitzer-Kommunikationsvorlagen |
+| lib/patientBreeds.ts | Tierrassen-Daten |
+| lib/registrationConfig.ts | Registrierungsformular-Konfiguration |
+| lib/privacyConfig.ts | Datenschutz/Consent-Konfiguration |
+| lib/server/getUserPractice.ts | Praxis-Zugehörigkeit + Auth-Helper |
+| lib/server/hrUtils.ts | HR-Modul Utilities |
+| lib/server/r2Upload.ts | Cloudflare R2 Upload-Helper |
+| lib/server/slack.ts | Slack API Integration |
+| lib/server/whatsapp.ts | WhatsApp Business API Integration |
+
+## Datenbank-Tabellen (Supabase)
+Alle Tabellen haben RLS aktiviert und UUID-Primary-Keys.
+
+| Tabelle | Migration | Beschreibung |
+|---------|-----------|--------------|
+| patients, cases, case_members | 20260406000000 | Kern-Patientensystem |
+| practice_settings | 20260406120001 | Praxis-Einstellungen |
+| templates | 20260406120002-04 | Interne + Patienten-Templates |
+| practice_memberships | 20260407120006 | Multi-Tenancy Grundlage |
+| registration_settings, consents | 20260412130000 | Registrierung + Consent |
+| diamond_profiles, diamond_results | 20260413+14 | Diamond Assessment |
+| employee_groups, employee_group_members | 20260415120001 | HR-Gruppen |
+| absences, vacation_entitlements | 20260415120002 | Urlaubsplaner |
+| whatsapp_conversations, whatsapp_messages | 20260415120003 | WhatsApp Integration |
+| whatsapp_media | 20260415120004 | WhatsApp Medien (R2) |
+| call_recordings | 20260415200000 | Yeastar Anruf-Aufnahmen |
+| vetmind_sessions, vetmind_messages | 20260415210000 | VetMind Chat-Persistenz |
+| public_holidays, shifts, hr_documents, onboarding_tasks | 20260415120001 | HR Kern-Tabellen |
 
 ## Auth-Regel (IMMER einhalten)
 fetchWithAuth() aus lib/supabase.ts für alle API-Calls verwenden.

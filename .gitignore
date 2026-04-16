@@ -43,5 +43,8 @@ next-env.d.ts
 # mcp config (may contain tokens)
 .mcp.json
 
+# local data files
+/data/
+
 # claude code local settings (machine-specific)
 .claude/settings.local.json
