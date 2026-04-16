@@ -35,6 +35,12 @@ async function handleCallEnd(payload: Record<string, unknown>, origin: string) {
     return;
   }
 
+  const practiceId = process.env.YEASTAR_DEFAULT_PRACTICE_ID || '';
+  if (!practiceId) {
+    console.error('[Yeastar Webhook] YEASTAR_DEFAULT_PRACTICE_ID fehlt – call_recordings-INSERT übersprungen.');
+    return;
+  }
+
   // Yeastar 30012 payload structure
   const sn = String(payload.sn || '');
   const callId = String(payload.callid || payload.call_id || sn || '');
@@ -58,6 +64,7 @@ async function handleCallEnd(payload: Record<string, unknown>, origin: string) {
   }
 
   const { data, error } = await sb.from('call_recordings').insert({
+    practice_id: practiceId,
     yeastar_call_id: callId,
     yeastar_recording_id: recording,
     caller,

@@ -79,7 +79,8 @@ export async function yeastarRequest(
   body?: Record<string, unknown>
 ): Promise<any> {
   const token = await getYeastarToken();
-  const url = `${YEASTAR_BASE}${API_PATH}/${endpoint}?access_token=${encodeURIComponent(token)}`;
+  const separator = endpoint.includes('?') ? '&' : '?';
+  const url = `${YEASTAR_BASE}${API_PATH}/${endpoint}${separator}access_token=${encodeURIComponent(token)}`;
 
   const res = await fetch(url, {
     method,
@@ -102,8 +103,7 @@ export async function yeastarRequest(
 /** Download a recording file and return the blob */
 export async function downloadRecording(id: string): Promise<{ url: string } | null> {
   try {
-    const data = await yeastarRequest('GET', `recording/download`, { id } as any);
-    // Yeastar returns a download URL
+    const data = await yeastarRequest('GET', `recording/download?id=${encodeURIComponent(id)}`);
     if (data?.download_url || data?.url) {
       return { url: data.download_url || data.url };
     }

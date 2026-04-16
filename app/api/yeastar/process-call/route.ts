@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { downloadRecording } from '../../../../lib/yeastarApi';
 
+export const maxDuration = 300;
+export const runtime = 'nodejs';
+
 /**
  * Background call processing pipeline:
  * 1. Download recording from Yeastar PBX
