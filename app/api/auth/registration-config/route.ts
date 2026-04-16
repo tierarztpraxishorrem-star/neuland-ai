@@ -28,40 +28,46 @@ const getSupabaseClient = () => {
 };
 
 export async function GET() {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json(DEFAULT_REGISTRATION_CONFIG);
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json(DEFAULT_REGISTRATION_CONFIG);
+    }
+
+    const { data, error } = await supabase
+      .from('registration_form_settings')
+      .select(
+        'registration_title, registration_subtitle, require_first_name, require_last_name, require_terms, require_privacy, allow_product_updates, min_password_length, require_uppercase, require_lowercase, require_digit, require_special_char, terms_label, privacy_label, product_updates_label',
+      )
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (error || !data) {
+      return NextResponse.json(DEFAULT_REGISTRATION_CONFIG);
+    }
+
+    const row = data as RegistrationSettingsRow;
+
+    return NextResponse.json({
+      registrationTitle: row.registration_title ?? DEFAULT_REGISTRATION_CONFIG.registrationTitle,
+      registrationSubtitle: row.registration_subtitle ?? DEFAULT_REGISTRATION_CONFIG.registrationSubtitle,
+      requireFirstName: row.require_first_name ?? DEFAULT_REGISTRATION_CONFIG.requireFirstName,
+      requireLastName: row.require_last_name ?? DEFAULT_REGISTRATION_CONFIG.requireLastName,
+      requireTerms: row.require_terms ?? DEFAULT_REGISTRATION_CONFIG.requireTerms,
+      requirePrivacy: row.require_privacy ?? DEFAULT_REGISTRATION_CONFIG.requirePrivacy,
+      allowProductUpdates: row.allow_product_updates ?? DEFAULT_REGISTRATION_CONFIG.allowProductUpdates,
+      minPasswordLength: row.min_password_length ?? DEFAULT_REGISTRATION_CONFIG.minPasswordLength,
+      requireUppercase: row.require_uppercase ?? DEFAULT_REGISTRATION_CONFIG.requireUppercase,
+      requireLowercase: row.require_lowercase ?? DEFAULT_REGISTRATION_CONFIG.requireLowercase,
+      requireDigit: row.require_digit ?? DEFAULT_REGISTRATION_CONFIG.requireDigit,
+      requireSpecialChar: row.require_special_char ?? DEFAULT_REGISTRATION_CONFIG.requireSpecialChar,
+      termsLabel: row.terms_label ?? DEFAULT_REGISTRATION_CONFIG.termsLabel,
+      privacyLabel: row.privacy_label ?? DEFAULT_REGISTRATION_CONFIG.privacyLabel,
+      productUpdatesLabel: row.product_updates_label ?? DEFAULT_REGISTRATION_CONFIG.productUpdatesLabel,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/auth/registration-config] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const { data, error } = await supabase
-    .from('registration_form_settings')
-    .select(
-      'registration_title, registration_subtitle, require_first_name, require_last_name, require_terms, require_privacy, allow_product_updates, min_password_length, require_uppercase, require_lowercase, require_digit, require_special_char, terms_label, privacy_label, product_updates_label',
-    )
-    .eq('id', 1)
-    .maybeSingle();
-
-  if (error || !data) {
-    return NextResponse.json(DEFAULT_REGISTRATION_CONFIG);
-  }
-
-  const row = data as RegistrationSettingsRow;
-
-  return NextResponse.json({
-    registrationTitle: row.registration_title ?? DEFAULT_REGISTRATION_CONFIG.registrationTitle,
-    registrationSubtitle: row.registration_subtitle ?? DEFAULT_REGISTRATION_CONFIG.registrationSubtitle,
-    requireFirstName: row.require_first_name ?? DEFAULT_REGISTRATION_CONFIG.requireFirstName,
-    requireLastName: row.require_last_name ?? DEFAULT_REGISTRATION_CONFIG.requireLastName,
-    requireTerms: row.require_terms ?? DEFAULT_REGISTRATION_CONFIG.requireTerms,
-    requirePrivacy: row.require_privacy ?? DEFAULT_REGISTRATION_CONFIG.requirePrivacy,
-    allowProductUpdates: row.allow_product_updates ?? DEFAULT_REGISTRATION_CONFIG.allowProductUpdates,
-    minPasswordLength: row.min_password_length ?? DEFAULT_REGISTRATION_CONFIG.minPasswordLength,
-    requireUppercase: row.require_uppercase ?? DEFAULT_REGISTRATION_CONFIG.requireUppercase,
-    requireLowercase: row.require_lowercase ?? DEFAULT_REGISTRATION_CONFIG.requireLowercase,
-    requireDigit: row.require_digit ?? DEFAULT_REGISTRATION_CONFIG.requireDigit,
-    requireSpecialChar: row.require_special_char ?? DEFAULT_REGISTRATION_CONFIG.requireSpecialChar,
-    termsLabel: row.terms_label ?? DEFAULT_REGISTRATION_CONFIG.termsLabel,
-    privacyLabel: row.privacy_label ?? DEFAULT_REGISTRATION_CONFIG.privacyLabel,
-    productUpdatesLabel: row.product_updates_label ?? DEFAULT_REGISTRATION_CONFIG.productUpdatesLabel,
-  });
 }

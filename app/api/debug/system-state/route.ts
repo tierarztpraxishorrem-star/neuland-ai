@@ -31,6 +31,7 @@ type WorkSessionRow = {
 };
 
 export async function GET(req: Request) {
+  try {
   const auth = await getUserPractice(req, { allowedRoles: ['owner', 'admin'] });
   if (!auth.ok) return auth.response;
 
@@ -76,4 +77,9 @@ export async function GET(req: Request) {
     work_sessions: (sessionsRes.data || []) as WorkSessionRow[],
     timestamp: new Date().toISOString(),
   });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/debug/system-state] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

@@ -87,37 +87,49 @@ async function handleCallEnd(payload: Record<string, unknown>, origin: string) {
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, message: 'Yeastar webhook endpoint is reachable.' });
+  try {
+    return NextResponse.json({ ok: true, message: 'Yeastar webhook endpoint is reachable.' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/yeastar/webhook] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const body = await req.json().catch(() => ({}));
-  const expectedSecret = process.env.YEASTAR_WEBHOOK_SECRET || '';
-  const providedSecret = extractSecret(req, body, url);
+  try {
+    const url = new URL(req.url);
+    const body = await req.json().catch(() => ({}));
+    const expectedSecret = process.env.YEASTAR_WEBHOOK_SECRET || '';
+    const providedSecret = extractSecret(req, body, url);
 
-  if (expectedSecret && providedSecret !== expectedSecret) {
-    return NextResponse.json({ error: 'Invalid webhook secret.' }, { status: 401 });
+    if (expectedSecret && providedSecret !== expectedSecret) {
+      return NextResponse.json({ error: 'Invalid webhook secret.' }, { status: 401 });
+    }
+
+    const payload = normalizePayload(body);
+    const eventType = String(payload.event || payload.event_type || payload.type || payload.msgType || 'unknown');
+    const number = String(payload.number || payload.caller || payload.from || payload.callee || 'unknown');
+
+    // Store event in file-based log (backward compat)
+    await appendYeastarWebhookEvent({
+      id: crypto.randomUUID(),
+      receivedAt: new Date().toISOString(),
+      eventType,
+      number,
+      payload,
+    });
+
+    // Handle call-end event (30012) → trigger recording + transcription pipeline
+    if (eventType === '30012' || eventType === 'CallEndDetails' || eventType === 'call_end') {
+      const origin = url.origin;
+      handleCallEnd(payload, origin);
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/yeastar/webhook] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const payload = normalizePayload(body);
-  const eventType = String(payload.event || payload.event_type || payload.type || payload.msgType || 'unknown');
-  const number = String(payload.number || payload.caller || payload.from || payload.callee || 'unknown');
-
-  // Store event in file-based log (backward compat)
-  await appendYeastarWebhookEvent({
-    id: crypto.randomUUID(),
-    receivedAt: new Date().toISOString(),
-    eventType,
-    number,
-    payload,
-  });
-
-  // Handle call-end event (30012) → trigger recording + transcription pipeline
-  if (eventType === '30012' || eventType === 'CallEndDetails' || eventType === 'call_end') {
-    const origin = url.origin;
-    handleCallEnd(payload, origin);
-  }
-
-  return NextResponse.json({ ok: true });
 }

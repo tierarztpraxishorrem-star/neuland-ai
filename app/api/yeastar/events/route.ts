@@ -52,9 +52,15 @@ const ensureAuthenticatedMembership = async (req: Request) => {
 };
 
 export async function GET(req: Request) {
-  const auth = await ensureAuthenticatedMembership(req);
-  if ('error' in auth) return auth.error;
+  try {
+    const auth = await ensureAuthenticatedMembership(req);
+    if ('error' in auth) return auth.error;
 
-  const events = await readYeastarWebhookEvents();
-  return NextResponse.json({ ok: true, events: events.slice(0, 50) });
+    const events = await readYeastarWebhookEvents();
+    return NextResponse.json({ ok: true, events: events.slice(0, 50) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/yeastar/events] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

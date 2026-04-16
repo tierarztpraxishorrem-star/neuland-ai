@@ -189,268 +189,274 @@ const resolvePracticeAccess = async (req: Request) => {
 };
 
 export async function GET(req: Request) {
-  const access = await resolvePracticeAccess(req);
-  if ('error' in access) return access.error;
+  try {
+    const access = await resolvePracticeAccess(req);
+    if ('error' in access) return access.error;
 
-  const { supabase, practiceId } = access;
-  const now = Date.now();
-  const nowIso = new Date(now).toISOString();
-  const from7Days = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const from30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const from365Days = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
+    const { supabase, practiceId } = access;
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const from7Days = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const from30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const from365Days = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [
-    casesTotalRes,
-    cases7Res,
-    cases30Res,
-    casesMissingTitleRes,
-    templatesTotalRes,
-    invitationsRes,
-    joinRequestsRes,
-    membershipsRes,
-  ] = await Promise.all([
-    supabase.from('cases').select('id', { count: 'exact', head: true }).eq('practice_id', practiceId),
-    supabase
-      .from('cases')
-      .select('id', { count: 'exact', head: true })
-      .eq('practice_id', practiceId)
-      .gte('created_at', from7Days),
-    supabase
-      .from('cases')
-      .select('id', { count: 'exact', head: true })
-      .eq('practice_id', practiceId)
-      .gte('created_at', from30Days),
-    supabase
-      .from('cases')
-      .select('id', { count: 'exact', head: true })
-      .eq('practice_id', practiceId)
-      .or('title.is.null,title.eq.'),
-    supabase.from('templates').select('id', { count: 'exact', head: true }).eq('practice_id', practiceId),
-    supabase
-      .from('practice_invitations')
-      .select('accepted_at, expires_at')
-      .eq('practice_id', practiceId)
-      .limit(2000),
-    supabase
-      .from('practice_join_requests')
-      .select('status')
-      .eq('practice_id', practiceId)
-      .limit(2000),
-    supabase.from('practice_memberships').select('role, user_id').eq('practice_id', practiceId).limit(5000),
-  ]);
+    const [
+      casesTotalRes,
+      cases7Res,
+      cases30Res,
+      casesMissingTitleRes,
+      templatesTotalRes,
+      invitationsRes,
+      joinRequestsRes,
+      membershipsRes,
+    ] = await Promise.all([
+      supabase.from('cases').select('id', { count: 'exact', head: true }).eq('practice_id', practiceId),
+      supabase
+        .from('cases')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .gte('created_at', from7Days),
+      supabase
+        .from('cases')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .gte('created_at', from30Days),
+      supabase
+        .from('cases')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .or('title.is.null,title.eq.'),
+      supabase.from('templates').select('id', { count: 'exact', head: true }).eq('practice_id', practiceId),
+      supabase
+        .from('practice_invitations')
+        .select('accepted_at, expires_at')
+        .eq('practice_id', practiceId)
+        .limit(2000),
+      supabase
+        .from('practice_join_requests')
+        .select('status')
+        .eq('practice_id', practiceId)
+        .limit(2000),
+      supabase.from('practice_memberships').select('role, user_id').eq('practice_id', practiceId).limit(5000),
+    ]);
 
-  if (
-    casesTotalRes.error ||
-    cases7Res.error ||
-    cases30Res.error ||
-    casesMissingTitleRes.error ||
-    templatesTotalRes.error ||
-    invitationsRes.error ||
-    joinRequestsRes.error ||
-    membershipsRes.error
-  ) {
-    return NextResponse.json({ error: 'Statistiken konnten nicht geladen werden.' }, { status: 500 });
-  }
-
-  const [casesMissingRequiredRes, casesRowsRes, practiceSettingsRes] = await Promise.all([
-    supabase
-      .from('cases')
-      .select('id', { count: 'exact', head: true })
-      .eq('practice_id', practiceId)
-      .or('title.is.null,title.eq.,result.is.null,result.eq.'),
-    supabase
-      .from('cases')
-      .select('created_at, updated_at, template, user_id, title, result')
-      .eq('practice_id', practiceId)
-      .gte('created_at', from365Days)
-      .limit(20000),
-    supabase.from('practice_settings').select('practice_name').eq('practice_id', practiceId).maybeSingle(),
-  ]);
-
-  const invitations = (invitationsRes.data || []) as InvitationRow[];
-  const joinRequests = (joinRequestsRes.data || []) as JoinRequestRow[];
-  const memberships = (membershipsRes.data || []) as Array<{ role: string | null; user_id: string | null }>;
-  const cases = casesRowsRes.error ? [] : ((casesRowsRes.data || []) as CaseRow[]);
-  const practiceName = typeof practiceSettingsRes.data?.practice_name === 'string'
-    ? practiceSettingsRes.data.practice_name
-    : null;
-
-  const invitationAccepted = invitations.filter((item) => Boolean(item.accepted_at)).length;
-  const invitationExpired = invitations.filter((item) => {
-    if (!item.expires_at || item.accepted_at) return false;
-    return new Date(item.expires_at).getTime() < Date.now();
-  }).length;
-  const invitationOpen = Math.max(invitations.length - invitationAccepted - invitationExpired, 0);
-
-  const pending = joinRequests.filter((item) => item.status === 'pending').length;
-  const approved = joinRequests.filter((item) => item.status === 'approved').length;
-  const rejected = joinRequests.filter((item) => item.status === 'rejected').length;
-
-  const owners = memberships.filter((item) => item.role === 'owner').length;
-  const admins = memberships.filter((item) => item.role === 'admin').length;
-  const members = memberships.filter((item) => item.role === 'member').length;
-
-  const last30Boundary = new Date(from30Days).getTime();
-  const templateCounts = new Map<string, number>();
-  const weeklyCounts = new Map<string, number>();
-  const monthlyCounts = new Map<string, number>();
-  const processingMinutes: number[] = [];
-  let roleOwnerActivity = 0;
-  let roleAdminActivity = 0;
-  let roleMemberActivity = 0;
-  let roleUnknownActivity = 0;
-
-  const roleByUserId = new Map<string, string>();
-  for (const membership of memberships) {
-    if (membership.user_id) roleByUserId.set(membership.user_id, membership.role || '');
-  }
-
-  for (const row of cases) {
-    const created = safeDate(row.created_at);
-    if (!created) continue;
-
-    const wk = weekKey(created);
-    weeklyCounts.set(wk, (weeklyCounts.get(wk) || 0) + 1);
-
-    const mk = monthKey(created);
-    monthlyCounts.set(mk, (monthlyCounts.get(mk) || 0) + 1);
-
-    const template = (row.template || '').trim();
-    if (template) {
-      templateCounts.set(template, (templateCounts.get(template) || 0) + 1);
+    if (
+      casesTotalRes.error ||
+      cases7Res.error ||
+      cases30Res.error ||
+      casesMissingTitleRes.error ||
+      templatesTotalRes.error ||
+      invitationsRes.error ||
+      joinRequestsRes.error ||
+      membershipsRes.error
+    ) {
+      return NextResponse.json({ error: 'Statistiken konnten nicht geladen werden.' }, { status: 500 });
     }
 
-    const updated = safeDate(row.updated_at);
-    if (updated && updated.getTime() > created.getTime()) {
-      const minutes = (updated.getTime() - created.getTime()) / 60000;
-      if (Number.isFinite(minutes) && minutes >= 0 && minutes <= 60 * 24 * 30) {
-        processingMinutes.push(minutes);
+    const [casesMissingRequiredRes, casesRowsRes, practiceSettingsRes] = await Promise.all([
+      supabase
+        .from('cases')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .or('title.is.null,title.eq.,result.is.null,result.eq.'),
+      supabase
+        .from('cases')
+        .select('created_at, updated_at, template, user_id, title, result')
+        .eq('practice_id', practiceId)
+        .gte('created_at', from365Days)
+        .limit(20000),
+      supabase.from('practice_settings').select('practice_name').eq('practice_id', practiceId).maybeSingle(),
+    ]);
+
+    const invitations = (invitationsRes.data || []) as InvitationRow[];
+    const joinRequests = (joinRequestsRes.data || []) as JoinRequestRow[];
+    const memberships = (membershipsRes.data || []) as Array<{ role: string | null; user_id: string | null }>;
+    const cases = casesRowsRes.error ? [] : ((casesRowsRes.data || []) as CaseRow[]);
+    const practiceName = typeof practiceSettingsRes.data?.practice_name === 'string'
+      ? practiceSettingsRes.data.practice_name
+      : null;
+
+    const invitationAccepted = invitations.filter((item) => Boolean(item.accepted_at)).length;
+    const invitationExpired = invitations.filter((item) => {
+      if (!item.expires_at || item.accepted_at) return false;
+      return new Date(item.expires_at).getTime() < Date.now();
+    }).length;
+    const invitationOpen = Math.max(invitations.length - invitationAccepted - invitationExpired, 0);
+
+    const pending = joinRequests.filter((item) => item.status === 'pending').length;
+    const approved = joinRequests.filter((item) => item.status === 'approved').length;
+    const rejected = joinRequests.filter((item) => item.status === 'rejected').length;
+
+    const owners = memberships.filter((item) => item.role === 'owner').length;
+    const admins = memberships.filter((item) => item.role === 'admin').length;
+    const members = memberships.filter((item) => item.role === 'member').length;
+
+    const last30Boundary = new Date(from30Days).getTime();
+    const templateCounts = new Map<string, number>();
+    const weeklyCounts = new Map<string, number>();
+    const monthlyCounts = new Map<string, number>();
+    const processingMinutes: number[] = [];
+    let roleOwnerActivity = 0;
+    let roleAdminActivity = 0;
+    let roleMemberActivity = 0;
+    let roleUnknownActivity = 0;
+
+    const roleByUserId = new Map<string, string>();
+    for (const membership of memberships) {
+      if (membership.user_id) roleByUserId.set(membership.user_id, membership.role || '');
+    }
+
+    for (const row of cases) {
+      const created = safeDate(row.created_at);
+      if (!created) continue;
+
+      const wk = weekKey(created);
+      weeklyCounts.set(wk, (weeklyCounts.get(wk) || 0) + 1);
+
+      const mk = monthKey(created);
+      monthlyCounts.set(mk, (monthlyCounts.get(mk) || 0) + 1);
+
+      const template = (row.template || '').trim();
+      if (template) {
+        templateCounts.set(template, (templateCounts.get(template) || 0) + 1);
+      }
+
+      const updated = safeDate(row.updated_at);
+      if (updated && updated.getTime() > created.getTime()) {
+        const minutes = (updated.getTime() - created.getTime()) / 60000;
+        if (Number.isFinite(minutes) && minutes >= 0 && minutes <= 60 * 24 * 30) {
+          processingMinutes.push(minutes);
+        }
+      }
+
+      if (created.getTime() >= last30Boundary) {
+        const role = row.user_id ? (roleByUserId.get(row.user_id) || '') : '';
+        if (role === 'owner') roleOwnerActivity += 1;
+        else if (role === 'admin') roleAdminActivity += 1;
+        else if (role === 'member') roleMemberActivity += 1;
+        else roleUnknownActivity += 1;
       }
     }
 
-    if (created.getTime() >= last30Boundary) {
-      const role = row.user_id ? (roleByUserId.get(row.user_id) || '') : '';
-      if (role === 'owner') roleOwnerActivity += 1;
-      else if (role === 'admin') roleAdminActivity += 1;
-      else if (role === 'member') roleMemberActivity += 1;
-      else roleUnknownActivity += 1;
-    }
-  }
+    const templateUsageTotal = [...templateCounts.values()].reduce((sum, value) => sum + value, 0);
+    const topTemplateUsage = [...templateCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([template, count]) => ({
+        template,
+        count,
+        sharePercent: templateUsageTotal > 0 ? clampPercent((count / templateUsageTotal) * 100) : 0,
+      }));
 
-  const templateUsageTotal = [...templateCounts.values()].reduce((sum, value) => sum + value, 0);
-  const topTemplateUsage = [...templateCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([template, count]) => ({
-      template,
-      count,
-      sharePercent: templateUsageTotal > 0 ? clampPercent((count / templateUsageTotal) * 100) : 0,
-    }));
+    const perWeek = [...weeklyCounts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-12)
+      .map(([week, count]) => ({ week, count }));
 
-  const perWeek = [...weeklyCounts.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-12)
-    .map(([week, count]) => ({ week, count }));
+    const perMonth = [...monthlyCounts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-12)
+      .map(([month, count]) => ({ month, count }));
 
-  const perMonth = [...monthlyCounts.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-12)
-    .map(([month, count]) => ({ month, count }));
+    const avgProcessingMinutes = processingMinutes.length
+      ? Number((processingMinutes.reduce((sum, value) => sum + value, 0) / processingMinutes.length).toFixed(1))
+      : null;
 
-  const avgProcessingMinutes = processingMinutes.length
-    ? Number((processingMinutes.reduce((sum, value) => sum + value, 0) / processingMinutes.length).toFixed(1))
-    : null;
-
-  let systemStability: AdminStatsPayload['systemStability'] = {
-    windowDays: 30,
-    dataAvailable: false,
-    totalRequests: 0,
-    errorRequests: 0,
-    errorRatePercent: null,
-    p50LatencyMs: null,
-    p95LatencyMs: null,
-  };
-
-  const apiLogsRes = await supabase
-    .from('api_request_logs')
-    .select('status_code, latency_ms')
-    .eq('practice_id', practiceId)
-    .gte('created_at', from30Days)
-    .limit(10000);
-
-  if (!apiLogsRes.error) {
-    const logs = (apiLogsRes.data || []) as ApiRequestLogRow[];
-    const totalRequests = logs.length;
-    const errorRequests = logs.filter((row) => (row.status_code || 0) >= 500).length;
-    const latencies = logs
-      .map((row) => row.latency_ms)
-      .filter((value): value is number => Number.isFinite(value ?? NaN) && (value ?? 0) >= 0);
-
-    systemStability = {
+    let systemStability: AdminStatsPayload['systemStability'] = {
       windowDays: 30,
-      dataAvailable: true,
-      totalRequests,
-      errorRequests,
-      errorRatePercent: totalRequests > 0 ? Number((((errorRequests / totalRequests) * 100)).toFixed(2)) : 0,
-      p50LatencyMs: percentile(latencies, 0.5),
-      p95LatencyMs: percentile(latencies, 0.95),
+      dataAvailable: false,
+      totalRequests: 0,
+      errorRequests: 0,
+      errorRatePercent: null,
+      p50LatencyMs: null,
+      p95LatencyMs: null,
     };
+
+    const apiLogsRes = await supabase
+      .from('api_request_logs')
+      .select('status_code, latency_ms')
+      .eq('practice_id', practiceId)
+      .gte('created_at', from30Days)
+      .limit(10000);
+
+    if (!apiLogsRes.error) {
+      const logs = (apiLogsRes.data || []) as ApiRequestLogRow[];
+      const totalRequests = logs.length;
+      const errorRequests = logs.filter((row) => (row.status_code || 0) >= 500).length;
+      const latencies = logs
+        .map((row) => row.latency_ms)
+        .filter((value): value is number => Number.isFinite(value ?? NaN) && (value ?? 0) >= 0);
+
+      systemStability = {
+        windowDays: 30,
+        dataAvailable: true,
+        totalRequests,
+        errorRequests,
+        errorRatePercent: totalRequests > 0 ? Number((((errorRequests / totalRequests) * 100)).toFixed(2)) : 0,
+        p50LatencyMs: percentile(latencies, 0.5),
+        p95LatencyMs: percentile(latencies, 0.95),
+      };
+    }
+
+    const caseTotal = casesTotalRes.count ?? 0;
+
+    const payload: AdminStatsPayload = {
+      practiceId,
+      updatedAt: nowIso,
+      cases: {
+        total: caseTotal,
+        last7Days: cases7Res.count ?? 0,
+        last30Days: cases30Res.count ?? 0,
+        missingTitle: casesMissingTitleRes.count ?? 0,
+        missingRequiredFields: casesMissingRequiredRes.error ? (casesMissingTitleRes.count ?? 0) : (casesMissingRequiredRes.count ?? 0),
+        estimatedTimeSavedMinutes: caseTotal * 15,
+        averageProcessingMinutes: avgProcessingMinutes,
+        perWeek,
+        perMonth,
+        byPractice: [
+          {
+            practiceId,
+            label: practiceName || 'Aktive Praxis',
+            total: caseTotal,
+            last30Days: cases30Res.count ?? 0,
+          },
+        ],
+      },
+      templates: {
+        total: templatesTotalRes.count ?? 0,
+        usage: topTemplateUsage,
+      },
+      invitations: {
+        total: invitations.length,
+        open: invitationOpen,
+        accepted: invitationAccepted,
+        expired: invitationExpired,
+      },
+      joinRequests: {
+        total: joinRequests.length,
+        pending,
+        approved,
+        rejected,
+      },
+      memberships: {
+        total: memberships.length,
+        owners,
+        admins,
+        members,
+      },
+      activityByRole: {
+        owner: roleOwnerActivity,
+        admin: roleAdminActivity,
+        member: roleMemberActivity,
+        unknown: roleUnknownActivity,
+      },
+      systemStability,
+    };
+
+    return NextResponse.json(payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/admin/stats] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const caseTotal = casesTotalRes.count ?? 0;
-
-  const payload: AdminStatsPayload = {
-    practiceId,
-    updatedAt: nowIso,
-    cases: {
-      total: caseTotal,
-      last7Days: cases7Res.count ?? 0,
-      last30Days: cases30Res.count ?? 0,
-      missingTitle: casesMissingTitleRes.count ?? 0,
-      missingRequiredFields: casesMissingRequiredRes.error ? (casesMissingTitleRes.count ?? 0) : (casesMissingRequiredRes.count ?? 0),
-      estimatedTimeSavedMinutes: caseTotal * 15,
-      averageProcessingMinutes: avgProcessingMinutes,
-      perWeek,
-      perMonth,
-      byPractice: [
-        {
-          practiceId,
-          label: practiceName || 'Aktive Praxis',
-          total: caseTotal,
-          last30Days: cases30Res.count ?? 0,
-        },
-      ],
-    },
-    templates: {
-      total: templatesTotalRes.count ?? 0,
-      usage: topTemplateUsage,
-    },
-    invitations: {
-      total: invitations.length,
-      open: invitationOpen,
-      accepted: invitationAccepted,
-      expired: invitationExpired,
-    },
-    joinRequests: {
-      total: joinRequests.length,
-      pending,
-      approved,
-      rejected,
-    },
-    memberships: {
-      total: memberships.length,
-      owners,
-      admins,
-      members,
-    },
-    activityByRole: {
-      owner: roleOwnerActivity,
-      admin: roleAdminActivity,
-      member: roleMemberActivity,
-      unknown: roleUnknownActivity,
-    },
-    systemStability,
-  };
-
-  return NextResponse.json(payload);
 }

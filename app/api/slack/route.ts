@@ -91,41 +91,47 @@ const resolveAccess = async (req: Request) => {
 };
 
 export async function POST(req: Request) {
-  const access = await resolveAccess(req);
-  if ('error' in access) return access.error;
+  try {
+    const access = await resolveAccess(req);
+    if ('error' in access) return access.error;
 
-  const webhookUrl = process.env.SLACK_INCOMING_WEBHOOK_URL;
-  if (!webhookUrl) {
-    return NextResponse.json({ error: 'SLACK_INCOMING_WEBHOOK_URL fehlt.' }, { status: 500 });
+    const webhookUrl = process.env.SLACK_INCOMING_WEBHOOK_URL;
+    if (!webhookUrl) {
+      return NextResponse.json({ error: 'SLACK_INCOMING_WEBHOOK_URL fehlt.' }, { status: 500 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const text = String(body?.text || '').trim();
+    if (!text) {
+      return NextResponse.json({ error: 'text ist erforderlich.' }, { status: 400 });
+    }
+
+    const payload = {
+      text: `Von ${access.senderName}: ${text}`,
+      username: 'Neuland Kommunikation',
+      icon_emoji: ':telephone_receiver:',
+    };
+
+    const slackRes = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!slackRes.ok) {
+      const detail = await slackRes.text();
+      return NextResponse.json(
+        { error: 'Slack-Nachricht konnte nicht gesendet werden.', detail: detail.slice(0, 2000) },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, practiceId: access.practiceId, senderName: access.senderName });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/slack] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const body = await req.json().catch(() => ({}));
-  const text = String(body?.text || '').trim();
-  if (!text) {
-    return NextResponse.json({ error: 'text ist erforderlich.' }, { status: 400 });
-  }
-
-  const payload = {
-    text: `Von ${access.senderName}: ${text}`,
-    username: 'Neuland Kommunikation',
-    icon_emoji: ':telephone_receiver:',
-  };
-
-  const slackRes = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!slackRes.ok) {
-    const detail = await slackRes.text();
-    return NextResponse.json(
-      { error: 'Slack-Nachricht konnte nicht gesendet werden.', detail: detail.slice(0, 2000) },
-      { status: 502 },
-    );
-  }
-
-  return NextResponse.json({ ok: true, practiceId: access.practiceId, senderName: access.senderName });
 }

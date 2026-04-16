@@ -113,59 +113,65 @@ const mapCallItem = (raw: any, index: number): YeastarCallItem => {
 };
 
 export async function GET(req: Request) {
-  const access = await resolveAccess(req);
-  if ('error' in access) return access.error;
+  try {
+    const access = await resolveAccess(req);
+    if ('error' in access) return access.error;
 
-  const { baseUrl, callsPath, apiKey, token } = getYeastarConfig();
-  const credential = token || apiKey;
-  if (!credential) {
-    return NextResponse.json({ error: 'YEASTAR_API_KEY oder YEASTAR_ACCESS_TOKEN fehlt.' }, { status: 500 });
-  }
+    const { baseUrl, callsPath, apiKey, token } = getYeastarConfig();
+    const credential = token || apiKey;
+    if (!credential) {
+      return NextResponse.json({ error: 'YEASTAR_API_KEY oder YEASTAR_ACCESS_TOKEN fehlt.' }, { status: 500 });
+    }
 
-  const yeastarRes = await fetch(toAbsoluteUrl(baseUrl, callsPath), {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${credential}`,
-      'X-API-Key': credential,
-      Accept: 'application/json',
-    },
-    cache: 'no-store',
-  });
+    const yeastarRes = await fetch(toAbsoluteUrl(baseUrl, callsPath), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${credential}`,
+        'X-API-Key': credential,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
 
-  if (!yeastarRes.ok) {
-    const detail = await yeastarRes.text();
-    return NextResponse.json(
-      { error: 'Yeastar-Daten konnten nicht geladen werden.', detail: detail.slice(0, 2000) },
-      { status: 502 },
-    );
-  }
-
-  const payload = await yeastarRes.json().catch(() => null);
-
-  if (payload && typeof payload === 'object' && 'errcode' in payload) {
-    const errcode = Number((payload as any).errcode || 0);
-    if (errcode !== 0) {
+    if (!yeastarRes.ok) {
+      const detail = await yeastarRes.text();
       return NextResponse.json(
-        {
-          error: 'Yeastar-API hat einen Fehler gemeldet.',
-          detail: String((payload as any).errmsg || 'Unbekannter Yeastar-Fehler'),
-          errcode,
-        },
+        { error: 'Yeastar-Daten konnten nicht geladen werden.', detail: detail.slice(0, 2000) },
         { status: 502 },
       );
     }
+
+    const payload = await yeastarRes.json().catch(() => null);
+
+    if (payload && typeof payload === 'object' && 'errcode' in payload) {
+      const errcode = Number((payload as any).errcode || 0);
+      if (errcode !== 0) {
+        return NextResponse.json(
+          {
+            error: 'Yeastar-API hat einen Fehler gemeldet.',
+            detail: String((payload as any).errmsg || 'Unbekannter Yeastar-Fehler'),
+            errcode,
+          },
+          { status: 502 },
+        );
+      }
+    }
+
+    const rawCalls = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.calls)
+        ? payload.calls
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : Array.isArray(payload?.records)
+            ? payload.records
+          : [];
+
+    const calls = rawCalls.map(mapCallItem);
+    return NextResponse.json({ ok: true, practiceId: access.practiceId, calls });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/yeastar] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const rawCalls = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.calls)
-      ? payload.calls
-      : Array.isArray(payload?.data)
-        ? payload.data
-        : Array.isArray(payload?.records)
-          ? payload.records
-        : [];
-
-  const calls = rawCalls.map(mapCallItem);
-  return NextResponse.json({ ok: true, practiceId: access.practiceId, calls });
 }

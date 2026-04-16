@@ -114,85 +114,97 @@ const toAbsoluteUrl = (baseUrl: string, endpointPath: string) => {
 };
 
 export async function GET(req: Request) {
-  const access = await resolvePracticeAccess(req);
-  if ('error' in access) return access.error;
+  try {
+    const access = await resolvePracticeAccess(req);
+    if ('error' in access) return access.error;
 
-  const { apiKey, baseUrl, missedCallsPath } = getFonioConfig();
-  if (!apiKey) {
-    return NextResponse.json({ error: 'FONIO_API_KEY fehlt.' }, { status: 500 });
+    const { apiKey, baseUrl, missedCallsPath } = getFonioConfig();
+    if (!apiKey) {
+      return NextResponse.json({ error: 'FONIO_API_KEY fehlt.' }, { status: 500 });
+    }
+
+    const fonioRes = await fetch(toAbsoluteUrl(baseUrl, missedCallsPath), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
+
+    if (!fonioRes.ok) {
+      const detail = await fonioRes.text();
+      return NextResponse.json(
+        { error: 'Fonio-Anrufliste konnte nicht geladen werden.', detail: detail.slice(0, 2000) },
+        { status: 502 },
+      );
+    }
+
+    const payload = await fonioRes.json().catch(() => null);
+    const rawCalls = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.calls)
+        ? payload.calls
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+
+    const calls = rawCalls.map(mapFonioCall);
+
+    return NextResponse.json({ enabled: true, practiceId: access.practiceId, calls });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/fonio] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const fonioRes = await fetch(toAbsoluteUrl(baseUrl, missedCallsPath), {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: 'application/json',
-    },
-    cache: 'no-store',
-  });
-
-  if (!fonioRes.ok) {
-    const detail = await fonioRes.text();
-    return NextResponse.json(
-      { error: 'Fonio-Anrufliste konnte nicht geladen werden.', detail: detail.slice(0, 2000) },
-      { status: 502 },
-    );
-  }
-
-  const payload = await fonioRes.json().catch(() => null);
-  const rawCalls = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.calls)
-      ? payload.calls
-      : Array.isArray(payload?.data)
-        ? payload.data
-        : [];
-
-  const calls = rawCalls.map(mapFonioCall);
-
-  return NextResponse.json({ enabled: true, practiceId: access.practiceId, calls });
 }
 
 export async function POST(req: Request) {
-  const access = await resolvePracticeAccess(req);
-  if ('error' in access) return access.error;
+  try {
+    const access = await resolvePracticeAccess(req);
+    if ('error' in access) return access.error;
 
-  const { apiKey, baseUrl, callbackPath } = getFonioConfig();
-  if (!apiKey) {
-    return NextResponse.json({ error: 'FONIO_API_KEY fehlt.' }, { status: 500 });
+    const { apiKey, baseUrl, callbackPath } = getFonioConfig();
+    if (!apiKey) {
+      return NextResponse.json({ error: 'FONIO_API_KEY fehlt.' }, { status: 500 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const phoneNumber = String(body?.phoneNumber || '').trim();
+    if (!phoneNumber) {
+      return NextResponse.json({ error: 'phoneNumber ist erforderlich.' }, { status: 400 });
+    }
+
+    const callbackPayload = {
+      phoneNumber,
+      phone_number: phoneNumber,
+      number: phoneNumber,
+      reason: String(body?.reason || 'Rueckruf aus Neuland AI Kommunikation').slice(0, 200),
+    };
+
+    const fonioRes = await fetch(toAbsoluteUrl(baseUrl, callbackPath), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(callbackPayload),
+    });
+
+    if (!fonioRes.ok) {
+      const detail = await fonioRes.text();
+      return NextResponse.json(
+        { error: 'Fonio-Rueckruf konnte nicht erstellt werden.', detail: detail.slice(0, 2000) },
+        { status: 502 },
+      );
+    }
+
+    const payload = await fonioRes.json().catch(() => null);
+    return NextResponse.json({ ok: true, payload });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/fonio] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const body = await req.json().catch(() => ({}));
-  const phoneNumber = String(body?.phoneNumber || '').trim();
-  if (!phoneNumber) {
-    return NextResponse.json({ error: 'phoneNumber ist erforderlich.' }, { status: 400 });
-  }
-
-  const callbackPayload = {
-    phoneNumber,
-    phone_number: phoneNumber,
-    number: phoneNumber,
-    reason: String(body?.reason || 'Rueckruf aus Neuland AI Kommunikation').slice(0, 200),
-  };
-
-  const fonioRes = await fetch(toAbsoluteUrl(baseUrl, callbackPath), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(callbackPayload),
-  });
-
-  if (!fonioRes.ok) {
-    const detail = await fonioRes.text();
-    return NextResponse.json(
-      { error: 'Fonio-Rueckruf konnte nicht erstellt werden.', detail: detail.slice(0, 2000) },
-      { status: 502 },
-    );
-  }
-
-  const payload = await fonioRes.json().catch(() => null);
-  return NextResponse.json({ ok: true, payload });
 }

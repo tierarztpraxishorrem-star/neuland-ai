@@ -12,6 +12,7 @@ type PracticeRow = {
 };
 
 export async function GET(req: Request) {
+  try {
   const token = getBearerToken(req);
   if (!token) {
     return NextResponse.json({ error: 'Nicht angemeldet.' }, { status: 401 });
@@ -53,4 +54,9 @@ export async function GET(req: Request) {
   return NextResponse.json({
     results: (data || []) as PracticeRow[],
   });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unbekannter Fehler';
+    console.error('[api/practices/search] Fehler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

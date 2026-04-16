@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
+  try {
   const { text } = await req.json();
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -31,4 +32,9 @@ export async function POST(req: Request) {
     data?.output?.[0]?.content?.[0]?.text || "Neuer Chat";
 
   return NextResponse.json({ title });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unbekannter Fehler";
+    console.error("[api/title] Fehler:", error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
