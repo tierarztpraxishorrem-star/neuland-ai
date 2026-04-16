@@ -233,6 +233,7 @@ export async function searchSharePoint(query: string): Promise<SearchResult[]> {
           query: { queryString: query },
           from: 0,
           size: 20,
+          region: process.env.MICROSOFT_GRAPH_REGION || 'DEU',
         },
       ],
     }),
