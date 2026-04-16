@@ -338,7 +338,7 @@ export default function MailTemplatesPage() {
                   );
                 })}
                 <div style={{ fontSize: 11, color: uiTokens.textSecondary, marginTop: 4 }}>
-                  Cron-Job erneuert automatisch alle 6h Subscriptions, die in &lt; 24h ablaufen.
+                  Cron-Job läuft täglich um 04:00 und erneuert Subscriptions, die in &lt; 48h ablaufen.
                 </div>
               </div>
             )}

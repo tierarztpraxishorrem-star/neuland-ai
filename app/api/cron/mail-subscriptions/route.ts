@@ -4,10 +4,10 @@ import { graphFetch, isMsGraphConfigured } from '../../../../lib/server/msGraph'
 
 export const runtime = 'nodejs';
 
-// Cron-Route: erneuert Subscriptions, die in < 24h ablaufen.
+// Cron-Route: erneuert Subscriptions, die in < 48h ablaufen.
 // Authentifizierung: CRON_SECRET als Bearer OR Vercel's x-vercel-cron-signature.
-// Läuft z.B. alle 6h (siehe vercel.json).
-const RENEW_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Läuft täglich (Vercel Hobby = 1x/Tag). Subs halten 70h, 48h-Fenster fängt sie sicher.
+const RENEW_WINDOW_MS = 48 * 60 * 60 * 1000;
 const MAX_SUBSCRIPTION_MINUTES = 4230;
 
 // Alte Notifications nach 7 Tagen aufräumen (verhindert Tabellen-Wildwuchs)
