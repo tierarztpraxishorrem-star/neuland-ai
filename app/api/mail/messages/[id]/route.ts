@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { getUserPractice } from '../../../../../lib/server/getUserPractice';
 import {
   getMessage,
-  markRead,
+  updateMessage,
   listAttachments,
   MailError,
 } from '../../../../../lib/server/mail';
+import { MAIL_CATEGORIES } from '../../../../../lib/mailCategories';
 import { isMsGraphConfigured } from '../../../../../lib/server/msGraph';
 
 export const runtime = 'nodejs';
@@ -56,9 +57,23 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!id) return NextResponse.json({ error: 'Nachrichten-ID fehlt.' }, { status: 400 });
 
     const body = await req.json().catch(() => ({}));
-    const isRead = body?.isRead !== false;
+    const patch: { isRead?: boolean; categories?: string[] } = {};
+    if (typeof body?.isRead === 'boolean') patch.isRead = body.isRead;
+    if (Array.isArray(body?.categories)) {
+      const allowed = new Set<string>(MAIL_CATEGORIES);
+      patch.categories = body.categories
+        .filter((c: unknown): c is string => typeof c === 'string')
+        .filter((c: string) => allowed.has(c));
+    }
 
-    await markRead(id, isRead);
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json(
+        { error: 'Keine gültigen Felder (isRead, categories) übergeben.' },
+        { status: 400 }
+      );
+    }
+
+    await updateMessage(id, patch);
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof MailError) {

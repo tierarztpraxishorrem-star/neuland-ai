@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { uiTokens, Card, Button, Input, SelectInput, TextAreaInput, Badge } from "@/components/ui/System";
+import { MAIL_CATEGORIES, categoryStyle } from "@/lib/mailCategories";
 
 type MailMessage = {
   id: string;
@@ -16,6 +17,7 @@ type MailMessage = {
   isRead: boolean;
   hasAttachments: boolean;
   importance?: "low" | "normal" | "high";
+  categories?: string[];
 };
 
 type Folder = "inbox" | "sentitems" | "drafts" | "archive";
@@ -60,6 +62,7 @@ export default function MailInboxPage() {
   const [error, setError] = useState<string | null>(null);
   const [folder, setFolder] = useState<Folder>("inbox");
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [showCompose, setShowCompose] = useState(false);
 
   // Compose form
@@ -95,6 +98,9 @@ export default function MailInboxPage() {
     }
   }, [load, folder]);
 
+  const visibleMessages = categoryFilter
+    ? messages.filter((m) => (m.categories || []).includes(categoryFilter))
+    : messages;
   const unreadCount = messages.filter((m) => !m.isRead && folder === "inbox").length;
 
   async function handleSend(e: React.FormEvent) {
@@ -244,20 +250,64 @@ export default function MailInboxPage() {
               </Button>
             )}
           </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: uiTokens.textSecondary, marginRight: 4 }}>Kategorie:</span>
+            <button
+              type="button"
+              onClick={() => setCategoryFilter("")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: categoryFilter === "" ? `1px solid ${uiTokens.brand}` : "1px solid #e5e7eb",
+                background: categoryFilter === "" ? "#ecfeff" : "#fff",
+                color: categoryFilter === "" ? uiTokens.brand : uiTokens.textSecondary,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Alle
+            </button>
+            {MAIL_CATEGORIES.map((cat) => {
+              const s = categoryStyle(cat);
+              const active = categoryFilter === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setCategoryFilter(active ? "" : cat)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: `1px solid ${s.border}`,
+                    background: active ? s.bg : "#fff",
+                    color: s.fg,
+                    fontSize: 12,
+                    fontWeight: active ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
         </Card>
 
         {loading ? (
           <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Laden…</div>
-        ) : messages.length === 0 ? (
+        ) : visibleMessages.length === 0 ? (
           <Card style={{ textAlign: "center", padding: 40 }}>
             <div style={{ fontSize: 40, marginBottom: 8 }}>📭</div>
             <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>
-              Keine E-Mails in diesem Ordner.
+              {categoryFilter
+                ? `Keine E-Mails mit Kategorie „${categoryFilter}".`
+                : "Keine E-Mails in diesem Ordner."}
             </div>
           </Card>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {messages.map((m) => (
+            {visibleMessages.map((m) => (
               <Card
                 key={m.id}
                 onClick={() => router.push(`/kommunikation/mail/${encodeURIComponent(m.id)}`)}
@@ -293,6 +343,29 @@ export default function MailInboxPage() {
                     }}>
                       {m.subject}
                     </div>
+                    {(m.categories && m.categories.length > 0) && (
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                        {m.categories.map((cat) => {
+                          const s = categoryStyle(cat);
+                          return (
+                            <span
+                              key={cat}
+                              style={{
+                                padding: "1px 8px",
+                                borderRadius: 999,
+                                background: s.bg,
+                                color: s.fg,
+                                border: `1px solid ${s.border}`,
+                                fontSize: 10,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {cat}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                     <div style={{
                       fontSize: 12,
                       color: uiTokens.textSecondary,

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { uiTokens, Card, Button, TextAreaInput, Badge } from "@/components/ui/System";
+import { MAIL_CATEGORIES, categoryStyle } from "@/lib/mailCategories";
 
 type MailAddress = { name?: string; address: string };
 
@@ -21,6 +22,7 @@ type MailMessageFull = {
   bodyContentType: "text" | "html";
   body: string;
   webLink?: string;
+  categories?: string[];
 };
 
 type Attachment = {
@@ -91,6 +93,8 @@ export default function MailDetailPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiInstruction, setAiInstruction] = useState("");
 
+  const [categorySaving, setCategorySaving] = useState(false);
+
   const load = useCallback(async () => {
     if (!messageId) return;
     try {
@@ -149,6 +153,35 @@ export default function MailDetailPage() {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
       setReplySending(false);
+    }
+  }
+
+  async function toggleCategory(cat: string) {
+    if (!message) return;
+    const current = new Set(message.categories || []);
+    if (current.has(cat)) current.delete(cat);
+    else current.add(cat);
+    const next = Array.from(current);
+
+    // optimistic update
+    setMessage({ ...message, categories: next });
+    setCategorySaving(true);
+    try {
+      const res = await fetchWithAuth(`/api/mail/messages/${encodeURIComponent(messageId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categories: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Kategorie konnte nicht gespeichert werden.");
+      }
+    } catch (err) {
+      // revert
+      setMessage({ ...message, categories: message.categories || [] });
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setCategorySaving(false);
     }
   }
 
@@ -237,6 +270,41 @@ export default function MailDetailPage() {
                   <Button variant="ghost" size="sm">In Outlook öffnen ↗</Button>
                 </a>
               )}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#f8fafc", border: uiTokens.cardBorder }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: uiTokens.textSecondary, marginBottom: 6 }}>
+              Bearbeitungs-Status {categorySaving && <span style={{ fontWeight: 400 }}>· speichert…</span>}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {MAIL_CATEGORIES.map((cat) => {
+                const s = categoryStyle(cat);
+                const active = (message.categories || []).includes(cat);
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => toggleCategory(cat)}
+                    disabled={categorySaving}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: 999,
+                      border: `1px solid ${active ? s.border : "#e5e7eb"}`,
+                      background: active ? s.bg : "#fff",
+                      color: active ? s.fg : uiTokens.textSecondary,
+                      fontSize: 12,
+                      fontWeight: active ? 700 : 500,
+                      cursor: categorySaving ? "wait" : "pointer",
+                    }}
+                  >
+                    {active ? "✓ " : ""}{cat}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: uiTokens.textSecondary, marginTop: 6 }}>
+              Kategorien werden in Outlook und Neuland AI synchron angezeigt.
             </div>
           </div>
 

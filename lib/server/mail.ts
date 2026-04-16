@@ -6,6 +6,11 @@ import { graphFetch, graphJson, MsGraphError } from './msGraph';
 
 export { MsGraphError as MailError };
 
+// Festgelegtes geteiltes Postfach für Neuland AI.
+// Empfang UND Versand laufen ausschließlich über diese Adresse.
+// Bewusst im Code hart verdrahtet, damit kein anderes Postfach versehentlich per ENV reingeschleust wird.
+export const MAILBOX_ADDRESS = 'empfang@tzn-bergheim.de';
+
 export type MailAddress = {
   name?: string;
   address: string;
@@ -25,6 +30,7 @@ export type MailMessage = {
   hasAttachments: boolean;
   importance?: 'low' | 'normal' | 'high';
   webLink?: string;
+  categories: string[];
 };
 
 export type MailMessageFull = MailMessage & {
@@ -64,14 +70,11 @@ type GraphMessage = {
   importance?: string;
   webLink?: string;
   body?: { contentType?: string; content?: string };
+  categories?: string[];
 };
 
 function getMailbox(): string {
-  const mailbox = process.env.MICROSOFT_MAILBOX_EMAIL;
-  if (!mailbox) {
-    throw new MsGraphError('MICROSOFT_MAILBOX_EMAIL ist nicht gesetzt.');
-  }
-  return mailbox;
+  return MAILBOX_ADDRESS;
 }
 
 function normalizeAddress(r?: GraphRecipient): MailAddress | undefined {
@@ -100,6 +103,7 @@ function toSummary(m: GraphMessage): MailMessage {
     hasAttachments: Boolean(m.hasAttachments),
     importance: (['low', 'normal', 'high'] as const).find((v) => v === m.importance) || 'normal',
     webLink: m.webLink,
+    categories: Array.isArray(m.categories) ? m.categories : [],
   };
 }
 
@@ -137,7 +141,7 @@ export async function listMessages(options?: {
   params.push(`$top=${limit}`);
   params.push(
     `$select=${encodeURIComponent(
-      'id,conversationId,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,importance,webLink'
+      'id,conversationId,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,importance,webLink,categories'
     )}`
   );
   if (options?.search?.trim()) {
@@ -170,21 +174,39 @@ export async function getMessage(messageId: string): Promise<MailMessageFull> {
   return toFull(data);
 }
 
-export async function markRead(messageId: string, isRead = true): Promise<void> {
+export type MessagePatch = {
+  isRead?: boolean;
+  categories?: string[];
+};
+
+export async function updateMessage(messageId: string, patch: MessagePatch): Promise<void> {
   if (!messageId) throw new MsGraphError('Nachrichten-ID fehlt.');
+  const payload: Record<string, unknown> = {};
+  if (typeof patch.isRead === 'boolean') payload.isRead = patch.isRead;
+  if (Array.isArray(patch.categories)) {
+    payload.categories = patch.categories
+      .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+      .map((c) => c.trim());
+  }
+  if (Object.keys(payload).length === 0) return;
+
   const path = buildUserPath(`/messages/${encodeURIComponent(messageId)}`);
   const res = await graphFetch(path, {
     method: 'PATCH',
-    body: JSON.stringify({ isRead }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    let message = `Status konnte nicht geändert werden (${res.status}).`;
+    let message = `Nachricht konnte nicht aktualisiert werden (${res.status}).`;
     try {
       const body = await res.json();
       if (body?.error?.message) message = `Graph: ${body.error.message}`;
     } catch {}
     throw new MsGraphError(message, res.status);
   }
+}
+
+export async function markRead(messageId: string, isRead = true): Promise<void> {
+  return updateMessage(messageId, { isRead });
 }
 
 export async function listAttachments(messageId: string): Promise<MailAttachment[]> {

@@ -35,9 +35,9 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Mail unread count (nur wenn Microsoft Graph konfiguriert ist)
+  // Mail unread count (Empfangs-Postfach ist fest in lib/server/mail.ts verdrahtet)
   let mail = 0;
-  if (isMsGraphConfigured() && process.env.MICROSOFT_MAILBOX_EMAIL) {
+  if (isMsGraphConfigured()) {
     try {
       mail = await getMailUnread();
     } catch {
