@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     const auth = await getUserPractice(req);
     if (!auth.ok) return auth.response;
 
-    const { supabase, practiceId, userId } = auth.context;
+    const { supabase, practiceId, userId, role } = auth.context;
 
     const featureCheck = await getHrFeatureEnabled(supabase, practiceId);
     if (!featureCheck.ok) {
@@ -43,6 +43,52 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'HR-Modul ist für diese Praxis deaktiviert.' }, { status: 403 });
     }
 
+    const url = new URL(req.url);
+    const isAdmin = url.searchParams.get('admin') === 'true';
+    const statusFilter = url.searchParams.get('status');
+
+    // Admin mode: owner/admin can see all absences for the practice
+    if (isAdmin && (role === 'owner' || role === 'admin')) {
+      let query = supabase
+        .from('absences')
+        .select('id, employee_id, type, starts_on, ends_on, note, status, created_at, updated_at')
+        .eq('practice_id', practiceId)
+        .order('starts_on', { ascending: false });
+
+      if (statusFilter && ['pending', 'approved', 'rejected'].includes(statusFilter)) {
+        query = query.eq('status', statusFilter);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        return NextResponse.json({ error: error.message || 'Fehler beim Laden der Abwesenheiten.' }, { status: 500 });
+      }
+
+      // Enrich with employee names
+      const { data: employees } = await supabase
+        .from('employees')
+        .select('id, display_name, user_id')
+        .eq('practice_id', practiceId);
+
+      const empMap = new Map<string, string>();
+      for (const emp of employees || []) {
+        empMap.set(emp.id, emp.display_name || emp.user_id.slice(0, 8));
+      }
+
+      const enriched = (data || []).map((a) => ({
+        ...a,
+        employee_name: empMap.get(a.employee_id) || 'Unbekannt',
+        absence_type: a.type,
+        start_date: a.starts_on,
+        end_date: a.ends_on,
+        workdays: Math.max(1, Math.ceil((new Date(a.ends_on).getTime() - new Date(a.starts_on).getTime()) / 86400000) + 1),
+      }));
+
+      return NextResponse.json({ ok: true, absences: enriched });
+    }
+
+    // Regular mode: employee sees their own absences
     const employeeRes = await getOrCreateEmployee(supabase, practiceId, userId);
     if (!employeeRes.ok) {
       return NextResponse.json({ error: employeeRes.error }, { status: 500 });

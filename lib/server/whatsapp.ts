@@ -58,14 +58,36 @@ export async function markAsRead(messageId: string) {
   });
 }
 
-/** Download media by ID */
-export async function getMediaUrl(mediaId: string): Promise<string> {
+/** Download media by ID – returns { url, mime_type, file_size } */
+export async function getMediaInfo(mediaId: string): Promise<{ url: string; mime_type: string; file_size: number }> {
   const { token } = getConfig();
   const res = await fetch(`${GRAPH_API}/${mediaId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
-  return data.url as string;
+  return {
+    url: data.url as string,
+    mime_type: (data.mime_type as string) || "application/octet-stream",
+    file_size: (data.file_size as number) || 0,
+  };
+}
+
+/** Download media by ID (legacy compat) */
+export async function getMediaUrl(mediaId: string): Promise<string> {
+  const info = await getMediaInfo(mediaId);
+  return info.url;
+}
+
+/** Download media binary from the media URL */
+export async function downloadMedia(mediaUrl: string): Promise<{ buffer: ArrayBuffer; contentType: string }> {
+  const { token } = getConfig();
+  const res = await fetch(mediaUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Media download failed: ${res.status}`);
+  const contentType = res.headers.get("content-type") || "application/octet-stream";
+  const buffer = await res.arrayBuffer();
+  return { buffer, contentType };
 }
 
 /** Verify webhook challenge (GET) */
@@ -114,6 +136,7 @@ export type IncomingMessage = {
   type: string;          // text, image, document, audio, video
   body?: string;
   mediaId?: string;
+  mimeType?: string;
   profileName?: string;
 };
 
@@ -147,8 +170,9 @@ export function extractMessages(payload: Record<string, unknown>): IncomingMessa
         if (m.type === "text") {
           msg.body = (m.text as { body: string })?.body;
         } else if (["image", "audio", "video", "document"].includes(m.type as string)) {
-          const media = m[m.type as string] as { id: string; caption?: string } | undefined;
+          const media = m[m.type as string] as { id: string; caption?: string; mime_type?: string } | undefined;
           msg.mediaId = media?.id;
+          msg.mimeType = media?.mime_type;
           msg.body = media?.caption;
         }
 

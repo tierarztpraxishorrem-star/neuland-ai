@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserPractice } from "@/lib/server/getUserPractice";
+import { getUnreadCounts as getSlackUnread, isSlackConfigured } from "@/lib/server/slack";
 
 /**
  * GET /api/kommunikation/unread
@@ -22,8 +23,19 @@ export async function GET(req: NextRequest) {
     0
   );
 
+  // Slack unread count
+  let slack = 0;
+  if (isSlackConfigured()) {
+    try {
+      slack = await getSlackUnread();
+    } catch {
+      // ignore — Slack may not be configured yet
+    }
+  }
+
   return NextResponse.json({
     whatsapp,
-    total: whatsapp,
+    slack,
+    total: whatsapp + slack,
   });
 }

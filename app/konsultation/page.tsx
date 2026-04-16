@@ -1292,7 +1292,6 @@ background:'#fff'
                 border: `1px solid ${brand.border}`,
                 fontSize: isMobile ? '16px' : '15px',
                 boxSizing: 'border-box',
-                fontFamily: 'Arial, sans-serif',
                 resize: 'vertical',
                 background: '#fff',
               }}
@@ -1457,7 +1456,7 @@ setResult(prev =>
                   style={{
                     width: `${progress}%`,
                     height: '100%',
-                    background: `linear-gradient(90deg, ${brand.primary} 0%, #2d8e98 100%)`,
+                    background: brand.primary,
                     borderRadius: '999px',
                     transition: 'width 0.6s ease',
                   }}
@@ -1544,7 +1543,6 @@ fontSize: isMobile ? '22px' : '28px',  }}
     lineHeight: 1.5,
     resize: 'vertical',
     boxSizing: 'border-box',
-    fontFamily: 'Arial, sans-serif',
     whiteSpace: 'pre-wrap',
   }}
 />

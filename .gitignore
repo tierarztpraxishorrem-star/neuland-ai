@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# mcp config (may contain tokens)
+.mcp.json
+
+# claude code local settings (machine-specific)
+.claude/settings.local.json

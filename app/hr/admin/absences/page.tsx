@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../../lib/supabase";
+import { uiTokens, Card, Section, Button, Badge } from "../../../../components/ui/System";
 
 type AbsenceType = "vacation" | "sick" | "school" | "other";
 type AbsenceStatus = "pending" | "approved" | "rejected";
@@ -21,6 +22,7 @@ type Employee = {
   id: string;
   user_id: string;
   role: string;
+  display_name?: string | null;
 };
 
 const TYPE_LABELS: Record<AbsenceType, string> = {
@@ -36,10 +38,10 @@ const STATUS_LABELS: Record<AbsenceStatus, string> = {
   rejected: "Abgelehnt",
 };
 
-const STATUS_COLORS: Record<AbsenceStatus, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  approved: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
+const STATUS_TONES: Record<AbsenceStatus, "accent" | "success" | "danger"> = {
+  pending: "accent",
+  approved: "success",
+  rejected: "danger",
 };
 
 async function fetchWithAuth(url: string, init?: RequestInit) {
@@ -146,120 +148,117 @@ export default function AdminAbsencesPage() {
   function getEmployeeLabel(employeeId: string) {
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return employeeId.slice(0, 8) + "…";
-    return emp.user_id.slice(0, 8) + "…";
+    return emp.display_name || emp.user_id.slice(0, 8) + "…";
   }
 
   const pending = absences.filter((a) => a.status === "pending");
   const rest = absences.filter((a) => a.status !== "pending");
 
   return (
-    <div className="mx-auto max-w-[900px] space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Abwesenheitsverwaltung</h1>
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}>
+      <div style={{ width: "min(900px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>
+          Abwesenheitsverwaltung
+        </h1>
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <p className="text-sm text-gray-500">Laden…</p>
-      ) : (
-        <>
-          {/* Pending absences */}
-          <div className="rounded-lg border border-black/10 bg-white p-4">
-            <h2 className="mb-3 text-lg font-semibold">
-              Ausstehende Anträge ({pending.length})
-            </h2>
-            {pending.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                Keine ausstehenden Anträge.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {pending.map((a) => (
-                  <div
-                    key={a.id}
-                    className="flex items-center justify-between rounded-md border border-amber-100 bg-amber-50 p-3"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="text-sm font-medium">
-                        {TYPE_LABELS[a.type] || a.type} –{" "}
-                        <span className="text-gray-600">
-                          {getEmployeeLabel(a.employee_id)}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatDate(a.starts_on)} – {formatDate(a.ends_on)}
-                        {a.note && (
-                          <span className="ml-2 italic">{a.note}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleStatusChange(a.id, "approved")}
-                        disabled={updating === a.id}
-                        className="rounded-md bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                      >
-                        Genehmigen
-                      </button>
-                      <button
-                        onClick={() => handleStatusChange(a.id, "rejected")}
-                        disabled={updating === a.id}
-                        className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                      >
-                        Ablehnen
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        {error && (
+          <div style={{ padding: 12, borderRadius: uiTokens.radiusCard, border: "1px solid #fca5a5", background: "#fef2f2", color: "#b91c1c", fontSize: 14 }}>
+            {error}
           </div>
+        )}
 
-          {/* Past absences */}
-          <div className="rounded-lg border border-black/10 bg-white p-4">
-            <h2 className="mb-3 text-lg font-semibold">
-              Bearbeitete Anträge ({rest.length})
-            </h2>
-            {rest.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                Keine bearbeiteten Anträge.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {rest.map((a) => (
-                  <div
-                    key={a.id}
-                    className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 p-3"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="text-sm font-medium">
-                        {TYPE_LABELS[a.type] || a.type} –{" "}
-                        <span className="text-gray-600">
-                          {getEmployeeLabel(a.employee_id)}
-                        </span>
+        {loading ? (
+          <p style={{ fontSize: 14, color: uiTokens.textMuted }}>Laden…</p>
+        ) : (
+          <>
+            {/* Pending absences */}
+            <Section title={`Ausstehende Anträge (${pending.length})`}>
+              {pending.length === 0 ? (
+                <p style={{ fontSize: 14, color: uiTokens.textMuted }}>
+                  Keine ausstehenden Anträge.
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: uiTokens.cardGap }}>
+                  {pending.map((a) => (
+                    <Card key={a.id}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div style={{ fontSize: 14, fontWeight: 500, color: uiTokens.textPrimary }}>
+                            {TYPE_LABELS[a.type] || a.type} –{" "}
+                            <span style={{ color: uiTokens.textSecondary }}>
+                              {getEmployeeLabel(a.employee_id)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 13, color: uiTokens.textMuted }}>
+                            {formatDate(a.starts_on)} – {formatDate(a.ends_on)}
+                            {a.note && (
+                              <span style={{ marginLeft: 8, fontStyle: "italic" }}>{a.note}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Button
+                            size="sm"
+                            onClick={() => handleStatusChange(a.id, "approved")}
+                            disabled={updating === a.id}
+                            style={{ background: "#16a34a", borderColor: "#16a34a" }}
+                          >
+                            Genehmigen
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleStatusChange(a.id, "rejected")}
+                            disabled={updating === a.id}
+                            style={{ background: "#dc2626", borderColor: "#dc2626", color: "#fff" }}
+                          >
+                            Ablehnen
+                          </Button>
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500">
-                        {formatDate(a.starts_on)} – {formatDate(a.ends_on)}
-                        {a.note && (
-                          <span className="ml-2 italic">{a.note}</span>
-                        )}
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Section>
+
+            {/* Past absences */}
+            <Section title={`Bearbeitete Anträge (${rest.length})`}>
+              {rest.length === 0 ? (
+                <p style={{ fontSize: 14, color: uiTokens.textMuted }}>
+                  Keine bearbeiteten Anträge.
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: uiTokens.cardGap }}>
+                  {rest.map((a) => (
+                    <Card key={a.id}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div style={{ fontSize: 14, fontWeight: 500, color: uiTokens.textPrimary }}>
+                            {TYPE_LABELS[a.type] || a.type} –{" "}
+                            <span style={{ color: uiTokens.textSecondary }}>
+                              {getEmployeeLabel(a.employee_id)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 13, color: uiTokens.textMuted }}>
+                            {formatDate(a.starts_on)} – {formatDate(a.ends_on)}
+                            {a.note && (
+                              <span style={{ marginLeft: 8, fontStyle: "italic" }}>{a.note}</span>
+                            )}
+                          </div>
+                        </div>
+                        <Badge tone={STATUS_TONES[a.status] || "accent"}>
+                          {STATUS_LABELS[a.status] || a.status}
+                        </Badge>
                       </div>
-                    </div>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] || "bg-gray-100 text-gray-700"}`}
-                    >
-                      {STATUS_LABELS[a.status] || a.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Section>
+          </>
+        )}
+      </div>
+    </main>
   );
 }

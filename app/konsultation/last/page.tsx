@@ -53,7 +53,7 @@ export default function LastConsultationPage() {
   }, [router]);
 
   return (
-    <main style={{ padding: '40px', fontFamily: 'Arial' }}>
+    <main style={{ padding: '40px' }}>
       Lade letzte Konsultation...
     </main>
   );

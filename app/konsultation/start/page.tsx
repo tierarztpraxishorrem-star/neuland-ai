@@ -1,14 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ANAMNESIS_TEMPLATE_META, TEMPLATE_KEYS } from '../../../lib/liveAnamnesis';
+import { uiTokens, Card } from '../../../components/ui/System';
 
 const CHIEF_COMPLAINT_OPTIONS = TEMPLATE_KEYS.map((key) => ({
   value: key,
   label: ANAMNESIS_TEMPLATE_META[key].label,
 }));
+
+type Patient = {
+  id: string;
+  name: string;
+  tierart: string | null;
+  rasse: string | null;
+  alter: string | null;
+  geschlecht: string | null;
+  external_id: string | null;
+  owner_name: string | null;
+};
 
 export default function StartKonsultation() {
 
@@ -21,17 +33,42 @@ export default function StartKonsultation() {
   const [titleError, setTitleError] = useState<string | null>(null);
   const showNoLastConsultationNotice = searchParams.get('notice') === 'no-last-consultation';
 
+  // Patient selection
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [patientSearch, setPatientSearch] = useState('');
+  const [practiceId, setPracticeId] = useState<string | null>(null);
 
   // Titel (Pflicht)
   const [caseTitle, setCaseTitle] = useState("");
 
-  const brand = {
-    primary: '#0F6B74',
-    border: '#E5E7EB',
-    text: '#1F2937',
-    bg: '#F4F7F8',
-    card: '#FFFFFF'
-  };
+  // Load patients + practice_id on mount
+  useEffect(() => {
+    const load = async () => {
+      const [patientsRes, membershipRes] = await Promise.all([
+        supabase.from('patients').select('*').order('created_at', { ascending: false }).limit(300),
+        supabase.from('practice_memberships').select('practice_id, role, created_at').order('created_at', { ascending: true }),
+      ]);
+      if (patientsRes.data) setPatients(patientsRes.data as Patient[]);
+
+      const rank: Record<string, number> = { owner: 0, admin: 1, member: 2 };
+      const best = ((membershipRes.data || []) as { practice_id: string | null; role: string | null; created_at: string | null }[]).sort((a, b) => {
+        const ra = rank[a.role || ''] ?? 99;
+        const rb = rank[b.role || ''] ?? 99;
+        return ra !== rb ? ra - rb : String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      })[0];
+      if (best?.practice_id) setPracticeId(best.practice_id);
+    };
+    load();
+  }, []);
+
+  const filteredPatients = useMemo(() => {
+    const term = patientSearch.trim().toLowerCase();
+    if (!term) return patients.slice(0, 20);
+    return patients.filter((p) => [p.name, p.external_id || '', p.owner_name || ''].join(' ').toLowerCase().includes(term)).slice(0, 20);
+  }, [patients, patientSearch]);
+
+  const selectedPatient = useMemo(() => patients.find((p) => p.id === selectedPatientId) || null, [patients, selectedPatientId]);
 
   // 🚀 CASE ERSTELLEN
   const createCase = async () => {
@@ -44,12 +81,25 @@ export default function StartKonsultation() {
     setTitleError(null);
     setLoading(true);
     try {
+      const insertPayload: Record<string, unknown> = {
+        title: normalizedTitle,
+        status: 'draft',
+      };
+      if (selectedPatientId) {
+        insertPayload.patient_id = selectedPatientId;
+        if (selectedPatient) {
+          insertPayload.patient_name = selectedPatient.name;
+          insertPayload.species = selectedPatient.tierart;
+          insertPayload.breed = selectedPatient.rasse;
+          insertPayload.age = selectedPatient.alter;
+          insertPayload.geschlecht = selectedPatient.geschlecht;
+        }
+      }
+      if (practiceId) insertPayload.practice_id = practiceId;
+
       const { data, error } = await supabase
         .from("cases")
-        .insert({
-          title: normalizedTitle,
-          status: "draft"
-        })
+        .insert(insertPayload)
         .select()
         .single();
       if (error) throw error;
@@ -70,22 +120,17 @@ export default function StartKonsultation() {
   return (
     <main style={{
       minHeight: "100vh",
-      background: brand.bg,
-      padding: "40px",
-      fontFamily: "Arial"
+      background: uiTokens.pageBackground,
+      padding: uiTokens.pagePadding,
     }}>
 
-      <div style={{
+      <Card style={{
         maxWidth: "700px",
         margin: "0 auto",
-        background: brand.card,
-        padding: "30px",
-        borderRadius: "16px",
-        border: `1px solid ${brand.border}`
       }}>
 
 
-        <h1 style={{ color: brand.primary, marginBottom: "25px" }}>
+        <h1 style={{ color: uiTokens.brand, marginBottom: "25px" }}>
           Neue Aufnahme / Dokumentation
         </h1>
 
@@ -131,8 +176,64 @@ export default function StartKonsultation() {
           </div>
         ) : null}
 
+        {/* Patient (optional) */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 6, fontSize: 14, color: '#6b7280' }}>Patient (optional)</div>
+          {selectedPatient ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 12px', borderRadius: uiTokens.radiusCard, border: `1px solid ${uiTokens.brand}`, background: '#ecf8f9',
+            }}>
+              <span style={{ fontSize: 14, color: '#0f172a' }}>
+                {selectedPatient.name}
+                {selectedPatient.external_id ? ` (#${selectedPatient.external_id})` : ''}
+                {selectedPatient.tierart ? ` · ${selectedPatient.tierart}` : ''}
+                {selectedPatient.rasse ? ` · ${selectedPatient.rasse}` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => { setSelectedPatientId(null); setPatientSearch(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 16 }}
+              >✕</button>
+            </div>
+          ) : (
+            <>
+              <input
+                placeholder="Patient suchen (Name oder ID)..."
+                value={patientSearch}
+                onChange={(e) => setPatientSearch(e.target.value)}
+                style={inputStyle}
+              />
+              {patientSearch.trim() && filteredPatients.length > 0 && (
+                <div style={{
+                  border: '1px solid #E5E7EB', borderRadius: 10, maxHeight: 180, overflowY: 'auto',
+                  background: '#fff', marginTop: -8, marginBottom: 8,
+                }}>
+                  {filteredPatients.map((p) => (
+                    <div
+                      key={p.id}
+                      onClick={() => { setSelectedPatientId(p.id); setPatientSearch(''); }}
+                      style={{
+                        padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#f0fdfa'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#fff'; }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{p.name}</span>
+                      {p.external_id ? <span style={{ color: '#6b7280' }}> #{p.external_id}</span> : null}
+                      {p.tierart ? <span style={{ color: '#6b7280' }}> · {p.tierart}</span> : null}
+                      {p.rasse ? <span style={{ color: '#6b7280' }}> · {p.rasse}</span> : null}
+                      {p.owner_name ? <span style={{ color: '#6b7280' }}> · {p.owner_name}</span> : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
         <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 18 }}>
-          <b>Hinweis:</b> Weitere strukturierte Daten (z.B. Patient, Zusatzinfos) werden erst nach Auswahl der Vorlage abgefragt.
+          <b>Hinweis:</b> Weitere strukturierte Daten (z.B. Zusatzinfos, Vorlage) können nach der Aufnahme ergänzt werden.
         </div>
 
         <div style={{ marginBottom: 14 }}>
@@ -143,7 +244,7 @@ export default function StartKonsultation() {
               onClick={() => setMode('normal')}
               style={{
                 ...modeButtonStyle,
-                border: mode === 'normal' ? '2px solid #0F6B74' : '1px solid #E5E7EB',
+                border: mode === 'normal' ? `2px solid ${uiTokens.brand}` : uiTokens.cardBorder,
                 background: mode === 'normal' ? '#ecf8f9' : '#fff'
               }}
             >
@@ -154,7 +255,7 @@ export default function StartKonsultation() {
               onClick={() => setMode('live-anamnesis')}
               style={{
                 ...modeButtonStyle,
-                border: mode === 'live-anamnesis' ? '2px solid #0F6B74' : '1px solid #E5E7EB',
+                border: mode === 'live-anamnesis' ? `2px solid ${uiTokens.brand}` : uiTokens.cardBorder,
                 background: mode === 'live-anamnesis' ? '#ecf8f9' : '#fff'
               }}
             >
@@ -189,8 +290,8 @@ export default function StartKonsultation() {
             width: "100%",
             marginTop: "20px",
             padding: "16px",
-            borderRadius: "14px",
-            background: brand.primary,
+            borderRadius: uiTokens.radiusCard,
+            background: uiTokens.brand,
             color: "#fff",
             border: "none",
             cursor: "pointer",
@@ -201,7 +302,7 @@ export default function StartKonsultation() {
           {loading ? "Erstelle..." : "➡️ Zur Aufnahme"}
         </button>
 
-      </div>
+      </Card>
     </main>
   );
 }
@@ -211,15 +312,15 @@ const inputStyle = {
   width: "100%",
   padding: "12px",
   marginBottom: "12px",
-  borderRadius: "10px",
-  border: "1px solid #E5E7EB"
+  borderRadius: "16px",
+  border: "1px solid #e5e7eb"
 };
 
 const modeButtonStyle = {
   width: '100%',
-  borderRadius: '10px',
+  borderRadius: '16px',
   padding: '12px',
   textAlign: 'left' as const,
   cursor: 'pointer',
-  color: '#0f172a'
+  color: '#1f2937'
 };

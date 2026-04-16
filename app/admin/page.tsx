@@ -11,6 +11,19 @@ type UserRow = {
   role?: 'owner' | 'admin' | 'member';
 };
 
+type EmployeeProfileRow = {
+  id: string;
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  auth_full_name: string | null;
+  role: string;
+  membership_role: string;
+  employment_status: string;
+  weekly_hours: number | null;
+  created_at: string;
+};
+
 type PracticeSettingsRow = {
   id?: number;
   practice_id: string | null;
@@ -152,6 +165,15 @@ export default function AdminPage() {
   const [domainMessage, setDomainMessage] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
 
+  // Employee profile management
+  const [employeeProfiles, setEmployeeProfiles] = useState<EmployeeProfileRow[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeesError, setEmployeesError] = useState<string | null>(null);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Partial<EmployeeProfileRow>>({});
+  const [savingEmployee, setSavingEmployee] = useState(false);
+  const [employeeMessage, setEmployeeMessage] = useState<string | null>(null);
+
   const resolvePracticeId = async () => {
     const { data, error } = await supabase
       .from('practice_memberships')
@@ -277,6 +299,92 @@ export default function AdminPage() {
       .limit(20);
 
     setNotifications((data || []) as NotificationRow[]);
+  };
+
+  const loadEmployeeProfiles = async (practiceId: string) => {
+    setEmployeesLoading(true);
+    setEmployeesError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setEmployeesError('Nicht angemeldet.');
+        return;
+      }
+      const res = await fetch('/api/admin/employees', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'X-Practice-Id': practiceId,
+        },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setEmployeesError(json.error || 'Mitarbeiter konnten nicht geladen werden.');
+        return;
+      }
+      setEmployeeProfiles(json.employees || []);
+    } catch {
+      setEmployeesError('Fehler beim Laden der Mitarbeiter.');
+    } finally {
+      setEmployeesLoading(false);
+    }
+  };
+
+  const startEditEmployee = (emp: EmployeeProfileRow) => {
+    setEditingEmployeeId(emp.id);
+    setEditDraft({
+      display_name: emp.display_name || emp.auth_full_name || '',
+      weekly_hours: emp.weekly_hours,
+      employment_status: emp.employment_status,
+      role: emp.role,
+    });
+    setEmployeeMessage(null);
+  };
+
+  const cancelEditEmployee = () => {
+    setEditingEmployeeId(null);
+    setEditDraft({});
+    setEmployeeMessage(null);
+  };
+
+  const saveEmployee = async () => {
+    if (!editingEmployeeId || !activePracticeId) return;
+    setSavingEmployee(true);
+    setEmployeeMessage(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setEmployeeMessage('Nicht angemeldet.');
+        return;
+      }
+      const res = await fetch('/api/admin/employees', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'X-Practice-Id': activePracticeId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          employee_id: editingEmployeeId,
+          display_name: editDraft.display_name || null,
+          weekly_hours: editDraft.weekly_hours !== undefined ? editDraft.weekly_hours : undefined,
+          employment_status: editDraft.employment_status,
+          role: editDraft.role,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setEmployeeMessage(json.error || 'Speichern fehlgeschlagen.');
+        return;
+      }
+      setEmployeeMessage('Mitarbeiterdaten gespeichert.');
+      setEditingEmployeeId(null);
+      setEditDraft({});
+      await loadEmployeeProfiles(activePracticeId);
+    } catch {
+      setEmployeeMessage('Speichern fehlgeschlagen.');
+    } finally {
+      setSavingEmployee(false);
+    }
   };
 
   const reviewJoinRequest = async (requestId: string, approve: boolean) => {
@@ -441,7 +549,7 @@ export default function AdminPage() {
 
       const json = (await res.json().catch(() => ({}))) as AdminUserRoleUpdateResponse;
       if (!res.ok) {
-        setRoleUpdateMessage(json.error || 'Rolle konnte nicht geaendert werden.');
+        setRoleUpdateMessage(json.error || 'Rolle konnte nicht geändert werden.');
         return;
       }
 
@@ -452,7 +560,7 @@ export default function AdminPage() {
       )));
       setRoleUpdateMessage('Rolle gespeichert.');
     } catch {
-      setRoleUpdateMessage('Rolle konnte nicht geaendert werden.');
+      setRoleUpdateMessage('Rolle konnte nicht geändert werden.');
     } finally {
       setUpdatingRoleId(null);
     }
@@ -526,6 +634,7 @@ export default function AdminPage() {
     loadJoinRequests(activePracticeId);
     loadDomainLinks(activePracticeId);
     loadNotifications(activePracticeId);
+    loadEmployeeProfiles(activePracticeId);
   }, [activePracticeId]);
 
   const onLogoUpload = (file: File | null) => {
@@ -815,8 +924,8 @@ export default function AdminPage() {
         <h2 style={{ fontSize: 20, marginBottom: 12 }}>Registrierung konfigurieren</h2>
         <div
           style={{
-            background: 'linear-gradient(160deg, #ffffff 0%, #f6fbfb 100%)',
-            borderRadius: 14,
+            background: uiTokens.cardBackground,
+            borderRadius: uiTokens.radiusCard,
             padding: 20,
             border: uiTokens.cardBorder,
             display: 'grid',
@@ -1200,18 +1309,174 @@ export default function AdminPage() {
         )}
       </section>
 
-      {/* Weitere Admin-Funktionen als Platzhalter */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 22,
-        }}
-      >
-        <AdminCard title="Aktivitätsprotokoll" desc="Logins & Aktionen einsehen" icon="📜" />
-        <AdminCard title="Systemeinstellungen" desc="Plattform konfigurieren" icon="⚙️" />
-        <AdminCard title="Supportanfragen" desc="Tickets & Feedback" icon="🛠️" />
-      </div>
+      {/* Mitarbeiterprofil-Verwaltung */}
+      <section style={{ marginBottom: 40 }}>
+        <h2 style={{ fontSize: 20, marginBottom: 12 }}>Mitarbeiter-Verwaltung 👤</h2>
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+          Hier können Name, Wochenstunden, Status und Rolle aller Mitarbeiter angepasst werden. Diese Daten werden im gesamten HR-Bereich verwendet.
+        </div>
+        {employeeMessage ? (
+          <div style={{ marginBottom: 10, fontSize: 13, color: '#0f766e' }}>{employeeMessage}</div>
+        ) : null}
+        {employeesLoading ? (
+          <div>Lade Mitarbeiter...</div>
+        ) : employeesError ? (
+          <div style={{ color: '#b91c1c' }}>{employeesError}</div>
+        ) : employeeProfiles.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#64748b' }}>Noch keine Mitarbeiter in dieser Praxis.</div>
+        ) : (
+          <div style={{ display: 'grid', gap: 12 }}>
+            {employeeProfiles.map((emp) => {
+              const isEditing = editingEmployeeId === emp.id;
+              return (
+                <div
+                  key={emp.id}
+                  style={{
+                    background: '#fff',
+                    borderRadius: 12,
+                    padding: 16,
+                    border: isEditing ? '2px solid #0F6B74' : uiTokens.cardBorder,
+                    transition: 'border 0.2s',
+                  }}
+                >
+                  {isEditing ? (
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 4 }}>Anzeigename</label>
+                          <input
+                            value={editDraft.display_name || ''}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, display_name: e.target.value }))}
+                            placeholder="z. B. Dr. Anna Müller"
+                            style={fieldStyle}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 4 }}>Wochenstunden</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={168}
+                            value={editDraft.weekly_hours ?? ''}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, weekly_hours: e.target.value === '' ? null : Number(e.target.value) }))}
+                            placeholder="z. B. 40"
+                            style={fieldStyle}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 4 }}>Status</label>
+                          <select
+                            value={editDraft.employment_status || 'active'}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, employment_status: e.target.value }))}
+                            style={fieldStyle}
+                          >
+                            <option value="active">Aktiv</option>
+                            <option value="inactive">Inaktiv</option>
+                            <option value="suspended">Gesperrt</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#475569', marginBottom: 4 }}>HR-Rolle</label>
+                          <select
+                            value={editDraft.role || 'member'}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, role: e.target.value }))}
+                            style={fieldStyle}
+                          >
+                            <option value="member">Mitarbeiter</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>
+                        E-Mail: {emp.email} · Erstellt: {new Date(emp.created_at).toLocaleDateString('de-DE')}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                        <button
+                          onClick={saveEmployee}
+                          disabled={savingEmployee}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: 8,
+                            border: 'none',
+                            background: '#0F6B74',
+                            color: '#fff',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {savingEmployee ? 'Speichere...' : 'Speichern'}
+                        </button>
+                        <button
+                          onClick={cancelEditEmployee}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: 8,
+                            border: '1px solid #e2e8f0',
+                            background: '#fff',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Abbrechen
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>
+                          {emp.display_name || emp.auth_full_name || emp.email}
+                        </div>
+                        <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
+                          {emp.email}
+                          {emp.weekly_hours !== null ? ` · ${emp.weekly_hours}h/Woche` : ''}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                          <span style={{
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            fontWeight: 600,
+                            background: emp.employment_status === 'active' ? '#dcfce7' : emp.employment_status === 'suspended' ? '#fef2f2' : '#f1f5f9',
+                            color: emp.employment_status === 'active' ? '#166534' : emp.employment_status === 'suspended' ? '#991b1b' : '#475569',
+                          }}>
+                            {emp.employment_status === 'active' ? 'Aktiv' : emp.employment_status === 'inactive' ? 'Inaktiv' : 'Gesperrt'}
+                          </span>
+                          <span style={{
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            fontWeight: 600,
+                            background: '#f0f9ff',
+                            color: '#1e40af',
+                          }}>
+                            {emp.membership_role === 'owner' ? 'Owner' : emp.role === 'admin' ? 'Admin' : 'Mitarbeiter'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => startEditEmployee(emp)}
+                        style={{
+                          padding: '8px 14px',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          background: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: 13,
+                        }}
+                      >
+                        Bearbeiten
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </main>
   );
 }
@@ -1252,33 +1517,5 @@ function ToggleChip({
       <input type='checkbox' checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
-  );
-}
-
-function AdminCard({ title, desc, icon }: { title: string; desc: string; icon: string }) {
-  return (
-    <div
-      style={{
-        background: uiTokens.cardBackground,
-        padding: 26,
-        borderRadius: 16,
-        border: uiTokens.cardBorder,
-        cursor: "pointer",
-        transition: "all 0.2s ease",
-        boxShadow: "none",
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.transform = "translateY(-5px)";
-        e.currentTarget.style.boxShadow = "0 16px 40px rgba(0,0,0,0.10)";
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.06)";
-      }}
-    >
-      <div style={{ fontSize: 26, marginBottom: 12 }}>{icon}</div>
-      <div style={{ fontSize: 17, fontWeight: 700 }}>{title}</div>
-      <div style={{ fontSize: 14, color: "#6b7280" }}>{desc}</div>
-    </div>
   );
 }

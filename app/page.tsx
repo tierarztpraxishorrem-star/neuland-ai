@@ -13,6 +13,7 @@ import {
 } from '../lib/registrationConfig';
 import { isPersonalDiamondEnabled } from '../lib/features';
 import { showToast } from '../lib/toast';
+import { uiTokens, Card } from '../components/ui/System';
 
 type DebugSystemStateResponse = {
   work_sessions?: Array<{ ended_at: string | null }>;
@@ -91,8 +92,8 @@ export default function Home() {
   const inputStyle = {
     width: "100%",
     padding: "14px 16px",
-    borderRadius: "12px",
-    border: "1px solid #e5e7eb",
+    borderRadius: uiTokens.radiusCard,
+    border: uiTokens.cardBorder,
     marginBottom: "16px",
     fontSize: "16px",
     outline: "none",
@@ -102,8 +103,8 @@ export default function Home() {
   const primaryButton = {
     flex: 1,
     padding: "14px 24px",
-    borderRadius: "12px",
-    background: "#0F6B74",
+    borderRadius: uiTokens.radiusCard,
+    background: uiTokens.brand,
     color: "#fff",
     border: "none",
     fontWeight: 600,
@@ -114,9 +115,9 @@ export default function Home() {
   const secondaryButton = {
     flex: 1,
     padding: "14px 24px",
-    borderRadius: "12px",
-    background: "#fff",
-    border: "1px solid #e5e7eb",
+    borderRadius: uiTokens.radiusCard,
+    background: uiTokens.cardBackground,
+    border: uiTokens.cardBorder,
     fontWeight: 600,
     cursor: "pointer",
     transition: "background 0.2s"
@@ -381,34 +382,32 @@ export default function Home() {
       <main
         style={{
           minHeight: "100vh",
-          background: "linear-gradient(180deg, #f4f7f8 0%, #eaf0f1 100%)",
+          background: uiTokens.pageBackground,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontFamily: "Arial, sans-serif"
         }}
       >
         <div
           style={{
             width: "100%",
             maxWidth: "400px",
-            background: "#fff",
+            background: uiTokens.cardBackground,
             padding: "32px",
-            borderRadius: "16px",
-            border: "1px solid #e5e7eb",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.05)"
+            borderRadius: uiTokens.radiusCard,
+            border: uiTokens.cardBorder,
           }}
         >
           {/* HEADER */}
           <div style={{ marginBottom: "24px" }}>
-            <h1 style={{ margin: 0, color: "#0F6B74" }}>
+            <h1 style={{ margin: 0, color: uiTokens.brand }}>
               Neuland AI
             </h1>
-            <p style={{ color: "#6b7280", marginTop: "6px" }}>
+            <p style={{ color: uiTokens.textSecondary, marginTop: "6px" }}>
               {authMode === 'login' ? 'Login zur Praxisplattform' : registrationConfig.registrationSubtitle}
             </p>
-            <p style={{ color: '#6b7280', marginTop: '10px', marginBottom: 0, fontSize: 13 }}>
-              <Link href='/was-ist-neuland' style={{ color: '#0F6B74', textDecoration: 'none', fontWeight: 600 }}>
+            <p style={{ color: uiTokens.textSecondary, marginTop: '10px', marginBottom: 0, fontSize: 13 }}>
+              <Link href='/was-ist-neuland' style={{ color: uiTokens.brand, textDecoration: 'none', fontWeight: 600 }}>
                 Was ist Neuland AI?
               </Link>
             </p>
@@ -420,8 +419,8 @@ export default function Home() {
               style={{
                 ...secondaryButton,
                 flex: 1,
-                background: authMode === 'login' ? '#0F6B74' : '#fff',
-                color: authMode === 'login' ? '#fff' : '#0f172a',
+                background: authMode === 'login' ? uiTokens.brand : '#fff',
+                color: authMode === 'login' ? '#fff' : uiTokens.textPrimary,
                 marginBottom: 0,
               }}
             >
@@ -432,8 +431,8 @@ export default function Home() {
               style={{
                 ...secondaryButton,
                 flex: 1,
-                background: authMode === 'register' ? '#0F6B74' : '#fff',
-                color: authMode === 'register' ? '#fff' : '#0f172a',
+                background: authMode === 'register' ? uiTokens.brand : '#fff',
+                color: authMode === 'register' ? '#fff' : uiTokens.textPrimary,
                 marginBottom: 0,
               }}
             >
@@ -520,7 +519,7 @@ export default function Home() {
                 />
                 <span>
                   Ich akzeptiere die{' '}
-                  <Link href='/legal/agb' style={{ color: '#0F6B74', fontWeight: 600 }}>
+                  <Link href='/legal/agb' style={{ color: uiTokens.brand, fontWeight: 600 }}>
                     AGB
                   </Link>
                 </span>
@@ -534,7 +533,7 @@ export default function Home() {
                 />
                 <span>
                   Ich akzeptiere die{' '}
-                  <Link href='/legal/datenschutz' style={{ color: '#0F6B74', fontWeight: 600 }}>
+                  <Link href='/legal/datenschutz' style={{ color: uiTokens.brand, fontWeight: 600 }}>
                     Datenschutzerklärung
                   </Link>
                 </span>
@@ -583,26 +582,21 @@ export default function Home() {
       <main
         style={{
           minHeight: '100vh',
-          background: 'linear-gradient(180deg, #f4f7f8 0%, #eef3f4 100%)',
-          padding: '40px',
-          fontFamily: 'Arial, sans-serif',
+          background: uiTokens.pageBackground,
+          padding: uiTokens.pagePadding,
           display: 'grid',
           placeItems: 'center',
         }}
       >
-        <section
+        <Card
           style={{
             width: 'min(760px, 100%)',
-            border: '1px solid #dbe5e6',
-            borderRadius: '16px',
-            background: '#fff',
-            padding: '24px',
             display: 'grid',
             gap: '12px',
           }}
         >
-          <h1 style={{ margin: 0, color: '#0f172a' }}>Du bist noch keiner Praxis zugeordnet</h1>
-          <p style={{ margin: 0, color: '#64748b', lineHeight: 1.5 }}>
+          <h1 style={{ margin: 0, color: uiTokens.textPrimary }}>Du bist noch keiner Praxis zugeordnet</h1>
+          <p style={{ margin: 0, color: uiTokens.textSecondary, lineHeight: 1.5 }}>
             Bitte wähle oder erstelle eine Praxis, damit du mit Fällen, VetMind und HR arbeiten kannst.
           </p>
 
@@ -615,12 +609,12 @@ export default function Home() {
             </Link>
           </div>
 
-          <div style={{ fontSize: 13, color: '#64748b' }}>
-            <Link href='/was-ist-neuland' style={{ color: '#0F6B74', fontWeight: 600, textDecoration: 'none' }}>
+          <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>
+            <Link href='/was-ist-neuland' style={{ color: uiTokens.brand, fontWeight: 600, textDecoration: 'none' }}>
               Was ist Neuland AI?
             </Link>
           </div>
-        </section>
+        </Card>
       </main>
     );
   }
@@ -652,7 +646,7 @@ export default function Home() {
     {
       title: "VetMind",
       icon: "🤖",
-      desc: "SOPs & Wissen durchsuchen",
+      desc: "KI-Assistent für klinische Fragen",
       link: "/vetmind"
     }
   ];
@@ -661,9 +655,8 @@ export default function Home() {
     <main
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(180deg, #f4f7f8 0%, #eef3f4 100%)",
-        padding: "40px",
-        fontFamily: "Arial, sans-serif",
+        background: uiTokens.pageBackground,
+        padding: uiTokens.pagePadding,
       }}
     >
 
@@ -680,16 +673,16 @@ export default function Home() {
           <h1
             style={{
               fontSize: "28px",
-              color: "#0F6B74",
+              color: uiTokens.brand,
               marginBottom: "4px",
             }}
           >
             Willkommen 👋
           </h1>
-          <div style={{ color: "#6b7280", fontSize: "14px" }}>
+          <div style={{ color: uiTokens.textSecondary, fontSize: "14px" }}>
             Wählen Sie, womit Sie arbeiten möchten
           </div>
-          <div style={{ color: '#0f6b74', fontSize: '13px', marginTop: 6, fontWeight: 600 }}>
+          <div style={{ color: uiTokens.brand, fontSize: '13px', marginTop: 6, fontWeight: 600 }}>
             Du arbeitest aktuell in: {activePracticeName || 'deiner Praxis'}
           </div>
         </div>
@@ -700,9 +693,9 @@ export default function Home() {
           }}
           style={{
             padding: "10px 16px",
-            borderRadius: "10px",
-            border: "1px solid #e5e7eb",
-            background: "#fff",
+            borderRadius: uiTokens.radiusCard,
+            border: uiTokens.cardBorder,
+            background: uiTokens.cardBackground,
             cursor: "pointer",
             fontWeight: 600,
             transition: "0.2s",
@@ -711,7 +704,7 @@ export default function Home() {
             e.currentTarget.style.background = "#f9fafb";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#fff";
+            e.currentTarget.style.background = uiTokens.cardBackground;
           }}
         >
           Logout
@@ -723,8 +716,8 @@ export default function Home() {
           style={{
             marginBottom: '24px',
             border: '1px solid #bbf7d0',
-            background: 'linear-gradient(180deg, #f0fdf4 0%, #ecfdf5 100%)',
-            borderRadius: '14px',
+            background: '#f0fdf4',
+            borderRadius: uiTokens.radiusCard,
             padding: '14px 16px',
             display: 'flex',
             gap: 12,
@@ -780,21 +773,21 @@ export default function Home() {
         <Link href="/konsultation/start" style={{ textDecoration: "none" }}>
           <div
             style={{
-              background: "#0F6B74",
+              background: uiTokens.brand,
               color: "#fff",
               padding: "28px",
-              borderRadius: "18px",
+              borderRadius: uiTokens.radiusCard,
               cursor: "pointer",
               transition: "all 0.25s ease",
-              boxShadow: "0 12px 30px rgba(15,107,116,0.25)",
+              border: `2px solid ${uiTokens.brand}`,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-6px)";
-              e.currentTarget.style.boxShadow = "0 18px 40px rgba(15,107,116,0.35)";
+              e.currentTarget.style.transform = "translateY(-4px)";
+              e.currentTarget.style.borderColor = "#0a545c";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "0 12px 30px rgba(15,107,116,0.25)";
+              e.currentTarget.style.borderColor = uiTokens.brand;
             }}
           >
             <div style={{ fontSize: "30px", marginBottom: "12px" }}>➕</div>
@@ -814,20 +807,20 @@ export default function Home() {
           <Link key={i} href={card.link} style={{ textDecoration: "none" }}>
             <div
               style={{
-                background: "#fff",
+                background: uiTokens.cardBackground,
                 padding: "26px",
-                borderRadius: "18px",
-                border: "1px solid #e5e7eb",
+                borderRadius: uiTokens.radiusCard,
+                border: uiTokens.cardBorder,
                 cursor: "pointer",
                 transition: "all 0.2s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-5px)";
-                e.currentTarget.style.boxShadow = "0 12px 30px rgba(0,0,0,0.08)";
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.borderColor = uiTokens.brand;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "none";
+                e.currentTarget.style.borderColor = "#e5e7eb";
               }}
             >
               <div style={{ fontSize: "26px", marginBottom: "12px" }}>
@@ -838,7 +831,7 @@ export default function Home() {
                 {card.title}
               </div>
 
-              <div style={{ fontSize: "14px", color: "#6b7280" }}>
+              <div style={{ fontSize: "14px", color: uiTokens.textSecondary }}>
                 {card.desc}
               </div>
             </div>

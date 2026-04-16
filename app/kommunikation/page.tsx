@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
+import { uiTokens, Card, Button, Section } from '../../components/ui/System';
 
 type FonioCallItem = {
   id: string;
@@ -404,18 +405,17 @@ export default function KommunikationPage() {
 
   return (
     <main style={{
-      padding: "40px",
-      fontFamily: "Arial, sans-serif",
-      background: "linear-gradient(180deg, #f4f7f8 0%, #eaf0f1 100%)",
+      padding: uiTokens.pagePadding,
+      background: uiTokens.pageBackground,
       minHeight: "100vh"
     }}>
 
       {/* HEADER */}
-      <div style={{ marginBottom: "30px" }}>
-        <h1 style={{ margin: 0, color: "#0F6B74" }}>
+      <div style={{ marginBottom: "24px" }}>
+        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700, color: uiTokens.brand }}>
           Kommunikation
         </h1>
-        <p style={{ color: "#6b7280", marginTop: "6px" }}>
+        <p style={{ color: uiTokens.textSecondary, marginTop: "6px", fontSize: 15 }}>
           Zentrale für Patienten- & Teamkommunikation
         </p>
       </div>
@@ -450,11 +450,11 @@ export default function KommunikationPage() {
 
         {/* 📱 WHATSAPP */}
         <Link href="/kommunikation/whatsapp" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div style={{ ...card, cursor: 'pointer', transition: 'box-shadow 0.15s ease', position: 'relative' }}
-               onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)')}
-               onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+          <div style={{ ...card, cursor: 'pointer', transition: 'border-color 0.15s ease', position: 'relative' }}
+               onMouseEnter={e => (e.currentTarget.style.borderColor = uiTokens.brand)}
+               onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}>
             <h3>📱 WhatsApp Inbox</h3>
-            <div style={{ fontSize: '14px', color: '#6b7280' }}>
+            <div style={{ fontSize: '14px', color: uiTokens.textSecondary }}>
               Eingehende WhatsApp-Nachrichten anzeigen, beantworten und KI-Antwortvorschläge erhalten.
             </div>
             <div style={{ ...primaryBtn, textAlign: 'center', marginTop: '4px' }}>
@@ -560,21 +560,24 @@ export default function KommunikationPage() {
         {/* 💬 SLACK */}
         <div style={card}>
           <h3>💬 Team (Slack)</h3>
-
-          <textarea
-            placeholder="Nachricht an Team"
-            value={slackMessage}
-            onChange={(e) => setSlackMessage(e.target.value)}
-            style={textarea}
-          />
-
-          <button style={primaryBtn} onClick={sendSlackMessage} disabled={sendingSlack}>
-            {sendingSlack ? 'Sende...' : 'An Team senden'}
-          </button>
-
-          {slackStatus && (
-            <div style={{ fontSize: '12px', color: '#475569' }}>{slackStatus}</div>
-          )}
+          <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
+            Slack-Channels direkt in Neuland AI lesen und schreiben.
+          </div>
+          <Link
+            href="/kommunikation/slack"
+            style={{
+              display: 'inline-block',
+              padding: '8px 16px',
+              background: '#7c3aed',
+              color: '#fff',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            💬 Slack öffnen →
+          </Link>
         </div>
 
         {/* ☎️ YEASTAR */}
@@ -661,8 +664,8 @@ export default function KommunikationPage() {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div>
-            <h3 style={{ margin: 0, color: '#0F6B74' }}>📞 Anruf-Protokolle & KI-Zusammenfassungen</h3>
-            <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#6b7280' }}>
+            <h3 style={{ margin: 0, color: uiTokens.brand }}>📞 Anruf-Protokolle & KI-Zusammenfassungen</h3>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: uiTokens.textSecondary }}>
               Automatische Transkription und Zusammenfassung aller Telefonate über Yeastar PBX
             </p>
           </div>
@@ -860,22 +863,22 @@ const card = {
 
 const input = {
   padding: "12px",
-  borderRadius: "10px",
+  borderRadius: "16px",
   border: "1px solid #e5e7eb"
 };
 
 const textarea = {
   padding: "12px",
-  borderRadius: "10px",
+  borderRadius: "16px",
   border: "1px solid #e5e7eb",
   minHeight: "80px"
 };
 
 const primaryBtn = {
   padding: "12px",
-  borderRadius: "10px",
+  borderRadius: "16px",
   border: "none",
-  background: "#0F6B74",
+  background: "#0f6b74",
   color: "#fff",
   fontWeight: 600,
   cursor: "pointer"
@@ -883,7 +886,7 @@ const primaryBtn = {
 
 const secondaryBtn = {
   padding: "12px",
-  borderRadius: "10px",
+  borderRadius: "16px",
   border: "1px solid #e5e7eb",
   background: "#fff",
   fontWeight: 600,

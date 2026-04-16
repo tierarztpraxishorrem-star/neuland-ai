@@ -22,6 +22,8 @@ type Consultation = {
   result: string | null;
   transcript: string | null;
   created_at: string;
+  duration_seconds: number | null;
+  source: string | null;
 };
 
 type PatientDocument = {
@@ -145,7 +147,7 @@ export default function PatientDetailPage() {
         supabase.from('patients').select('*').eq('id', patientId).maybeSingle(),
         supabase
           .from('cases')
-          .select('id, title, result, transcript, created_at')
+          .select('id, title, result, transcript, created_at, duration_seconds, source')
           .eq('patient_id', patientId)
           .order('created_at', { ascending: false })
           .limit(300)
@@ -214,7 +216,9 @@ export default function PatientDetailPage() {
   useEffect(() => {
     const next: Record<string, number> = {};
     consultations.forEach((entry) => {
-      next[entry.id] = getConsultationDuration(entry.id);
+      // Prefer DB value, fall back to localStorage for old cases
+      const dbDuration = typeof entry.duration_seconds === 'number' ? entry.duration_seconds : 0;
+      next[entry.id] = dbDuration > 0 ? dbDuration : getConsultationDuration(entry.id);
     });
     setConsultationDurations(next);
   }, [consultations]);
@@ -558,6 +562,9 @@ export default function PatientDetailPage() {
                                     <div style={{ fontWeight: 700 }}>🧾 {entry.title || 'Konsultation'}</div>
                                     <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
                                       {formatDateTime(entry.created_at)} · Dauer: {formatDuration(consultationDurations[entry.id] || 0)}
+                                      {entry.source === 'live' ? (
+                                        <span style={{ marginLeft: 6, background: '#ecf8f9', color: '#0F6B74', borderRadius: 6, padding: '1px 6px', fontSize: 11, fontWeight: 600 }}>Live</span>
+                                      ) : null}
                                     </div>
                                   </div>
 

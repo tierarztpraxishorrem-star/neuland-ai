@@ -21,7 +21,6 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
-  CalendarDays,
   Briefcase,
 } from "lucide-react";
 
@@ -37,7 +36,7 @@ export default function Sidebar() {
   const collapsedWidth = 86;
   const diamondEnabled = isPersonalDiamondEnabled();
   const [hrRunning, setHrRunning] = useState(false);
-  const [unreadCounts, setUnreadCounts] = useState<{ whatsapp: number; total: number }>({ whatsapp: 0, total: 0 });
+  const [unreadCounts, setUnreadCounts] = useState<{ whatsapp: number; slack: number; total: number }>({ whatsapp: 0, slack: 0, total: 0 });
 
   const loadUnreadCounts = async () => {
     try {
@@ -48,7 +47,7 @@ export default function Sidebar() {
       });
       if (res.ok) {
         const data = await res.json();
-        setUnreadCounts({ whatsapp: data.whatsapp || 0, total: data.total || 0 });
+        setUnreadCounts({ whatsapp: data.whatsapp || 0, slack: data.slack || 0, total: data.total || 0 });
       }
     } catch {
       // silently ignore
@@ -173,7 +172,6 @@ export default function Sidebar() {
         { name: "Letzte Konsultation", href: "/konsultation/last", icon: History },
         { name: "Kommunikation", href: "/kommunikation", icon: MessageCircle, badge: unreadCounts.total },
         { name: "Patienten", href: "/patienten", icon: PawPrint },
-        { name: "Termine", href: "/termine", icon: CalendarDays },
         { name: "Vorlagen", href: "/vorlagen", icon: FileText },
         { name: "HR", href: "/hr", icon: Briefcase },
         { name: "VetMind", href: "/vetmind", icon: Bot, highlight: true },

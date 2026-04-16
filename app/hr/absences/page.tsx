@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { uiTokens, Card, Section, Button, Badge, Input, SelectInput } from "../../../components/ui/System";
 
 type AbsenceType = "vacation" | "sick" | "school" | "other";
 type AbsenceStatus = "pending" | "approved" | "rejected";
@@ -29,10 +30,10 @@ const STATUS_LABELS: Record<AbsenceStatus, string> = {
   rejected: "Abgelehnt",
 };
 
-const STATUS_COLORS: Record<AbsenceStatus, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  approved: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
+const STATUS_COLORS: Record<AbsenceStatus, { tone: 'default' | 'accent' | 'success' | 'danger' }> = {
+  pending: { tone: 'accent' },
+  approved: { tone: 'success' },
+  rejected: { tone: 'danger' },
 };
 
 async function fetchWithAuth(url: string, init?: RequestInit) {
@@ -113,117 +114,60 @@ export default function AbsencesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[800px] space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Abwesenheiten</h1>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding, fontFamily: "inherit" }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>Abwesenheiten</h1>
         </div>
-      )}
 
-      {/* New absence form */}
-      <div className="rounded-lg border border-black/10 bg-white p-4">
-        <h2 className="mb-3 text-lg font-semibold">Neuer Antrag</h2>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Typ
-              </label>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value as AbsenceType)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              >
-                {(Object.keys(TYPE_LABELS) as AbsenceType[]).map((t) => (
-                  <option key={t} value={t}>
-                    {TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div />
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Von
-              </label>
-              <input
-                type="date"
-                value={startsOn}
-                onChange={(e) => setStartsOn(e.target.value)}
-                required
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Bis
-              </label>
-              <input
-                type="date"
-                value={endsOn}
-                onChange={(e) => setEndsOn(e.target.value)}
-                required
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Notiz (optional)
-            </label>
-            <input
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="z. B. Familienurlaub"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting || !startsOn || !endsOn}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? "Wird eingereicht…" : "Antrag einreichen"}
-          </button>
-        </form>
-      </div>
-
-      {/* Absence list */}
-      <div className="rounded-lg border border-black/10 bg-white p-4">
-        <h2 className="mb-3 text-lg font-semibold">Meine Abwesenheiten</h2>
-        {loading ? (
-          <p className="text-sm text-gray-500">Laden…</p>
-        ) : absences.length === 0 ? (
-          <p className="text-sm text-gray-500">Keine Abwesenheiten vorhanden.</p>
-        ) : (
-          <div className="space-y-2">
-            {absences.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 p-3"
-              >
-                <div className="space-y-0.5">
-                  <div className="text-sm font-medium">
-                    {TYPE_LABELS[a.type] || a.type}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {formatDate(a.starts_on)} – {formatDate(a.ends_on)}
-                    {a.note && <span className="ml-2 italic">{a.note}</span>}
-                  </div>
-                </div>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status] || "bg-gray-100 text-gray-700"}`}
-                >
-                  {STATUS_LABELS[a.status] || a.status}
-                </span>
-              </div>
-            ))}
-          </div>
+        {error && (
+          <Card style={{ border: "1px solid #fecaca", background: "#fff1f2" }}>
+            <div style={{ fontSize: 13, color: "#b91c1c" }}>{error}</div>
+          </Card>
         )}
+
+        <Section title="Neuer Antrag">
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <SelectInput label="Typ" value={type} onChange={(e) => setType(e.target.value as AbsenceType)}>
+                {(Object.keys(TYPE_LABELS) as AbsenceType[]).map((t) => (
+                  <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+                ))}
+              </SelectInput>
+              <div />
+              <Input label="Von" type="date" value={startsOn} onChange={(e) => setStartsOn(e.target.value)} required />
+              <Input label="Bis" type="date" value={endsOn} onChange={(e) => setEndsOn(e.target.value)} required />
+            </div>
+            <Input label="Notiz (optional)" value={note} onChange={(e) => setNote(e.target.value)} placeholder="z. B. Familienurlaub" />
+            <div>
+              <Button variant="primary" type="submit" disabled={submitting || !startsOn || !endsOn}>
+                {submitting ? "Wird eingereicht…" : "Antrag einreichen"}
+              </Button>
+            </div>
+          </form>
+        </Section>
+
+        <Section title="Meine Abwesenheiten">
+          {loading ? <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Laden…</div> : absences.length === 0 ? (
+            <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Keine Abwesenheiten vorhanden.</div>
+          ) : (
+            absences.map((a) => (
+              <Card key={a.id} style={{ padding: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{TYPE_LABELS[a.type] || a.type}</div>
+                    <div style={{ fontSize: 12, color: uiTokens.textSecondary, marginTop: 2 }}>
+                      {formatDate(a.starts_on)} – {formatDate(a.ends_on)}
+                      {a.note && <span style={{ marginLeft: 8, fontStyle: "italic" }}>{a.note}</span>}
+                    </div>
+                  </div>
+                  <Badge tone={STATUS_COLORS[a.status]?.tone || 'default'}>{STATUS_LABELS[a.status] || a.status}</Badge>
+                </div>
+              </Card>
+            ))
+          )}
+        </Section>
       </div>
-    </div>
+    </main>
   );
 }

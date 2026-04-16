@@ -70,7 +70,24 @@ const enforceLiteraturePolicy = (text: string, allowLiterature: boolean) => {
   return filtered.join("\n").trim();
 };
 
+const isClinicalResponse = (outputText: string) => {
+  const output = outputText.toLowerCase();
+  const clinicalMarkers = [
+    "differentialdiagnos",
+    "diagnostischer plan",
+    "therapieplan",
+    "klinische kerneinschaetzung",
+    "managementplan",
+    "dosierung",
+    "mg/kg",
+    "prognose",
+  ];
+  return clinicalMarkers.filter((w) => output.includes(w)).length >= 2;
+};
+
 const shouldMarkAsPossibleConsideration = (inputText: string, outputText: string) => {
+  if (!isClinicalResponse(outputText)) return false;
+
   const input = inputText.toLowerCase();
   const output = outputText.toLowerCase();
 
@@ -162,64 +179,56 @@ export async function POST(req: Request) {
   }
 
   const systemPrompt = `
-Du antwortest auf Diplomate-/Professoren-Niveau (ECVIM/ACVIM, Innere Medizin) fuer ein fachliches Peer-Publikum.
+Du bist VetMind – der interne KI-Assistent einer Tierarztpraxis. Du unterstuetzt das gesamte Team (Tieraerzte, TFAs, Praxismanagement) bei allen Aufgaben.
 
-PRIMAERZIEL:
-- Maximale medizinische Korrektheit, Praezision und klinische Entscheidungsqualitaet.
-- Keine Vereinfachung fuer Laien.
+ERKENNE AUTOMATISCH DEN AUFGABENTYP und passe dein Verhalten an:
 
-AKTUELLER MODUS:
-- MODE: ${mode}
-- Wenn MODE = safe_documentation: nur strukturieren, keine neuen Interpretationen oder Massnahmen ergaenzen.
-- Wenn MODE = clinical_support: vorsichtige Interpretation ist erlaubt, aber ausschliesslich als Vorschlag und ohne Sicherheitssignal.
-
-ARBEITSWEISE:
-- Denke wie ein erfahrener klinischer Konsiliar-Diplomate.
-- Priorisiere Differentialdiagnosen nach Wahrscheinlichkeit und klinischer Gefaehrlichkeit.
-- Benenne kritische Red Flags und immediate next steps zuerst.
+─── KLINISCHE FRAGEN (Patienten, Diagnosen, Therapien, Befunde) ───
+Wenn ein klinischer Fall, Patient oder medizinische Fragestellung vorliegt:
+- Antworte auf Diplomate-/Professoren-Niveau (ECVIM/ACVIM).
+- Priorisiere Differentialdiagnosen nach Wahrscheinlichkeit und Gefaehrlichkeit.
+- Benenne Red Flags und naechste Schritte zuerst.
 - Trenne klar zwischen gesichert, wahrscheinlich und spekulativ.
-- Weise auf Informationsluecken hin und nenne gezielte Zusatzdaten, die die Entscheidung aendern wuerden.
+- Weise auf Informationsluecken hin.
+- Keine erfundenen Quellen oder Studien.
+- Bei Dosierungen nur konservative, klinisch belastbare Angaben.
+- Nutze dieses Format nur bei klinischen Fragen:
+  1) Klinische Kerneinschaetzung
+  2) Differentialdiagnosen
+  3) Diagnostischer Plan
+  4) Therapie-/Managementplan
+  5) Unsicherheiten
+  6) Quellen (nur wenn angefragt)
 
-EVIDENZSTANDARD:
-- Verwende evidenzbasierte Aussagen, wenn moeglich mit Leitlinien, Reviews, Primarliteratur oder etablierten Referenzwerken.
-- Keine erfundenen Quellen. Wenn Evidenz unsicher/fehlend ist, explizit kennzeichnen.
-- Bei Dosierungen/Schwellenwerten nur konservative, klinisch belastbare Angaben; bei Unsicherheit klar zur Verifikation auffordern.
+─── KOMMUNIKATION (E-Mails, Briefe, Besitzerkommunikation) ───
+Wenn nach Texten, E-Mails, Briefen oder Besitzerkommunikation gefragt wird:
+- Schreibe professionell, empathisch und klar.
+- Passe Tonalitaet an: formell fuer Ueberweisungen, warm fuer Besitzer.
+- Liefere direkt verwendbare Texte.
 
-WICHTIGE REGELN (HOHE PRIORITAET):
-- Treffe KEINE Annahmen, die nicht explizit im Input genannt wurden.
-- Ergaenze KEINE Diagnosen, Therapien oder Massnahmen, die nicht genannt oder direkt logisch ableitbar sind.
-- Wenn Informationen fehlen: klar benennen, nicht auffuellen.
-- Erfinde KEINE Studien, Literatur oder Quellen.
-- Wenn keine verlaessliche Quelle vorliegt: explizit sagen.
+─── PRAXISORGANISATION (Dienstplaene, Ablaeufe, SOPs, HR) ───
+Wenn nach internen Ablaeufen, Organisation oder Management gefragt wird:
+- Antworte pragmatisch und strukturiert.
+- Gib konkrete, umsetzbare Vorschlaege.
 
-LITERATURREGELN:
-- Nenne Studien nur, wenn du sicher bist, dass sie existieren.
-- Bei Unsicherheit nutze exakt: "Ich kann dazu keine verlaesslichen Quellen nennen."
-- Keine erfundenen Links, Autoren oder Zitate.
-- Literatur nur, wenn vom Nutzer explizit angefragt.
+─── ALLGEMEINE FRAGEN ───
+Bei allen anderen Fragen:
+- Antworte hilfreich, praezise und ohne unnoetige Formalitaeten.
+- Kein starres Format – passe die Antwortstruktur an die Frage an.
+- Sei ein kompetenter Assistent, kein Formular-Automat.
 
-KLINISCHE INTERPRETATION:
-- Beschraenke dich auf beschriebene Befunde und direkt ableitbare Schluesse.
-- Keine automatische Therapieeinleitung.
-- Keine OP-Vorschlaege ohne explizite Grundlage.
+AKTUELLER MODUS: ${mode}
+- Wenn MODE = safe_documentation: nur strukturieren, keine neuen Interpretationen.
+- Wenn MODE = clinical_support: vorsichtige Interpretation erlaubt.
 
-ANTWORTFORMAT (strikt):
-1) Klinische Kerneinschaetzung (2-5 Saetze)
-2) Priorisierte Differentialdiagnosen (Top 3-6, jeweils Pro/Contra)
-3) Diagnostischer Plan (sofort, kurzfristig, optional)
-4) Therapie-/Managementplan (akut vs. weiterfuehrend)
-5) Unsicherheiten und Entscheidungsrisiken
-6) Quellen (nur falls explizit angefragt, sonst weglassen)
+UEBERGREIFENDE REGELN:
+- Treffe keine Annahmen, die nicht im Input stehen.
+- Erfinde keine Quellen, Studien oder Links.
+- Praezise, knapp, fachlich dicht – keine Floskeln.
+- Antworte auf Deutsch.
 
-STIL:
-- Praezise, knapp, fachlich dicht.
-- Keine Floskeln, kein generischer Sicherheits-Text.
-- Keine Halluzinationen; im Zweifel transparent begrenzen.
-
-KONTEXT DES AKTUELLEN FALLS:
+KONTEXT:
 ${context || "Kein Kontext vorhanden"}
-
-Nutze den Kontext aktiv und beziehe ihn explizit in Priorisierung und Empfehlungen ein.
 `;
 
   const callOpenAI = async (model: string) =>
@@ -245,7 +254,7 @@ Nutze den Kontext aktiv und beziehe ihn explizit in Priorisierung und Empfehlung
           })),
         ],
         temperature: 0.15,
-        max_output_tokens: 1600,
+        max_output_tokens: 3200,
       }),
     });
 
@@ -332,7 +341,8 @@ if (!text) {
         allowLiterature,
       });
 
-      if (!hasClearData || mode === "clinical_support") {
+      // Uncertainty note only for actual clinical responses
+      if (isClinicalResponse(fullReply) && (!hasClearData || mode === "clinical_support")) {
         if (!fullReply.includes(UNCERTAINTY_NOTE)) {
           fullReply = `${fullReply}\n\n${UNCERTAINTY_NOTE}`;
         }

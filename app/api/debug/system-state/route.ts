@@ -16,6 +16,7 @@ type EmployeeRow = {
   role: string;
   employment_status: string;
   weekly_hours: number | null;
+  display_name: string | null;
   created_at: string;
 };
 
@@ -43,7 +44,7 @@ export async function GET(req: Request) {
       .maybeSingle(),
     supabase
       .from('employees')
-      .select('id, practice_id, user_id, role, employment_status, weekly_hours, created_at')
+      .select('id, practice_id, user_id, role, employment_status, weekly_hours, display_name, created_at')
       .eq('practice_id', practiceId)
       .order('created_at', { ascending: false })
       .limit(100),

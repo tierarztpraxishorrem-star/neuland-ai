@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../../lib/supabase";
+import { uiTokens, Card, Button, Input } from "../../../../components/ui/System";
 
 type Shift = {
   id: string;
@@ -16,6 +17,7 @@ type Employee = {
   id: string;
   user_id: string;
   role: string;
+  display_name?: string | null;
 };
 
 const DAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -162,7 +164,7 @@ export default function AdminSchedulePage() {
   function getEmployeeLabel(employeeId: string) {
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return employeeId.slice(0, 8);
-    return emp.user_id.slice(0, 8);
+    return emp.display_name || emp.user_id.slice(0, 8);
   }
 
   // Build grid: rows = employees, columns = days
@@ -175,193 +177,245 @@ export default function AdminSchedulePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1000px] space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Dienstplanung</h1>
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}>
+      <div style={{ width: "min(1000px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>
+          Dienstplanung
+        </h1>
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+        {error && (
+          <div style={{ padding: 12, borderRadius: uiTokens.radiusCard, border: "1px solid #fca5a5", background: "#fef2f2", color: "#b91c1c", fontSize: 14 }}>
+            {error}
+          </div>
+        )}
+
+        {/* Week navigation */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <Button variant="secondary" size="sm" onClick={() => setWeekOffset((w) => w - 1)}>
+            ← Vorherige Woche
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setWeekOffset(0)}>
+            Aktuelle Woche
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setWeekOffset((w) => w + 1)}>
+            Nächste Woche →
+          </Button>
         </div>
-      )}
 
-      {/* Week navigation */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => setWeekOffset((w) => w - 1)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          ← Vorherige Woche
-        </button>
-        <button
-          onClick={() => setWeekOffset(0)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          Aktuelle Woche
-        </button>
-        <button
-          onClick={() => setWeekOffset((w) => w + 1)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          Nächste Woche →
-        </button>
-      </div>
-
-      {/* Schedule table */}
-      {loading ? (
-        <p className="text-sm text-gray-500">Laden…</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-black/10 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-3 py-2 text-left font-medium text-gray-600">
-                  Mitarbeiter
-                </th>
-                {weekDays.map((day, idx) => {
-                  const today = isToday(day);
-                  return (
-                    <th
-                      key={formatDateKey(day)}
-                      className={`px-2 py-2 text-center font-medium ${today ? "bg-blue-50 text-blue-700" : "text-gray-600"}`}
-                    >
-                      {DAY_LABELS[idx]}
-                      <br />
-                      <span className="text-xs font-normal">
-                        {formatDayDisplay(day)}
-                      </span>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map((emp) => (
-                <tr key={emp.id} className="border-b border-gray-100">
-                  <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-700">
-                    {emp.user_id.slice(0, 8)}…
-                  </td>
-                  {weekDays.map((day) => {
-                    const key = `${emp.id}:${formatDateKey(day)}`;
-                    const cellShifts = shiftMap.get(key) || [];
+        {/* Schedule table */}
+        {loading ? (
+          <p style={{ fontSize: 14, color: uiTokens.textMuted }}>Laden…</p>
+        ) : (
+          <Card style={{ padding: 0, overflow: "auto" }}>
+            <table style={{ width: "100%", fontSize: 14, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: uiTokens.cardBorder, background: "#f9fafb" }}>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 500, color: uiTokens.textSecondary }}>
+                    Mitarbeiter
+                  </th>
+                  {weekDays.map((day, idx) => {
                     const today = isToday(day);
                     return (
-                      <td
+                      <th
                         key={formatDateKey(day)}
-                        className={`cursor-pointer px-1 py-1 text-center ${today ? "bg-blue-50/50" : ""}`}
-                        onClick={() => openAddShift(formatDateKey(day))}
+                        style={{
+                          padding: "8px 6px",
+                          textAlign: "center",
+                          fontWeight: 500,
+                          color: today ? uiTokens.brand : uiTokens.textSecondary,
+                          background: today ? "#e0f2f1" : "transparent",
+                        }}
                       >
-                        {cellShifts.length === 0 ? (
-                          <span className="text-xs text-gray-300">+</span>
-                        ) : (
-                          cellShifts.map((s) => (
-                            <div
-                              key={s.id}
-                              className="group relative mb-0.5 rounded bg-green-100 px-1 py-0.5 text-[10px] text-green-800"
-                            >
-                              {s.starts_at}–{s.ends_at}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteShift(s.id);
-                                }}
-                                className="absolute -right-1 -top-1 hidden rounded-full bg-red-500 px-1 text-[8px] text-white group-hover:block"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </td>
+                        {DAY_LABELS[idx]}
+                        <br />
+                        <span style={{ fontSize: 12, fontWeight: 400 }}>
+                          {formatDayDisplay(day)}
+                        </span>
+                      </th>
                     );
                   })}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {employees.map((emp) => (
+                  <tr key={emp.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500, color: uiTokens.textPrimary, whiteSpace: "nowrap" }}>
+                      {emp.display_name || `${emp.user_id.slice(0, 8)}…`}
+                    </td>
+                    {weekDays.map((day) => {
+                      const key = `${emp.id}:${formatDateKey(day)}`;
+                      const cellShifts = shiftMap.get(key) || [];
+                      const today = isToday(day);
+                      return (
+                        <td
+                          key={formatDateKey(day)}
+                          style={{
+                            padding: 4,
+                            textAlign: "center",
+                            cursor: "pointer",
+                            background: today ? "rgba(15,107,116,0.04)" : "transparent",
+                          }}
+                          onClick={() => {
+                            setModalEmployee(emp.id);
+                            openAddShift(formatDateKey(day));
+                          }}
+                        >
+                          {cellShifts.length === 0 ? (
+                            <span style={{ fontSize: 12, color: uiTokens.textMuted }}>+</span>
+                          ) : (
+                            cellShifts.map((s) => (
+                              <div
+                                key={s.id}
+                                style={{
+                                  position: "relative",
+                                  marginBottom: 2,
+                                  borderRadius: 6,
+                                  background: "#dcfce7",
+                                  padding: "2px 4px",
+                                  fontSize: 10,
+                                  color: "#166534",
+                                }}
+                              >
+                                {s.starts_at}–{s.ends_at}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteShift(s.id);
+                                  }}
+                                  style={{
+                                    position: "absolute",
+                                    right: -4,
+                                    top: -4,
+                                    borderRadius: "50%",
+                                    background: "#ef4444",
+                                    color: "#fff",
+                                    border: "none",
+                                    fontSize: 8,
+                                    width: 14,
+                                    height: 14,
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    opacity: 0,
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
 
-      {/* Add shift modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-            <h3 className="mb-4 text-lg font-semibold">
-              Schicht eintragen – {modalDate}
-            </h3>
-            <form onSubmit={handleAddShift} className="space-y-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Mitarbeiter
-                </label>
-                <select
-                  value={modalEmployee}
-                  onChange={(e) => setModalEmployee(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                >
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.user_id.slice(0, 8)}… ({emp.role})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+        {/* Add shift modal */}
+        {showModal && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)" }}>
+            <Card style={{ width: "100%", maxWidth: 420, padding: 24 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 600, color: uiTokens.textPrimary, marginBottom: 16 }}>
+                Schicht eintragen – {modalDate}
+              </h3>
+              <form onSubmit={handleAddShift} style={{ display: "grid", gap: 12 }}>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Von
+                  <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                    Mitarbeiter
                   </label>
-                  <input
-                    type="time"
-                    value={modalStart}
-                    onChange={(e) => setModalStart(e.target.value)}
-                    required
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                  />
+                  <select
+                    value={modalEmployee}
+                    onChange={(e) => setModalEmployee(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: uiTokens.radiusCard,
+                      border: uiTokens.cardBorder,
+                      fontSize: 14,
+                      background: "#fff",
+                    }}
+                  >
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.display_name || `${emp.user_id.slice(0, 8)}…`} ({emp.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                      Von
+                    </label>
+                    <input
+                      type="time"
+                      value={modalStart}
+                      onChange={(e) => setModalStart(e.target.value)}
+                      required
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: uiTokens.radiusCard,
+                        border: uiTokens.cardBorder,
+                        fontSize: 14,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                      Bis
+                    </label>
+                    <input
+                      type="time"
+                      value={modalEnd}
+                      onChange={(e) => setModalEnd(e.target.value)}
+                      required
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: uiTokens.radiusCard,
+                        border: uiTokens.cardBorder,
+                        fontSize: 14,
+                      }}
+                    />
+                  </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Bis
+                  <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                    Notiz (optional)
                   </label>
                   <input
-                    type="time"
-                    value={modalEnd}
-                    onChange={(e) => setModalEnd(e.target.value)}
-                    required
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    type="text"
+                    value={modalNote}
+                    onChange={(e) => setModalNote(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: uiTokens.radiusCard,
+                      border: uiTokens.cardBorder,
+                      fontSize: 14,
+                    }}
                   />
                 </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Notiz (optional)
-                </label>
-                <input
-                  type="text"
-                  value={modalNote}
-                  onChange={(e) => setModalNote(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="rounded-md border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
-                >
-                  Abbrechen
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting || !modalEmployee}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {submitting ? "Speichern…" : "Speichern"}
-                </button>
-              </div>
-            </form>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingTop: 8 }}>
+                  <Button variant="secondary" size="sm" onClick={() => setShowModal(false)} type="button">
+                    Abbrechen
+                  </Button>
+                  <Button size="sm" disabled={submitting || !modalEmployee} type="submit">
+                    {submitting ? "Speichern…" : "Speichern"}
+                  </Button>
+                </div>
+              </form>
+            </Card>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </main>
   );
 }

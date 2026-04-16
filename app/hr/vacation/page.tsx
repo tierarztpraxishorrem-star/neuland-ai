@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import VacationBudget from "@/components/hr/VacationBudget";
+import { uiTokens, Card, Section, Button, Badge } from "@/components/ui/System";
 
 type AbsenceType = "vacation" | "sick" | "special" | "overtime";
 type AbsenceStatus = "pending" | "approved" | "rejected";
@@ -44,10 +45,10 @@ const STATUS_LABELS: Record<AbsenceStatus, string> = {
   rejected: "Abgelehnt",
 };
 
-const STATUS_COLORS: Record<AbsenceStatus, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  approved: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
+const STATUS_TONES: Record<AbsenceStatus, "accent" | "success" | "danger"> = {
+  pending: "accent",
+  approved: "success",
+  rejected: "danger",
 };
 
 async function fetchWithAuth(url: string, init?: RequestInit) {
@@ -153,177 +154,197 @@ export default function VacationPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[800px] space-y-6 p-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Mein Urlaub</h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setYear((y) => y - 1)}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-          >
-            ←
-          </button>
-          <span className="text-sm font-medium">{year}</span>
-          <button
-            onClick={() => setYear((y) => y + 1)}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-          >
-            →
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Budget */}
-      {entitlement && (
-        <VacationBudget
-          daysTotal={entitlement.days_total}
-          daysCarry={entitlement.days_carry}
-          daysUsed={entitlement.days_used}
-          daysPending={entitlement.days_pending}
-        />
-      )}
-
-      {/* Groups */}
-      {groups.length > 0 && (
-        <div className="rounded-lg border border-black/10 bg-white p-4">
-          <h2 className="mb-2 text-sm font-semibold">Meine Gruppen</h2>
-          <div className="flex flex-wrap gap-2">
-            {groups.map((g) => (
-              <Link
-                key={g.id}
-                href={`/hr/vacation/${g.id}`}
-                className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100"
-              >
-                📅 {g.name}
-              </Link>
-            ))}
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>
+            Mein Urlaub
+          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Button variant="secondary" size="sm" onClick={() => setYear((y) => y - 1)}>
+              ←
+            </Button>
+            <span style={{ fontSize: 14, fontWeight: 500, color: uiTokens.textPrimary }}>{year}</span>
+            <Button variant="secondary" size="sm" onClick={() => setYear((y) => y + 1)}>
+              →
+            </Button>
           </div>
         </div>
-      )}
 
-      {/* Form */}
-      <div className="rounded-lg border border-black/10 bg-white p-4">
-        <h2 className="mb-3 text-lg font-semibold">Neuer Antrag</h2>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Typ
-              </label>
-              <select
-                value={absenceType}
-                onChange={(e) =>
-                  setAbsenceType(e.target.value as AbsenceType)
-                }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              >
-                {(Object.keys(TYPE_LABELS) as AbsenceType[]).map((t) => (
-                  <option key={t} value={t}>
-                    {TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div />
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Von
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                required
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Bis
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                required
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Notiz (optional)
-            </label>
-            <input
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="z. B. Familienurlaub"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting || !startDate || !endDate}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? "Wird eingereicht…" : "Antrag einreichen"}
-          </button>
-        </form>
-      </div>
-
-      {/* List */}
-      <div className="rounded-lg border border-black/10 bg-white p-4">
-        <h2 className="mb-3 text-lg font-semibold">Meine Anträge</h2>
-        {loading ? (
-          <p className="text-sm text-gray-500">Laden…</p>
-        ) : absences.length === 0 ? (
-          <p className="text-sm text-gray-500">Keine Anträge vorhanden.</p>
-        ) : (
-          <div className="space-y-2">
-            {absences.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2"
-              >
-                <div className="space-y-0.5">
-                  <div className="text-sm font-medium">
-                    {TYPE_LABELS[a.absence_type] || a.absence_type} –{" "}
-                    {formatDate(a.start_date)} bis {formatDate(a.end_date)}
-                    <span className="ml-2 text-xs text-gray-500">
-                      ({a.workdays} Arbeitstage)
-                    </span>
-                  </div>
-                  {a.note && (
-                    <div className="text-xs text-gray-500">{a.note}</div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.status]}`}
-                  >
-                    {STATUS_LABELS[a.status]}
-                  </span>
-                  {a.status === "pending" && (
-                    <button
-                      onClick={() => handleDelete(a.id)}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      Löschen
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+        {error && (
+          <div style={{ padding: 12, borderRadius: uiTokens.radiusCard, border: "1px solid #fca5a5", background: "#fef2f2", color: "#b91c1c", fontSize: 14 }}>
+            {error}
           </div>
         )}
+
+        {/* Budget */}
+        {entitlement && (
+          <VacationBudget
+            daysTotal={entitlement.days_total}
+            daysCarry={entitlement.days_carry}
+            daysUsed={entitlement.days_used}
+            daysPending={entitlement.days_pending}
+          />
+        )}
+
+        {/* Groups */}
+        {groups.length > 0 && (
+          <Card>
+            <h2 style={{ fontSize: 14, fontWeight: 600, color: uiTokens.textPrimary, marginBottom: 8 }}>Meine Gruppen</h2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {groups.map((g) => (
+                <Link
+                  key={g.id}
+                  href={`/hr/vacation/${g.id}`}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 12,
+                    border: `1px solid ${uiTokens.brand}33`,
+                    background: `${uiTokens.brand}0a`,
+                    fontSize: 14,
+                    color: uiTokens.brand,
+                    textDecoration: "none",
+                  }}
+                >
+                  📅 {g.name}
+                </Link>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Form */}
+        <Section title="Neuer Antrag">
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                  Typ
+                </label>
+                <select
+                  value={absenceType}
+                  onChange={(e) => setAbsenceType(e.target.value as AbsenceType)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: uiTokens.radiusCard,
+                    border: uiTokens.cardBorder,
+                    fontSize: 14,
+                    background: "#fff",
+                  }}
+                >
+                  {(Object.keys(TYPE_LABELS) as AbsenceType[]).map((t) => (
+                    <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+                  ))}
+                </select>
+              </div>
+              <div />
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                  Von
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: uiTokens.radiusCard,
+                    border: uiTokens.cardBorder,
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                  Bis
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: uiTokens.radiusCard,
+                    border: uiTokens.cardBorder,
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
+                Notiz (optional)
+              </label>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="z. B. Familienurlaub"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  borderRadius: uiTokens.radiusCard,
+                  border: uiTokens.cardBorder,
+                  fontSize: 14,
+                }}
+              />
+            </div>
+            <div>
+              <Button disabled={submitting || !startDate || !endDate} type="submit">
+                {submitting ? "Wird eingereicht…" : "Antrag einreichen"}
+              </Button>
+            </div>
+          </form>
+        </Section>
+
+        {/* List */}
+        <Section title="Meine Anträge">
+          {loading ? (
+            <p style={{ fontSize: 14, color: uiTokens.textMuted }}>Laden…</p>
+          ) : absences.length === 0 ? (
+            <p style={{ fontSize: 14, color: uiTokens.textMuted }}>Keine Anträge vorhanden.</p>
+          ) : (
+            <div style={{ display: "grid", gap: uiTokens.cardGap }}>
+              {absences.map((a) => (
+                <Card key={a.id}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ display: "grid", gap: 2 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: uiTokens.textPrimary }}>
+                        {TYPE_LABELS[a.absence_type] || a.absence_type} –{" "}
+                        {formatDate(a.start_date)} bis {formatDate(a.end_date)}
+                        <span style={{ marginLeft: 8, fontSize: 12, color: uiTokens.textMuted }}>
+                          ({a.workdays} Arbeitstage)
+                        </span>
+                      </div>
+                      {a.note && (
+                        <div style={{ fontSize: 13, color: uiTokens.textMuted }}>{a.note}</div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Badge tone={STATUS_TONES[a.status]}>
+                        {STATUS_LABELS[a.status]}
+                      </Badge>
+                      {a.status === "pending" && (
+                        <button
+                          onClick={() => handleDelete(a.id)}
+                          style={{ fontSize: 13, color: "#dc2626", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+                        >
+                          Löschen
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </Section>
       </div>
-    </div>
+    </main>
   );
 }

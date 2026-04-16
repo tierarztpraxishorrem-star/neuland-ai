@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { uiTokens, Card, Section, Button } from "../../../components/ui/System";
 
 type DocumentCategory =
   | "contract"
@@ -83,67 +84,65 @@ export default function DocumentsPage() {
   }, [loadDocuments]);
 
   return (
-    <div className="mx-auto max-w-[800px] space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Dokumente</h1>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding, fontFamily: "inherit" }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>Dokumente</h1>
         </div>
-      )}
 
-      {/* Category tabs */}
-      <div className="flex flex-wrap gap-1 rounded-lg border border-black/10 bg-white p-1">
-        {ALL_CATEGORIES.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setActiveTab(cat)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === cat
-                ? "bg-blue-600 text-white"
-                : "text-gray-600 hover:bg-gray-100"
-            }`}
-          >
-            {cat === "all" ? "Alle" : CATEGORY_LABELS[cat]}
-          </button>
-        ))}
-      </div>
+        {error && (
+          <Card style={{ border: "1px solid #fecaca", background: "#fff1f2" }}>
+            <div style={{ fontSize: 13, color: "#b91c1c" }}>{error}</div>
+          </Card>
+        )}
 
-      {/* Document list */}
-      <div className="rounded-lg border border-black/10 bg-white p-4">
-        {loading ? (
-          <p className="text-sm text-gray-500">Laden…</p>
-        ) : documents.length === 0 ? (
-          <p className="text-sm text-gray-500">Keine Dokumente vorhanden.</p>
-        ) : (
-          <div className="space-y-2">
-            {documents.map((doc) => (
-              <div
-                key={doc.id}
-                className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 p-3"
+        <Card style={{ padding: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {ALL_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveTab(cat)}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: activeTab === cat ? uiTokens.brand : "transparent",
+                  color: activeTab === cat ? "#fff" : uiTokens.textSecondary,
+                }}
               >
-                <div className="space-y-0.5">
-                  <div className="text-sm font-medium">{doc.title}</div>
-                  <div className="text-xs text-gray-500">
-                    {CATEGORY_LABELS[doc.category] || doc.category} –{" "}
-                    {formatDateTime(doc.uploaded_at)}
-                  </div>
-                </div>
-                {doc.download_url && (
-                  <a
-                    href={doc.download_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-                  >
-                    Herunterladen
-                  </a>
-                )}
-              </div>
+                {cat === "all" ? "Alle" : CATEGORY_LABELS[cat]}
+              </button>
             ))}
           </div>
-        )}
+        </Card>
+
+        <Section title="Meine Dokumente">
+          {loading ? <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Laden…</div> : documents.length === 0 ? (
+            <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Keine Dokumente vorhanden.</div>
+          ) : (
+            documents.map((doc) => (
+              <Card key={doc.id} style={{ padding: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{doc.title}</div>
+                    <div style={{ fontSize: 12, color: uiTokens.textSecondary, marginTop: 2 }}>
+                      {CATEGORY_LABELS[doc.category] || doc.category} – {formatDateTime(doc.uploaded_at)}
+                    </div>
+                  </div>
+                  {doc.download_url && (
+                    <a href={doc.download_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+                      <Button variant="primary" size="sm">Herunterladen</Button>
+                    </a>
+                  )}
+                </div>
+              </Card>
+            ))
+          )}
+        </Section>
       </div>
-    </div>
+    </main>
   );
 }

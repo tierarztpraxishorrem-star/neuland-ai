@@ -567,14 +567,22 @@ export default function ResultPage() {
           setVisibilityScope(normalizeVisibilityScope(data.visibility_scope));
         }
         if (!storedRecordingSession && data.created_at) setSessionCreatedAt(data.created_at);
+        if (!storedRecordingSession && typeof data.duration_seconds === 'number') {
+          setRecordedDurationSeconds((prev) => Math.max(prev, data.duration_seconds));
+        }
         if (!storedTranscript && data.transcript) setTranscript(data.transcript);
         if (!storedResult && data.result) setResult(data.result);
+        if (data.source === 'live') {
+          setShowLiveHandoffBanner(true);
+          setIsLiveHandoffMode(true);
+        }
         setContextData((prev) => ({
           ...prev,
           patientName: prev.patientName || data.patient_name || '',
           tierart: prev.tierart || data.species || '',
           rasse: prev.rasse || data.breed || '',
-          alter: prev.alter || data.age || ''
+          alter: prev.alter || data.age || '',
+          geschlecht: prev.geschlecht || data.geschlecht || '',
         }));
       }
 
@@ -1136,6 +1144,7 @@ export default function ResultPage() {
         species: selectedPatient?.tierart || structuredCase.tierart || null,
         breed: selectedPatient?.rasse || structuredCase.rasse || null,
         age: selectedPatient?.alter || structuredCase.alter || null,
+        geschlecht: selectedPatient?.geschlecht || structuredCase.geschlecht || null,
         user_id: currentUserId,
         practice_id: effectivePracticeId,
         category,
@@ -1143,7 +1152,11 @@ export default function ResultPage() {
         visibility_scope: category === 'internal' ? visibilityScope : 'practice',
         transcript,
         result,
-        template: selectedTemplate || null
+        template: selectedTemplate || null,
+        duration_seconds: totalDurationSeconds > 0 ? totalDurationSeconds : null,
+        source: isLiveHandoffMode ? 'live' : 'normal',
+        completed_at: new Date().toISOString(),
+        status: 'completed',
       };
 
       const { error } = await supabase
@@ -1227,7 +1240,6 @@ export default function ResultPage() {
           minHeight: '100vh',
           background: brand.bg,
           padding: uiTokens.pagePadding,
-          fontFamily: 'Arial'
         }}
       >
         <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
@@ -1427,7 +1439,6 @@ export default function ResultPage() {
         minHeight: '100vh',
         background: brand.bg,
         padding: uiTokens.pagePadding,
-        fontFamily: 'Arial'
       }}
     >
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
@@ -2314,9 +2325,9 @@ export default function ResultPage() {
                   transform: 'translateY(-100%)',
                   minWidth: '240px',
                   background: '#fff',
-                  border: '1px solid #E5E7EB',
+                  border: uiTokens.cardBorder,
                   borderRadius: '12px',
-                  boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                   padding: '6px',
                   zIndex: 20
                 }}

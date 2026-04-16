@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { uiTokens, Card, Section, Button } from "../../components/ui/System";
 
 export default function HilfePage() {
   const [user, setUser] = useState<any | null>(null);
@@ -17,46 +18,54 @@ export default function HilfePage() {
   }, []);
 
   if (loading) {
-    return <div style={{ padding: 40 }}>Lade...</div>;
+    return <div style={{ padding: 40, color: uiTokens.textMuted }}>Lade...</div>;
   }
 
   if (!user) {
-    return <div style={{ padding: 40 }}>Nicht eingeloggt.</div>;
+    return <div style={{ padding: 40, color: uiTokens.textMuted }}>Nicht eingeloggt.</div>;
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(180deg, #f4f7f8 0%, #eef3f4 100%)",
-        padding: 40,
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
-      <h1 style={{ fontSize: 28, color: "#0F6B74", marginBottom: 24 }}>
-        Hilfe & Support
-      </h1>
-      <section style={{ marginBottom: 36 }}>
-        <h2 style={{ fontSize: 20, marginBottom: 10 }}>FAQ</h2>
-        <ul style={{ background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-          <li style={{ marginBottom: 18 }}>
-            <b>Wie kann ich mein Passwort zurücksetzen?</b><br />
-            Über die Login-Seite auf "Passwort vergessen" klicken und den Anweisungen folgen.
-          </li>
-          <li style={{ marginBottom: 18 }}>
-            <b>Wie erreiche ich den Support?</b><br />
-            Schreibe eine E-Mail an <a href="mailto:support@neuland.ai" style={{ color: "#0F6B74" }}>support@neuland.ai</a> oder nutze das Kontaktformular unten.
-          </li>
-          <li style={{ marginBottom: 0 }}>
-            <b>Wo finde ich Anleitungen zur Plattform?</b><br />
-            Im Bereich "VetMind" findest du viele Anleitungen und SOPs.
-          </li>
-        </ul>
-      </section>
-      <section>
-        <h2 style={{ fontSize: 20, marginBottom: 10 }}>Kontaktformular</h2>
-        <HilfeKontaktForm />
-      </section>
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>
+          Hilfe & Support
+        </h1>
+
+        <Section title="FAQ">
+          <Card>
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 18 }}>
+              <li>
+                <b style={{ color: uiTokens.textPrimary }}>Wie kann ich mein Passwort zurücksetzen?</b>
+                <br />
+                <span style={{ fontSize: 14, color: uiTokens.textSecondary }}>
+                  Über die Login-Seite auf &quot;Passwort vergessen&quot; klicken und den Anweisungen folgen.
+                </span>
+              </li>
+              <li>
+                <b style={{ color: uiTokens.textPrimary }}>Wie erreiche ich den Support?</b>
+                <br />
+                <span style={{ fontSize: 14, color: uiTokens.textSecondary }}>
+                  Schreibe eine E-Mail an{" "}
+                  <a href="mailto:support@neuland.ai" style={{ color: uiTokens.brand }}>support@neuland.ai</a>{" "}
+                  oder nutze das Kontaktformular unten.
+                </span>
+              </li>
+              <li>
+                <b style={{ color: uiTokens.textPrimary }}>Wo finde ich Anleitungen zur Plattform?</b>
+                <br />
+                <span style={{ fontSize: 14, color: uiTokens.textSecondary }}>
+                  Im Bereich &quot;VetMind&quot; findest du viele Anleitungen und SOPs.
+                </span>
+              </li>
+            </ul>
+          </Card>
+        </Section>
+
+        <Section title="Kontaktformular">
+          <HilfeKontaktForm />
+        </Section>
+      </div>
     </main>
   );
 }
@@ -70,7 +79,6 @@ function HilfeKontaktForm() {
   const handleSubmit = async (e: any) => {
     e.preventDefault();
     setSending(true);
-    // Hier könnte ein Insert in eine Supabase-Tabelle erfolgen
     setTimeout(() => {
       setSent(true);
       setSending(false);
@@ -78,34 +86,45 @@ function HilfeKontaktForm() {
   };
 
   if (sent) {
-    return <div style={{ color: "#16a34a", marginTop: 16 }}>Danke für deine Nachricht! Wir melden uns zeitnah.</div>;
+    return <div style={{ color: "#16a34a", marginTop: 16, fontSize: 14 }}>Danke für deine Nachricht! Wir melden uns zeitnah.</div>;
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,0.04)", maxWidth: 420 }}>
-      <input
-        type="email"
-        placeholder="Deine E-Mail"
-        value={email}
-        onChange={e => setEmail(e.target.value)}
-        required
-        style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #e5e7eb", marginBottom: 14 }}
-      />
-      <textarea
-        placeholder="Deine Nachricht"
-        value={message}
-        onChange={e => setMessage(e.target.value)}
-        required
-        rows={4}
-        style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #e5e7eb", marginBottom: 14, resize: "vertical" }}
-      />
-      <button
-        type="submit"
-        disabled={sending}
-        style={{ width: "100%", padding: 12, borderRadius: 8, background: "#0F6B74", color: "#fff", border: "none", fontWeight: 600, cursor: sending ? "not-allowed" : "pointer" }}
-      >
-        {sending ? "Sende..." : "Absenden"}
-      </button>
-    </form>
+    <Card style={{ maxWidth: 420 }}>
+      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
+        <input
+          type="email"
+          placeholder="Deine E-Mail"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          style={{
+            width: "100%",
+            padding: 12,
+            borderRadius: uiTokens.radiusCard,
+            border: uiTokens.cardBorder,
+            fontSize: 14,
+          }}
+        />
+        <textarea
+          placeholder="Deine Nachricht"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          required
+          rows={4}
+          style={{
+            width: "100%",
+            padding: 12,
+            borderRadius: uiTokens.radiusCard,
+            border: uiTokens.cardBorder,
+            fontSize: 14,
+            resize: "vertical",
+          }}
+        />
+        <Button disabled={sending} type="submit" style={{ width: "100%" }}>
+          {sending ? "Sende..." : "Absenden"}
+        </Button>
+      </form>
+    </Card>
   );
 }

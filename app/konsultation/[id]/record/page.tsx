@@ -679,9 +679,8 @@ export default function RecordPage() {
       flexDirection: "column",
       justifyContent: "flex-start",
       alignItems: "center",
-      background: "linear-gradient(180deg, #0F6B74, #0c555c)",
+      background: uiTokens.brand,
       color: "#fff",
-      fontFamily: "Arial",
       padding: `${uiTokens.pagePadding} 20px`
     }}>
 

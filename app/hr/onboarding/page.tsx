@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { uiTokens, Card, Section } from "../../../components/ui/System";
 
 type OnboardingTask = {
   id: string;
@@ -76,96 +77,71 @@ export default function OnboardingPage() {
   const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
   return (
-    <div className="mx-auto max-w-[800px] space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Onboarding</h1>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding, fontFamily: "inherit" }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>Onboarding</h1>
         </div>
-      )}
 
-      {loading ? (
-        <p className="text-sm text-gray-500">Laden…</p>
-      ) : totalTasks === 0 ? (
-        <div className="rounded-lg border border-black/10 bg-white p-4">
-          <p className="text-sm text-gray-500">
-            Keine Onboarding-Aufgaben vorhanden.
-          </p>
-        </div>
-      ) : (
-        <>
-          {/* Progress bar */}
-          <div className="rounded-lg border border-black/10 bg-white p-4">
-            <div className="mb-2 flex items-center justify-between text-sm">
-              <span className="font-medium">Fortschritt</span>
-              <span className="text-gray-600">
-                {doneTasks} von {totalTasks} erledigt ({progress}%)
-              </span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-gray-200">
-              <div
-                className="h-full rounded-full bg-green-500 transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
+        {error && (
+          <Card style={{ border: "1px solid #fecaca", background: "#fff1f2" }}>
+            <div style={{ fontSize: 13, color: "#b91c1c" }}>{error}</div>
+          </Card>
+        )}
 
-          {/* Task list */}
-          <div className="rounded-lg border border-black/10 bg-white p-4">
-            <div className="space-y-2">
+        {loading ? (
+          <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Laden…</div>
+        ) : totalTasks === 0 ? (
+          <Card>
+            <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Keine Onboarding-Aufgaben vorhanden.</div>
+          </Card>
+        ) : (
+          <>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 14 }}>
+                <span style={{ fontWeight: 600 }}>Fortschritt</span>
+                <span style={{ color: uiTokens.textSecondary }}>{doneTasks} von {totalTasks} erledigt ({progress}%)</span>
+              </div>
+              <div style={{ height: 10, borderRadius: 999, background: "#e5e7eb", overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 999, background: "#22c55e", width: `${progress}%`, transition: "width 0.3s" }} />
+              </div>
+            </Card>
+
+            <Section title="Aufgaben">
               {tasks.map((task) => (
-                <div
+                <Card
                   key={task.id}
-                  className={`flex items-center gap-3 rounded-md border p-3 ${
-                    task.done
-                      ? "border-gray-100 bg-gray-50 opacity-60"
-                      : "border-gray-200 bg-white"
-                  }`}
+                  style={{
+                    padding: 14,
+                    opacity: task.done ? 0.6 : 1,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => handleToggle(task)}
                 >
-                  <button
-                    onClick={() => handleToggle(task)}
-                    disabled={toggling === task.id}
-                    className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
-                      task.done
-                        ? "border-green-500 bg-green-500 text-white"
-                        : "border-gray-300 hover:border-blue-400"
-                    }`}
-                  >
-                    {task.done && (
-                      <svg
-                        className="h-3 w-3"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={3}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                  <div className="flex-1">
-                    <span
-                      className={`text-sm ${task.done ? "line-through text-gray-400" : "font-medium"}`}
-                    >
-                      {task.title}
-                    </span>
-                    {task.due_on && (
-                      <span className="ml-2 text-xs text-gray-400">
-                        Fällig: {formatDate(task.due_on)}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{
+                      width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+                      border: task.done ? "2px solid #22c55e" : uiTokens.cardBorder,
+                      background: task.done ? "#22c55e" : "#fff",
+                      display: "grid", placeItems: "center", color: "#fff", fontSize: 12,
+                    }}>
+                      {task.done ? "✓" : ""}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 14, fontWeight: task.done ? 400 : 600, textDecoration: task.done ? "line-through" : "none", color: task.done ? uiTokens.textMuted : uiTokens.textPrimary }}>
+                        {task.title}
                       </span>
-                    )}
+                      {task.due_on && (
+                        <span style={{ marginLeft: 8, fontSize: 12, color: uiTokens.textMuted }}>Fällig: {formatDate(task.due_on)}</span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </Card>
               ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+            </Section>
+          </>
+        )}
+      </div>
+    </main>
   );
 }

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '../../../../lib/supabase';
+import { uiTokens } from '../../../../components/ui/System';
 import {
+  ANAMNESIS_TEMPLATES,
   ANAMNESIS_TEMPLATE_META,
   AnamnesisQuestion,
   extractFinalNotes,
@@ -17,13 +19,14 @@ import {
 } from '../../../../lib/liveAnamnesis';
 
 const CHUNK_MS = 7000;
-const ANALYSIS_TICK_MS = 1500;
+const ANALYSIS_TICK_MS = 3000;
 const ANALYSIS_FORCED_REFRESH_MS = 20000;
-const ANALYSIS_MIN_INTERVAL_MS = 3500;
+const ANALYSIS_MIN_INTERVAL_MS = 4000;
+const AUTOSAVE_INTERVAL_MS = 60000;
 const ANALYSIS_MIN_TRANSCRIPT_CHARS = 20;
 const ANALYSIS_MIN_DELTA_CHARS = 30;
 const TRANSCRIBE_TIMEOUT_MS = 25000;
-const MAX_VISIBLE_OPEN_QUESTIONS = 3;
+const MAX_VISIBLE_OPEN_QUESTIONS = 6;
 const MAX_QUESTION_HISTORY = 60;
 const MAX_TRANSCRIBE_BATCH_SEGMENTS = 2;
 const FINALIZE_QUEUE_TIMEOUT_MS = 60000;
@@ -94,7 +97,9 @@ export default function LiveAnamnesisPage() {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [showSavedHint, setShowSavedHint] = useState(false);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
-  const [showDebugPanel, setShowDebugPanel] = useState(true);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
+  const [recordingElapsed, setRecordingElapsed] = useState('');
   const [transcribeStats, setTranscribeStats] = useState({
     received: 0,
     success: 0,
@@ -114,12 +119,31 @@ export default function LiveAnamnesisPage() {
   const lastAnalyzedLengthRef = useRef(0);
   const lastAnalyzedAtRef = useRef(0);
   const analysisInFlightRef = useRef(false);
+  const analysisStateRef = useRef(analysis.state);
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
   const refillCheckpointRef = useRef(0);
 
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
+
+  useEffect(() => {
+    analysisStateRef.current = analysis.state;
+  }, [analysis.state]);
+
+  // Recording duration timer
+  useEffect(() => {
+    if (!recordingStartedAt) { setRecordingElapsed(''); return; }
+    const tick = () => {
+      const secs = Math.floor((Date.now() - recordingStartedAt) / 1000);
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      setRecordingElapsed(`${m}:${String(s).padStart(2, '0')}`);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [recordingStartedAt]);
 
   useEffect(() => {
     const el = transcriptScrollRef.current;
@@ -382,7 +406,7 @@ export default function LiveAnamnesisPage() {
           transcript: currentTranscript,
           chiefComplaint,
           templateOverride: templateOverride === 'auto' ? null : templateOverride,
-          currentState: analysis.state,
+          currentState: analysisStateRef.current,
           askedQuestions,
           existingOpenQuestions,
           askedQuestionKeys,
@@ -420,7 +444,6 @@ export default function LiveAnamnesisPage() {
       setAnalysisRunning(false);
     }
   }, [
-    analysis.state,
     askedQuestionKeys,
     askedQuestions,
     chiefComplaint,
@@ -464,6 +487,20 @@ export default function LiveAnamnesisPage() {
       console.error(error);
     });
   }, [analysis.isComplete, checkedCount, openQuestionCount, runAnalysis]);
+
+  // Auto-save during recording to prevent data loss
+  useEffect(() => {
+    if (!recording) return;
+    const id = window.setInterval(() => {
+      persistLiveResult().then(() => {
+        setLastSavedAt(new Date().toISOString());
+      }).catch((err) => {
+        console.warn('Auto-save fehlgeschlagen:', err);
+      });
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording]);
 
   const stopTracks = () => {
     if (segmentStopTimeoutRef.current) {
@@ -548,10 +585,18 @@ export default function LiveAnamnesisPage() {
       scheduleSegmentStop(recorder);
 
       setRecording(true);
+      setRecordingStartedAt(Date.now());
       setStatus('Live-Anamnese läuft');
     } catch (error) {
       console.error(error);
-      setStatus('Mikrofonzugriff nicht möglich');
+      const msg = error instanceof Error ? error.message : '';
+      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+        setStatus('Mikrofonzugriff verweigert – bitte in den Browser-Einstellungen erlauben');
+      } else if (msg.includes('NotFound')) {
+        setStatus('Kein Mikrofon gefunden – bitte ein Mikrofon anschließen');
+      } else {
+        setStatus('Mikrofonzugriff nicht möglich – bitte Berechtigung prüfen');
+      }
     }
   };
 
@@ -583,6 +628,8 @@ export default function LiveAnamnesisPage() {
       transcript: safeTranscript,
       result: structuredText,
       status: 'draft',
+      source: 'live',
+      analysis_json: analysis,
     };
 
     const { error } = await supabase.from('cases').update(payload).eq('id', caseId);
@@ -626,6 +673,7 @@ export default function LiveAnamnesisPage() {
   const stopRecordingAndSave = async () => {
     setFinalizing(true);
     setStatus('Session wird abgeschlossen ...');
+    setRecordingStartedAt(null);
 
     try {
       recordingActiveRef.current = false;
@@ -659,395 +707,524 @@ export default function LiveAnamnesisPage() {
     };
   }, []);
 
+  const templateFields = useMemo(
+    () => ANAMNESIS_TEMPLATES[analysis.templateKey] || [],
+    [analysis.templateKey],
+  );
+
+  const fieldProgress = useMemo(() => {
+    const known = templateFields.filter((f) => analysis.state[f.key]?.status === 'known').length;
+    const unclear = templateFields.filter((f) => analysis.state[f.key]?.status === 'unclear').length;
+    const missing = templateFields.filter((f) => !analysis.state[f.key] || analysis.state[f.key]?.status === 'missing').length;
+    const total = templateFields.length;
+    const pct = total > 0 ? Math.round(((known + unclear * 0.5) / total) * 100) : 0;
+    return { known, unclear, missing, total, pct };
+  }, [templateFields, analysis.state]);
+
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: '#f3f7f8',
-        color: '#0f172a',
-        fontFamily: 'Arial',
-        padding: '24px',
-      }}
-    >
-      <div style={{ maxWidth: 1500, margin: '0 auto' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 16,
-            marginBottom: 16,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div>
-            <h1 style={{ margin: 0, color: '#0F6B74' }}>Anamnese Assistent (Live)</h1>
-            <div style={{ marginTop: 6, fontSize: 13, color: '#475569' }}>
-              Strukturierte Live-Anamnese ohne Diagnosevorschläge
+    <main style={pageStyle}>
+      <div style={{ maxWidth: 1600, margin: '0 auto' }}>
+        {/* Header */}
+        <div style={headerStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {recording && (
+              <span style={recordingDotStyle} />
+            )}
+            <div>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: uiTokens.brand }}>
+                Anamnese Assistent
+              </h1>
+              <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
+                {ANAMNESIS_TEMPLATE_META[analysis.templateKey].label}
+                {recordingElapsed ? ` · ${recordingElapsed}` : ''}
+              </div>
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: 13, color: '#334155' }}>Vorstellungsgrund</label>
             <select
               value={chiefComplaint}
-              onChange={(event) => setChiefComplaint(event.target.value)}
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid #cbd5e1',
-                background: '#fff',
-              }}
+              onChange={(e) => setChiefComplaint(e.target.value)}
+              style={selectStyle}
+              aria-label='Vorstellungsgrund'
             >
               {CHIEF_COMPLAINT_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
+                <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </select>
 
-            <label style={{ fontSize: 13, color: '#334155' }}>Template</label>
             <select
               value={templateOverride}
-              onChange={(event) => setTemplateOverride(event.target.value as 'auto' | TemplateKey)}
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid #cbd5e1',
-                background: '#fff',
-              }}
+              onChange={(e) => setTemplateOverride(e.target.value as 'auto' | TemplateKey)}
+              style={selectStyle}
+              aria-label='Template'
             >
-              <option value='auto'>Auto ({ANAMNESIS_TEMPLATE_META[analysis.templateKey].label})</option>
+              <option value='auto'>Auto</option>
               {TEMPLATE_KEYS.map((key) => (
-                <option key={key} value={key}>
-                  {ANAMNESIS_TEMPLATE_META[key].label}
-                </option>
+                <option key={key} value={key}>{ANAMNESIS_TEMPLATE_META[key].label}</option>
               ))}
             </select>
 
             {!recording ? (
-              <button
-                type='button'
-                onClick={startRecording}
-                disabled={finalizing}
-                style={primaryButtonStyle}
-              >
-                Aufnahme starten
+              <button type='button' onClick={startRecording} disabled={finalizing} style={btnPrimary}>
+                ● Aufnahme starten
               </button>
             ) : (
-              <button
-                type='button'
-                onClick={stopRecordingAndSave}
-                disabled={finalizing}
-                style={{ ...primaryButtonStyle, background: '#b91c1c' }}
-              >
-                {finalizing ? 'Speichere ...' : 'Aufnahme stoppen'}
+              <button type='button' onClick={stopRecordingAndSave} disabled={finalizing} style={btnDanger}>
+                {finalizing ? 'Speichere …' : '■ Stoppen & Speichern'}
               </button>
             )}
 
             <button
               type='button'
               onClick={() => {
-                goToDocumentation().catch((error) => {
-                  console.error(error);
+                goToDocumentation().catch((err) => {
+                  console.error(err);
                   setStatus('Übergabe zur Dokumentation fehlgeschlagen');
                 });
               }}
               disabled={finalizing}
-              style={{ ...primaryButtonStyle, background: '#111827' }}
+              style={btnDark}
             >
-              {finalizing ? 'Übergebe ...' : 'Zur Dokumentation'}
+              Zur Dokumentation →
             </button>
           </div>
         </div>
 
-        <div style={{ marginBottom: 12, fontSize: 13, color: '#334155' }}>
-          Status: {status} {queueSize > 0 ? `| Segmente in Queue: ${queueSize}` : ''}{' '}
-          {analysisRunning ? '| Analyse wird aktualisiert ...' : ''}
-          {checkedCount > 0 ? `| Als gefragt markiert: ${checkedCount}` : ''}
-          {openQuestionCount > 0 ? `| Offen: ${openQuestionCount}` : ''}
-          {transcriptionStalled ? ' | Warnung: Transkription scheint zu hängen' : ''}
+        {/* Progress bar */}
+        <div style={progressContainerStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>
+              Vollständigkeit: {fieldProgress.pct}%
+            </span>
+            <span style={{ fontSize: 12, color: '#64748b' }}>
+              {fieldProgress.known} erhoben · {fieldProgress.unclear} unklar · {fieldProgress.missing} fehlend
+            </span>
+          </div>
+          <div style={progressBarBg}>
+            <div style={{ ...progressBarFill, width: `${fieldProgress.pct}%`, background: fieldProgress.pct >= 80 ? '#16a34a' : fieldProgress.pct >= 50 ? '#eab308' : '#ef4444' }} />
+          </div>
         </div>
 
-        {analysisError ? (
-          <div style={{ marginBottom: 12, color: '#b91c1c', fontSize: 13 }}>
-            Analyse-Fehler: {analysisError}
-          </div>
-        ) : null}
-
-        {showSavedHint && lastSavedAt ? (
-          <div style={{ marginBottom: 12, color: '#166534', fontSize: 13 }}>
-            Zuletzt gespeichert: {new Date(lastSavedAt).toLocaleTimeString('de-DE')}
-          </div>
-        ) : null}
-
-        <div
-          style={{
-            marginBottom: 12,
-            border: '1px solid #dbe3e8',
-            borderRadius: 10,
-            background: '#fff',
-            padding: 10,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>Debug (Live-Anamnese)</div>
-            <button
-              type='button'
-              onClick={() => setShowDebugPanel((prev) => !prev)}
-              style={{
-                border: '1px solid #cbd5e1',
-                borderRadius: 8,
-                background: '#fff',
-                padding: '4px 8px',
-                fontSize: 12,
-                cursor: 'pointer',
-              }}
-            >
-              {showDebugPanel ? 'ausblenden' : 'einblenden'}
-            </button>
-          </div>
-
-          {showDebugPanel ? (
-            <div style={{ marginTop: 8, display: 'grid', gap: 6, fontSize: 12, color: '#334155' }}>
-              <div>Template-Key: {analysis.templateKey}</div>
-              <div>Template-Name: {ANAMNESIS_TEMPLATE_META[analysis.templateKey].label}</div>
-              <div>Override: {templateOverride === 'auto' ? 'Auto' : templateOverride}</div>
-              <div>Letzte Analyse: {lastAnalyzedAt ? new Date(lastAnalyzedAt).toLocaleTimeString('de-DE') : 'noch keine'}</div>
-              <div>Segmente empfangen: {transcribeStats.received}</div>
-              <div>Transkription erfolgreich: {transcribeStats.success}</div>
-              <div>Transkription leer: {transcribeStats.empty}</div>
-              <div>Transkriptionsfehler: {transcribeStats.failed}</div>
-              <div>Letzte erfolgreiche Transkription: {transcribeStats.lastSuccessAt ? new Date(transcribeStats.lastSuccessAt).toLocaleTimeString('de-DE') : 'noch keine'}</div>
-              <div>Missing-Felder: {missingStateFields.length ? missingStateFields.join(', ') : 'keine'}</div>
-              <div>Unclear-Felder: {unclearStateFields.length ? unclearStateFields.join(', ') : 'keine'}</div>
-            </div>
-          ) : null}
+        {/* Field chips */}
+        <div style={fieldChipsContainerStyle}>
+          {templateFields.map((field) => {
+            const entry = analysis.state[field.key];
+            const status = entry?.status || 'missing';
+            const chipStyle = status === 'known' ? chipKnown : status === 'unclear' ? chipUnclear : chipMissing;
+            const value = entry?.value?.trim();
+            const displayValue = status === 'known' && value && value.toLowerCase() !== 'erwaehnt' && value.toLowerCase() !== 'bekannt'
+              ? value : undefined;
+            return (
+              <span key={field.key} style={chipStyle} title={displayValue || field.label}>
+                {status === 'known' ? '✓' : status === 'unclear' ? '?' : '·'} {field.label}
+                {displayValue && <span style={{ fontWeight: 400, opacity: 0.85 }}> — {displayValue.length > 30 ? displayValue.slice(0, 30) + '…' : displayValue}</span>}
+              </span>
+            );
+          })}
         </div>
 
-        <section
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-            gap: 12,
-          }}
-        >
-          <article style={panelStyle}>
-            <h2 style={panelTitleStyle}>Live-Transkript</h2>
-            <div ref={transcriptScrollRef} style={scrollAreaStyle}>
-              {transcript ? (
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: 'pre-wrap',
-                    lineHeight: 1.45,
-                    fontSize: 14,
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                  }}
-                >
-                  {transcript}
-                </pre>
-              ) : (
-                <div style={{ color: '#64748b', fontSize: 14 }}>
-                  Noch kein Transkript vorhanden. Starte die Aufnahme.
-                </div>
+        {/* Status line */}
+        {(analysisError || queueSize > 0 || analysisRunning || transcriptionStalled) && (
+          <div style={statusBarStyle}>
+            {analysisError && <span style={{ color: '#dc2626' }}>Analyse-Fehler: {analysisError}</span>}
+            {queueSize > 0 && <span>Segmente in Queue: {queueSize}</span>}
+            {analysisRunning && <span style={{ color: uiTokens.brand }}>Analyse wird aktualisiert …</span>}
+            {transcriptionStalled && <span style={{ color: '#dc2626' }}>⚠ Transkription scheint zu hängen</span>}
+          </div>
+        )}
+
+        {showSavedHint && lastSavedAt && (
+          <div style={{ marginBottom: 8, color: '#16a34a', fontSize: 12, fontWeight: 500 }}>
+            ✓ Gespeichert um {new Date(lastSavedAt).toLocaleTimeString('de-DE')}
+          </div>
+        )}
+
+        {/* Main grid: 2-column – left=questions, right=transcript+anamnese */}
+        <div style={gridStyle}>
+          {/* LEFT: Questions panel (primary for TFA) */}
+          <div style={panelStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={panelTitleStyle}>
+                Nächste Fragen
+                {openQuestionCount > 0 && <span style={badgeStyle}>{openQuestionCount}</span>}
+              </h2>
+              {checkedCount > 0 && (
+                <span style={{ fontSize: 12, color: '#64748b' }}>{checkedCount} erledigt</span>
               )}
             </div>
-          </article>
 
-          <article style={panelStyle}>
-            <h2 style={panelTitleStyle}>Anamnese (Fließtext)</h2>
-            <div style={scrollAreaStyle}>
-              <div style={{ fontSize: 14, lineHeight: 1.55, color: '#0f172a' }}>{narrativeAnamnesis}</div>
-
-              <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-                <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Vorerkrankungen</div>
-                  <div style={{ fontSize: 14, color: '#0f172a' }}>{finalNotes.vorerkrankungen}</div>
-                </div>
-
-                <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Aktuelle Medikation</div>
-                  <div style={{ fontSize: 14, color: '#0f172a' }}>{finalNotes.medikation}</div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Interner Hinweis (fehlende Angaben)</div>
-                {analysis.missingPoints.length ? (
-                  <ul style={{ margin: 0, paddingLeft: 18, color: '#334155' }}>
-                    {analysis.missingPoints.map((item) => (
-                      <li key={item} style={{ marginBottom: 4, fontSize: 14 }}>
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div style={{ color: '#64748b', fontSize: 14 }}>Aktuell keine offenen Punkte erkannt.</div>
-                )}
-              </div>
-            </div>
-          </article>
-
-          <article style={panelStyle}>
-            <h2 style={panelTitleStyle}>Empfohlene nächste Fragen</h2>
-            <div style={scrollAreaStyle}>
+            <div style={questionAreaStyle}>
               {visibleQuestions.length ? (
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {visibleQuestions.map((question) => {
-                    const checked = question.checked;
-                    const irrelevant = question.irrelevant;
-                    const accent =
-                      question.priority === 'high'
-                        ? '#fecaca'
-                        : question.priority === 'medium'
-                          ? '#fde68a'
-                          : '#dbeafe';
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {visibleQuestions.map((q) => {
+                    const isOpen = !q.checked && !q.irrelevant;
+                    const accentBg = q.priority === 'high' ? '#fef2f2' : q.priority === 'medium' ? '#fffbeb' : '#f0f9ff';
+                    const accentBorder = q.priority === 'high' ? '#fecaca' : q.priority === 'medium' ? '#fde68a' : '#bfdbfe';
+                    const accentPill = q.priority === 'high' ? '#dc2626' : q.priority === 'medium' ? '#ca8a04' : '#2563eb';
                     return (
-                      <label
-                        key={question.id}
+                      <div
+                        key={q.id}
                         style={{
-                          display: 'flex',
-                          gap: 10,
-                          alignItems: 'flex-start',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: 10,
-                          padding: 10,
-                          background: irrelevant ? '#f1f5f9' : checked ? '#ecfdf5' : '#fff',
+                          border: `1px solid ${isOpen ? accentBorder : '#e2e8f0'}`,
+                          borderRadius: 12,
+                          padding: '12px 14px',
+                          background: q.irrelevant ? '#f8fafc' : q.checked ? '#f0fdf4' : accentBg,
+                          opacity: isOpen ? 1 : 0.7,
+                          transition: 'opacity 0.2s',
                         }}
                       >
-                        <input
-                          type='checkbox'
-                          checked={checked}
-                          onChange={() => toggleQuestionChecked(question.id)}
-                          disabled={irrelevant}
-                        />
-                        <div style={{ display: 'grid', gap: 6, width: '100%' }}>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                borderRadius: 999,
-                                padding: '2px 8px',
-                                background: accent,
-                                color: '#111827',
-                                textTransform: 'uppercase',
-                              }}
-                            >
-                              {question.priority}
-                            </span>
-                            {irrelevant ? (
-                              <span style={{ fontSize: 11, color: '#475569' }}>irrelevant</span>
-                            ) : null}
-                          </div>
-
-                          <span
-                            style={{
-                              fontSize: 14,
-                              color: '#0f172a',
-                              textDecoration: checked || irrelevant ? 'line-through' : 'none',
-                              opacity: checked || irrelevant ? 0.75 : 1,
-                            }}
-                          >
-                            {question.text}
-                          </span>
-
-                          {question.reason ? (
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: '#475569',
-                                background: '#f8fafc',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: 8,
-                                padding: '6px 8px',
-                              }}
-                            >
-                              Warum diese Frage: {question.reason}
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                          <input
+                            type='checkbox'
+                            checked={q.checked}
+                            onChange={() => toggleQuestionChecked(q.id)}
+                            disabled={q.irrelevant}
+                            style={{ marginTop: 3, accentColor: uiTokens.brand }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' }}>
+                              <span style={{
+                                fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '1px 7px',
+                                color: '#fff', background: accentPill, textTransform: 'uppercase', letterSpacing: '0.04em',
+                              }}>
+                                {q.priority}
+                              </span>
+                              {q.irrelevant && <span style={{ fontSize: 11, color: '#94a3b8' }}>irrelevant</span>}
                             </div>
-                          ) : null}
-
-                          <div>
+                            <div style={{
+                              fontSize: 15, lineHeight: 1.45, color: '#0f172a', fontWeight: isOpen ? 600 : 400,
+                              textDecoration: q.checked || q.irrelevant ? 'line-through' : 'none',
+                            }}>
+                              {q.text}
+                            </div>
+                            {q.reason && isOpen && (
+                              <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                                {q.reason}
+                              </div>
+                            )}
                             <button
                               type='button'
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                toggleQuestionIrrelevant(question.id);
-                              }}
-                              style={{
-                                border: '1px solid #cbd5e1',
-                                background: '#fff',
-                                color: '#334155',
-                                borderRadius: 8,
-                                padding: '4px 8px',
-                                fontSize: 11,
-                                cursor: 'pointer',
-                              }}
+                              onClick={() => toggleQuestionIrrelevant(q.id)}
+                              style={chipButton}
                             >
-                              {irrelevant ? 'nicht irrelevant' : 'als irrelevant markieren'}
+                              {q.irrelevant ? 'wiederherstellen' : 'irrelevant'}
                             </button>
                           </div>
                         </div>
-                      </label>
+                      </div>
                     );
                   })}
                 </div>
               ) : analysis.isComplete ? (
-                <div
-                  style={{
-                    border: '1px solid #bbf7d0',
-                    background: '#f0fdf4',
-                    color: '#166534',
-                    borderRadius: 12,
-                    padding: 12,
-                    fontWeight: 700,
-                    fontSize: 15,
-                  }}
-                >
-                  {analysis.completionText || 'Fertig - keine weiteren Fragen erforderlich.'}
+                <div style={completeBannerStyle}>
+                  ✓ {analysis.completionText || 'Alle Fragen gestellt – Anamnese vollständig.'}
                 </div>
               ) : (
-                <div style={{ color: '#64748b', fontSize: 14 }}>
-                  Noch keine Fragevorschläge vorhanden.
+                <div style={{ color: '#94a3b8', fontSize: 14, padding: '20px 0', textAlign: 'center' }}>
+                  {recording ? 'Warte auf erste Analyse …' : 'Starte die Aufnahme für Fragevorschläge.'}
                 </div>
               )}
             </div>
-          </article>
-        </section>
+          </div>
+
+          {/* RIGHT: Transcript + Structured anamnesis */}
+          <div style={{ display: 'grid', gap: 14 }}>
+            {/* Transcript */}
+            <div style={{ ...panelStyle, minHeight: 200 }}>
+              <h2 style={panelTitleStyle}>Live-Transkript</h2>
+              <div ref={transcriptScrollRef} style={scrollAreaStyle}>
+                {transcript ? (
+                  <pre style={transcriptPre}>{transcript}</pre>
+                ) : (
+                  <div style={{ color: '#94a3b8', fontSize: 14 }}>
+                    Noch kein Transkript vorhanden.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Structured anamnesis */}
+            <div style={panelStyle}>
+              <h2 style={panelTitleStyle}>Strukturierte Anamnese</h2>
+              <div style={scrollAreaStyle}>
+                <div style={{ fontSize: 14, lineHeight: 1.6, color: '#1e293b' }}>
+                  {narrativeAnamnesis}
+                </div>
+
+                <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+                  {finalNotes.vorerkrankungen !== 'nicht erhoben' && (
+                    <div>
+                      <div style={sectionLabel}>Vorerkrankungen</div>
+                      <div style={{ fontSize: 14, color: '#1e293b' }}>{finalNotes.vorerkrankungen}</div>
+                    </div>
+                  )}
+                  {finalNotes.medikation !== 'nicht erhoben' && (
+                    <div>
+                      <div style={sectionLabel}>Aktuelle Medikation</div>
+                      <div style={{ fontSize: 14, color: '#1e293b' }}>{finalNotes.medikation}</div>
+                    </div>
+                  )}
+                </div>
+
+                {analysis.missingPoints.length > 0 && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={sectionLabel}>Fehlende Angaben</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {analysis.missingPoints.map((item) => (
+                        <span key={item} style={missingChip}>{item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Debug panel (collapsed) */}
+        <details style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>
+          <summary style={{ cursor: 'pointer' }}>Debug</summary>
+          <div style={{ marginTop: 6, display: 'grid', gap: 4, padding: 10, background: '#f8fafc', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+            <div>Template: {analysis.templateKey} ({ANAMNESIS_TEMPLATE_META[analysis.templateKey].label})</div>
+            <div>Override: {templateOverride === 'auto' ? 'Auto' : templateOverride}</div>
+            <div>Letzte Analyse: {lastAnalyzedAt ? new Date(lastAnalyzedAt).toLocaleTimeString('de-DE') : '–'}</div>
+            <div>Segmente: {transcribeStats.received} empfangen, {transcribeStats.success} OK, {transcribeStats.empty} leer, {transcribeStats.failed} Fehler</div>
+            <div>Missing: {missingStateFields.join(', ') || 'keine'}</div>
+            <div>Unclear: {unclearStateFields.join(', ') || 'keine'}</div>
+          </div>
+        </details>
       </div>
     </main>
   );
 }
 
-const primaryButtonStyle: React.CSSProperties = {
-  background: '#0F6B74',
+/* ── Styles ── */
+
+const pageStyle: React.CSSProperties = {
+  minHeight: '100vh',
+  background: uiTokens.pageBackground,
+  color: uiTokens.textPrimary,
+  padding: '20px 24px',
+};
+
+const headerStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 16,
+  marginBottom: 14,
+  flexWrap: 'wrap',
+};
+
+const selectStyle: React.CSSProperties = {
+  padding: '7px 10px',
+  borderRadius: 8,
+  border: uiTokens.cardBorder,
+  background: '#fff',
+  fontSize: 13,
+  color: '#334155',
+};
+
+const btnPrimary: React.CSSProperties = {
+  background: uiTokens.brand,
   color: '#fff',
   border: 'none',
   borderRadius: 10,
-  padding: '10px 14px',
+  padding: '9px 16px',
   cursor: 'pointer',
   fontWeight: 600,
+  fontSize: 14,
+};
+
+const btnDanger: React.CSSProperties = {
+  ...btnPrimary,
+  background: '#dc2626',
+};
+
+const btnDark: React.CSSProperties = {
+  ...btnPrimary,
+  background: '#1e293b',
+};
+
+const recordingDotStyle: React.CSSProperties = {
+  width: 12,
+  height: 12,
+  borderRadius: '50%',
+  background: '#dc2626',
+  flexShrink: 0,
+  animation: 'pulse-dot 1.2s ease-in-out infinite',
+};
+
+const progressContainerStyle: React.CSSProperties = {
+  marginBottom: 10,
+};
+
+const progressBarBg: React.CSSProperties = {
+  height: 6,
+  borderRadius: 3,
+  background: '#e5e7eb',
+  overflow: 'hidden',
+};
+
+const progressBarFill: React.CSSProperties = {
+  height: '100%',
+  borderRadius: 3,
+  transition: 'width 0.6s ease, background 0.4s ease',
+};
+
+const fieldChipsContainerStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+  marginBottom: 14,
+};
+
+const chipBase: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  fontSize: 12,
+  fontWeight: 600,
+  borderRadius: 999,
+  padding: '3px 10px',
+  lineHeight: 1.4,
+};
+
+const chipKnown: React.CSSProperties = {
+  ...chipBase,
+  background: '#dcfce7',
+  color: '#166534',
+  border: '1px solid #bbf7d0',
+};
+
+const chipUnclear: React.CSSProperties = {
+  ...chipBase,
+  background: '#fef9c3',
+  color: '#854d0e',
+  border: '1px solid #fde68a',
+};
+
+const chipMissing: React.CSSProperties = {
+  ...chipBase,
+  background: '#fff',
+  color: '#94a3b8',
+  border: '1px solid #e5e7eb',
+};
+
+const statusBarStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 12,
+  fontSize: 12,
+  color: '#64748b',
+  marginBottom: 10,
+};
+
+const gridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 14,
+  alignItems: 'start',
 };
 
 const panelStyle: React.CSSProperties = {
   background: '#fff',
-  border: '1px solid #dbe3e8',
-  borderRadius: 14,
-  padding: 14,
-  minHeight: 520,
+  border: uiTokens.cardBorder,
+  borderRadius: uiTokens.radiusCard,
+  padding: 16,
 };
 
 const panelTitleStyle: React.CSSProperties = {
-  marginTop: 0,
-  marginBottom: 10,
-  fontSize: 18,
-  color: '#0F6B74',
+  margin: 0,
+  fontSize: 16,
+  fontWeight: 700,
+  color: uiTokens.brand,
 };
 
-const scrollAreaStyle: React.CSSProperties = {
-  maxHeight: '68vh',
+const badgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginLeft: 8,
+  fontSize: 11,
+  fontWeight: 700,
+  background: uiTokens.brand,
+  color: '#fff',
+  borderRadius: 999,
+  minWidth: 20,
+  height: 20,
+  padding: '0 6px',
+};
+
+const questionAreaStyle: React.CSSProperties = {
+  maxHeight: '72vh',
   overflowY: 'auto',
   paddingRight: 4,
 };
+
+const scrollAreaStyle: React.CSSProperties = {
+  maxHeight: '36vh',
+  overflowY: 'auto',
+  paddingRight: 4,
+};
+
+const transcriptPre: React.CSSProperties = {
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  lineHeight: 1.5,
+  fontSize: 13,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  color: '#334155',
+};
+
+const chipButton: React.CSSProperties = {
+  marginTop: 6,
+  border: '1px solid #e5e7eb',
+  background: 'transparent',
+  color: '#94a3b8',
+  borderRadius: 6,
+  padding: '2px 8px',
+  fontSize: 11,
+  cursor: 'pointer',
+};
+
+const completeBannerStyle: React.CSSProperties = {
+  background: '#f0fdf4',
+  border: '1px solid #bbf7d0',
+  color: '#166534',
+  borderRadius: 12,
+  padding: '16px 14px',
+  fontWeight: 700,
+  fontSize: 15,
+  textAlign: 'center',
+};
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: '#64748b',
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  marginBottom: 4,
+};
+
+const missingChip: React.CSSProperties = {
+  fontSize: 12,
+  background: '#fef2f2',
+  color: '#dc2626',
+  border: '1px solid #fecaca',
+  borderRadius: 999,
+  padding: '2px 10px',
+};
+
+// Inject pulse animation
+if (typeof document !== 'undefined') {
+  const styleId = 'live-anamnesis-pulse';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `@keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }`;
+    document.head.appendChild(style);
+  }
+}

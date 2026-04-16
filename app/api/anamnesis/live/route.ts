@@ -11,24 +11,32 @@ import {
 
 const PRIMARY_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
 const FALLBACK_MODEL = process.env.OPENAI_CHAT_FALLBACK_MODEL || "gpt-4.1";
-const MAX_NEXT_QUESTIONS = 3;
+const MAX_NEXT_QUESTIONS = 6;
 
-const SYSTEM_PROMPT = `Du bist ein Anamnese-Assistent fuer Tieraerzte und tiermedizinische Fachangestellte.
-Du arbeitest strikt anhand eines vorgegebenen Anamnese-Templates.
+const SYSTEM_PROMPT = `Du bist ein erfahrener Anamnese-Assistent fuer tiermedizinische Fachangestellte (TFA) in der Kleintierpraxis.
+Du analysierst ein Live-Transkript und extrahierst strukturierte Informationen anhand eines Templates.
 
-Fuer jeden Punkt musst du entscheiden:
-- known (klar beantwortet)
-- unclear (erwaehnt, aber unvollstaendig)
-- missing (nicht erwaehnt)
+Fuer jeden Template-Punkt:
+- known: Klar benannt im Transkript. WICHTIG: Extrahiere den KONKRETEN Wert aus dem Transkript als "value".
+  Beispiele: "seit 3 Tagen", "2x taeglich", "wässrig, gelblich", "linke Hintergliedmaße", "Metacam 0.5 mg 1x taeglich"
+  NICHT: "erwaehnt", "bekannt", "vorhanden" – diese Woerter sind verboten als value bei "known".
+- unclear: Im Transkript angedeutet, aber Detailtiefe reicht nicht. Beschreibe was unklar ist.
+- missing: Nicht im Transkript erwaehnt.
 
-Nur fuer unclear oder missing:
--> generiere gezielte, kurze Rueckfragen.
-
-Regeln:
-- Keine Diagnosen
-- Maximal 3 Fragen
-- Priorisiere medizinisch wichtige Punkte zuerst
-- Keine doppelten Fragen
+Fragen-Regeln:
+- Generiere 4-6 gezielte Rueckfragen. Decke sowohl Template-Felder als auch klinisch relevante Nachfragen ab.
+- Priorisiere: required-Felder zuerst, dann high, dann medium.
+- WICHTIG: Gehe auf den KONTEXT ein! Wenn z.B. Erbrechen erwaehnt wird, frage nach:
+  - Wie sieht das Erbrochene aus (Farbe, Konsistenz, Blut, Schaum)?
+  - Koennte das Tier etwas Ungewoehnliches gefressen haben (Fremdkoerper, Gift, Muell)?
+  - Wurde anders gefuettert als sonst?
+  - Wann war der letzte Kotabsatz und wie sah er aus?
+  - Gibt es weitere Symptome (Durchfall, Fieber, Mattigkeit)?
+- Wenn Lahmheit erwaehnt wird, frage nach Trauma, Schwellung, Waerme, Belastung.
+- Wenn Juckreiz erwaehnt wird, frage nach Parasitenprophylaxe, Futteraenderung, andere Tiere betroffen.
+- Formuliere die Fragen so, dass eine TFA sie direkt dem Tierbesitzer stellen kann – freundlich, verstaendlich, nicht zu fachsprachlich.
+- Gib pro Frage einen "key" (Template-Feldname oder "context_followup") und eine "reason" an.
+- Keine Diagnosen, keine Therapievorschlaege.
 
 Rueckgabe ausschliesslich als valides JSON.`;
 
@@ -101,13 +109,14 @@ function filterUniqueQuestions(input: AnamnesisQuestion[], options: QuestionFilt
     if (!questionText) continue;
 
     const questionKey = typeof raw.key === "string" ? raw.key.trim() : "";
-    const stateStatus = questionKey ? options.state?.[questionKey]?.status : undefined;
-    if (questionKey && blockedKeySet.has(questionKey)) continue;
+    const isContextFollowup = questionKey === "context_followup";
+    const stateStatus = questionKey && !isContextFollowup ? options.state?.[questionKey]?.status : undefined;
+    if (questionKey && !isContextFollowup && blockedKeySet.has(questionKey)) continue;
     if (stateStatus === "known") continue;
 
     const isBlocked = options.blockedTexts.some((existing) => areQuestionsSimilar(existing, questionText));
     const isDuplicate = result.some((existing) => areQuestionsSimilar(existing.text, questionText));
-    const isDuplicateKey = questionKey
+    const isDuplicateKey = questionKey && !isContextFollowup
       ? result.some((existing) => (existing.key || "").trim() === questionKey)
       : false;
     if (isBlocked || isDuplicate || isDuplicateKey) continue;
@@ -125,7 +134,7 @@ function filterUniqueQuestions(input: AnamnesisQuestion[], options: QuestionFilt
       reason: typeof raw.reason === "string" ? raw.reason.trim() : undefined,
     });
 
-    if (questionKey) blockedKeySet.add(questionKey);
+    if (questionKey && !isContextFollowup) blockedKeySet.add(questionKey);
 
     if (result.length >= MAX_NEXT_QUESTIONS) break;
   }
@@ -156,6 +165,28 @@ function detectByKeywords(text: string, keywords: string[]) {
   return containsAny(text, keywords);
 }
 
+function extractContext(text: string, keywords: string[], windowChars = 80): string {
+  const lower = normalizeForSearch(text);
+  for (const kw of keywords) {
+    const kwNorm = normalizeForSearch(kw);
+    const idx = lower.indexOf(kwNorm);
+    if (idx < 0) continue;
+    const start = Math.max(0, text.lastIndexOf(' ', Math.max(0, idx - windowChars)) + 1);
+    const end = Math.min(text.length, text.indexOf(' ', idx + kwNorm.length + windowChars));
+    const snippet = text.slice(start, end > start ? end : undefined).trim();
+    if (snippet.length > 120) return snippet.slice(0, 120).trim() + '…';
+    return snippet;
+  }
+  return '';
+}
+
+function detectWithContext(text: string, keywords: string[]): { found: boolean; value: string } {
+  const found = containsAny(text, keywords);
+  if (!found) return { found: false, value: '' };
+  const ctx = extractContext(text, keywords);
+  return { found: true, value: ctx || 'erhoben' };
+}
+
 function buildTemplateState(templateKey: TemplateKey, transcript: string) {
   const text = transcript.toLowerCase();
   const state: AnamnesisState = {};
@@ -172,7 +203,7 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
       if (value) {
         state[field.key] = { status: "known", value };
       } else if (detectByKeywords(text, ["erbrechen", "uebergeben", "übergeben", "vomitus", "kotzen", "spucken"])) {
-        state[field.key] = { status: "unclear", value: "Erbrechen erwaehnt" };
+        state[field.key] = { status: "unclear", value: "Erbrechen erwähnt, Häufigkeit unklar" };
       } else {
         state[field.key] = { status: "missing" };
       }
@@ -180,10 +211,12 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
     }
 
     if (field.key === "inhalt_erbrechen") {
-      if (detectByKeywords(text, ["blut", "schaum", "futter", "gelb", "gruen", "grün", "galle", "schleim", "brocken", "fluessig", "flüssig"])) {
-        state[field.key] = { status: "known", value: "Inhalt beschrieben" };
+      const contentKw = ["blut", "schaum", "futter", "gelb", "gruen", "grün", "galle", "schleim", "brocken", "fluessig", "flüssig"];
+      const { found, value } = detectWithContext(transcript, contentKw);
+      if (found) {
+        state[field.key] = { status: "known", value };
       } else if (detectByKeywords(text, ["erbrechen", "uebergeben", "übergeben", "vomitus", "kotzen", "spucken"])) {
-        state[field.key] = { status: "unclear", value: "Inhalt unklar" };
+        state[field.key] = { status: "unclear", value: "Erbrechen erwähnt, Inhalt nicht beschrieben" };
       } else {
         state[field.key] = { status: "missing" };
       }
@@ -191,33 +224,33 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
     }
 
     if (field.key === "durchfall") {
-      if (detectByKeywords(text, ["durchfall", "diarrhoe", "diarrhö", "weicher kot", "wässrig", "waessrig", "breiig", "duenner kot", "dünner kot"])) {
-        state[field.key] = { status: "known", value: "erwaehnt" };
-      } else {
-        state[field.key] = { status: "missing" };
-      }
+      const dKw = ["durchfall", "diarrhoe", "diarrhö", "weicher kot", "wässrig", "waessrig", "breiig", "duenner kot", "dünner kot"];
+      const { found, value } = detectWithContext(transcript, dKw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "appetit") {
-      state[field.key] = detectByKeywords(text, ["appetit", "frisst", "frisst nicht", "isst", "futteraufnahme", "inappet", "maekelig", "mäkelig", "fresslust"])
-        ? { status: "known", value: "erwaehnt" }
-        : { status: "missing" };
+      const kw = ["appetit", "frisst", "frisst nicht", "isst", "futteraufnahme", "inappet", "maekelig", "mäkelig", "fresslust"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "wasseraufnahme") {
-      state[field.key] = detectByKeywords(text, ["wasseraufnahme", "trinkt", "durst", "polydipsie", "viel trinken", "wenig trinken", "trinkmenge"])
-        ? { status: "known", value: "erwaehnt" }
-        : { status: "missing" };
+      const kw = ["wasseraufnahme", "trinkt", "durst", "polydipsie", "viel trinken", "wenig trinken", "trinkmenge"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "gliedmasse") {
-      if (detectByKeywords(text, ["vorne", "hinten", "links", "rechts", "pfote", "gliedmass", "gliedma", "vorderbein", "hinterbein", "vordergliedmasse", "hintergliedmasse"])) {
-        state[field.key] = { status: "known", value: "lokalisation erwaehnt" };
+      const locKw = ["vorne", "hinten", "links", "rechts", "pfote", "gliedmass", "gliedma", "vorderbein", "hinterbein", "vordergliedmasse", "hintergliedmasse"];
+      const { found, value } = detectWithContext(transcript, locKw);
+      if (found) {
+        state[field.key] = { status: "known", value };
       } else if (detectByKeywords(text, ["lahm", "humpeln", "schont", "entlastet"])) {
-        state[field.key] = { status: "unclear", value: "Lokalisation unklar" };
+        state[field.key] = { status: "unclear", value: "Lahmheit erwähnt, Lokalisation unklar" };
       } else {
         state[field.key] = { status: "missing" };
       }
@@ -225,45 +258,51 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
     }
 
     if (field.key === "trauma") {
-      state[field.key] = detectByKeywords(text, ["trauma", "unfall", "sprung", "gestuerzt", "gestürzt", "angestoßen", "angestossen", "verletzt", "sturz", "stolpern"])
-        ? { status: "known", value: "erwaehnt" }
-        : { status: "missing" };
+      const kw = ["trauma", "unfall", "sprung", "gestuerzt", "gestürzt", "angestoßen", "angestossen", "verletzt", "sturz", "stolpern"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "schmerz") {
-      state[field.key] = detectByKeywords(text, ["schmerz", "jault", "empfindlich", "schmerzhaft", "schont", "wehrt sich", "beruehrungsempfindlich", "berührungsempfindlich"])
-        ? { status: "known", value: "erwaehnt" }
-        : { status: "missing" };
+      const kw = ["schmerz", "jault", "empfindlich", "schmerzhaft", "schont", "wehrt sich", "beruehrungsempfindlich", "berührungsempfindlich"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "verlauf") {
-      state[field.key] = detectByKeywords(text, ["besser", "schlechter", "gleich", "zunehmend", "abnehmend", "progredient", "schubweise", "intermittierend", "konstant"])
-        ? { status: "known", value: "erwaehnt" }
-        : { status: "missing" };
+      const kw = ["besser", "schlechter", "gleich", "zunehmend", "abnehmend", "progredient", "schubweise", "intermittierend", "konstant"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "verhalten") {
-      state[field.key] = detectByKeywords(text, ["matt", "schlapp", "aktiv", "verhalten", "ruhig", "unruhig", "apathisch", "lethargisch", "nervoes", "nervös"])
-        ? { status: "known", value: "erwaehnt" }
-        : { status: "missing" };
+      const kw = ["matt", "schlapp", "aktiv", "verhalten", "ruhig", "unruhig", "apathisch", "lethargisch", "nervoes", "nervös"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "trinken") {
-      state[field.key] = detectByKeywords(text, ["trinkt", "durst", "wasseraufnahme", "polydipsie", "trinkmenge", "viel trinken", "wenig trinken"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["trinkt", "durst", "wasseraufnahme", "polydipsie", "trinkmenge", "viel trinken", "wenig trinken"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "medikation") {
-      state[field.key] = detectByKeywords(text, ["medikation", "medikament", "tablette", "gabe", "spritze", "tropfen", "praeparat", "präparat", "antibiot", "schmerzmittel"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["medikation", "medikament", "tablette", "gabe", "spritze", "tropfen", "praeparat", "präparat", "antibiot", "schmerzmittel"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "vorerkrankungen") {
-      state[field.key] = detectByKeywords(text, ["vorerkrank", "chronisch", "frueher", "früher", "operation", "op", "diagnose", "bekannt seit", "langjaehrig", "langjährig"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["vorerkrank", "chronisch", "frueher", "früher", "operation", "op", "diagnose", "bekannt seit", "langjaehrig", "langjährig"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
@@ -272,7 +311,7 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
       if (freq) {
         state[field.key] = { status: "known", value: freq };
       } else if (detectByKeywords(text, ["husten", "hustet", "wuergen", "würgen", "raeuspern", "räuspern"])) {
-        state[field.key] = { status: "unclear", value: "Husten erwaehnt" };
+        state[field.key] = { status: "unclear", value: "Husten erwähnt, Häufigkeit unklar" };
       } else {
         state[field.key] = { status: "missing" };
       }
@@ -280,52 +319,72 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
     }
 
     if (field.key === "atemnot") {
-      state[field.key] = detectByKeywords(text, ["atemnot", "dyspnoe", "schnelle atmung", "kurzatmig", "kurzatmig", "maulatmung", "bauchatmung", "atemarbeit", "hecheln in ruhe"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["atemnot", "dyspnoe", "schnelle atmung", "kurzatmig", "maulatmung", "bauchatmung", "atemarbeit", "hecheln in ruhe"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "nasenausfluss") {
-      state[field.key] = detectByKeywords(text, ["nasenausfluss", "nase laeuft", "sekret", "nasensekret", "schnupfen", "einseitig", "beidseitig", "klar", "eitrig"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["nasenausfluss", "nase laeuft", "sekret", "nasensekret", "schnupfen", "einseitig", "beidseitig", "eitrig"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "urinabsatz") {
-      state[field.key] = detectByKeywords(text, ["urin", "harn", "pinkeln", "urinabsatz", "harnabsatz", "pieseln", "wasserlassen", "larn", "löst sich"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["urin", "harn", "pinkeln", "urinabsatz", "harnabsatz", "pieseln", "wasserlassen"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "pollakisurie") {
-      state[field.key] = detectByKeywords(text, ["pollakisurie", "haeufig urin", "häufig urin", "staendig raus", "ständig raus", "kleine mengen", "oft pinkeln", "dauernd hocken"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["pollakisurie", "haeufig urin", "häufig urin", "staendig raus", "ständig raus", "kleine mengen", "oft pinkeln", "dauernd hocken"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "haematurie") {
-      state[field.key] = detectByKeywords(text, ["haematurie", "hämaturie", "blut im urin", "roter urin", "rosa urin", "blutiger urin"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["haematurie", "hämaturie", "blut im urin", "roter urin", "rosa urin", "blutiger urin"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "dysurie") {
-      state[field.key] = detectByKeywords(text, ["dysurie", "strangurie", "presst", "schmerz beim urin", "presst beim pinkeln", "jammert beim urinieren", "pressen", "tröpfeln"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["dysurie", "strangurie", "presst", "schmerz beim urin", "presst beim pinkeln", "jammert beim urinieren", "pressen", "tröpfeln"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "juckreiz") {
-      state[field.key] = detectByKeywords(text, ["juckreiz", "kratzt", "leckt", "beisst sich", "beißt sich", "scheuert", "reibt sich", "knabbert", "pfotenlecken"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["juckreiz", "kratzt", "leckt", "beisst sich", "beißt sich", "scheuert", "reibt sich", "knabbert", "pfotenlecken"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "lokalisation" || field.key === "lokalisation_mass") {
-      state[field.key] = detectByKeywords(text, ["links", "rechts", "hals", "bauch", "brust", "pfote", "kopf", "ruecken", "rücken", "flanke", "axilla", "leiste", "thorax", "abdomen"]) ? { status: "known", value: "lokalisation erwaehnt" } : { status: "missing" };
+      const kw = ["links", "rechts", "hals", "bauch", "brust", "pfote", "kopf", "ruecken", "rücken", "flanke", "axilla", "leiste", "thorax", "abdomen"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "anfallsart") {
-      state[field.key] = detectByKeywords(text, ["anfall", "krampf", "episod", "zuckung", "kollaps", "weggetreten", "tonisch", "klonisch", "muskelzucken"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["anfall", "krampf", "episod", "zuckung", "kollaps", "weggetreten", "tonisch", "klonisch", "muskelzucken"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "bewusstsein") {
-      state[field.key] = detectByKeywords(text, ["bewusst", "apathisch", "ansprechbar", "desorientiert", "nicht ansprechbar", "somnolent", "stupor", "bewusstlos"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["bewusst", "apathisch", "ansprechbar", "desorientiert", "nicht ansprechbar", "somnolent", "stupor", "bewusstlos"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
@@ -336,22 +395,114 @@ function buildTemplateState(templateKey: TemplateKey, transcript: string) {
     }
 
     if (field.key === "ataxie") {
-      state[field.key] = detectByKeywords(text, ["ataxie", "taumelt", "paresen", "unsicherer gang", "schwankt", "koordinationsstoerung", "koordinationsstörung", "wegknicken"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["ataxie", "taumelt", "paresen", "unsicherer gang", "schwankt", "koordinationsstoerung", "koordinationsstörung", "wegknicken"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "groesse_verlauf") {
-      state[field.key] = detectByKeywords(text, ["groesser", "größer", "kleiner", "wachstum", "gleich gross", "gleich groß", "zunahme", "abnahme", "rasch gewachsen", "langsam gewachsen"]) ? { status: "known", value: "veraenderung erwaehnt" } : { status: "missing" };
+      const kw = ["groesser", "größer", "kleiner", "wachstum", "gleich gross", "gleich groß", "zunahme", "abnahme", "rasch gewachsen", "langsam gewachsen"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "gewicht") {
-      state[field.key] = detectByKeywords(text, ["gewicht", "abgenommen", "zugenommen", "gewichtsverlust", "gewichtszunahme", "mager", "abgemagert"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["gewicht", "abgenommen", "zugenommen", "gewichtsverlust", "gewichtszunahme", "mager", "abgemagert"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
     if (field.key === "allgemeinbefinden") {
-      state[field.key] = detectByKeywords(text, ["allgemeinbefinden", "matt", "schlapp", "fit", "lethargisch", "munter", "abgeschlagen", "normalzustand"]) ? { status: "known", value: "erwaehnt" } : { status: "missing" };
+      const kw = ["allgemeinbefinden", "matt", "schlapp", "fit", "lethargisch", "munter", "abgeschlagen", "normalzustand"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "kotabsatz") {
+      const kw = ["kot", "stuhlgang", "kotabsatz", "konsistenz", "fest", "breiig", "wässrig", "waessrig", "schwarz", "blutig"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "futterwechsel") {
+      const kw = ["futterwechsel", "neues futter", "futter umgestellt", "futterumstellung", "anderes futter", "leckerli", "tisch", "muell", "müll", "fremdkoerper", "fremdkörper"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "belastung") {
+      const kw = ["belastung", "spaziergang", "laufen", "treppen", "bewegung", "ruhe", "morgens schlechter", "abends schlechter", "nach bewegung"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "neurologie_flag") {
+      const kw = ["neurologisch", "zucken", "zittern", "krampf", "paresen", "ataxie", "bewusstlos", "ohnmacht", "anfall", "taumeln"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "leistung") {
+      const kw = ["leistung", "belastbar", "schnell muede", "schnell müde", "kurzatmig", "schlapp bei bewegung", "kondition", "schwaecher", "schwächer"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "fieber") {
+      const kw = ["fieber", "temperatur", "warm", "39", "40", "41", "erhoeht", "erhöht", "gemessen", "temperatur gemessen"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "hautlaesion") {
+      const kw = ["roetung", "rötung", "krusten", "schuppen", "naessen", "nässen", "papel", "pustel", "alopezie", "haarausfall", "wund", "erosion", "ulcus"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "otitis") {
+      const kw = ["ohr", "otitis", "ohrenschmalz", "kopfschuetteln", "kopfschütteln", "ohr kratzen", "ohren", "geruch ohr"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "parasitenprophylaxe") {
+      const kw = ["parasit", "floh", "zecke", "wurm", "entwurm", "spot-on", "prophylaxe", "frontline", "bravecto", "nexgard", "simparica"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "futterumstellung") {
+      const kw = ["futterwechsel", "futterumstellung", "neues futter", "diaet", "diät", "allergie", "hypoallergen", "eliminationsdiaet", "eliminationsdiät", "umzug", "umgebung"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "trigger") {
+      const kw = ["trigger", "ausloser", "auslöser", "stress", "futteraufnahme", "aufregung", "geraeusch", "geräusch", "gewitter", "silvestertag"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
+      continue;
+    }
+
+    if (field.key === "postiktal") {
+      const kw = ["postiktal", "danach", "nach dem anfall", "normal danach", "desorientiert danach", "muede danach", "müde danach", "frisst danach", "trinkt danach"];
+      const { found, value } = detectWithContext(transcript, kw);
+      state[field.key] = found ? { status: "known", value } : { status: "missing" };
       continue;
     }
 
@@ -413,6 +564,9 @@ function buildQuestionForField(templateKey: TemplateKey, fieldKey: string, field
     allgemeinbefinden: "Wie ist das Allgemeinbefinden aktuell?",
     trauma: "Gab es ein Trauma, einen Sprung oder einen Unfall?",
     schmerz: "Sind Schmerzen aufgefallen und wann treten sie auf?",
+    futterwechsel: "Gab es kürzlich einen Futterwechsel oder hat das Tier etwas Ungewöhnliches aufgenommen?",
+    parasitenprophylaxe: "Ist die Parasitenprophylaxe aktuell (Flöhe, Zecken, Würmer)?",
+    futterumstellung: "Gab es kürzlich eine Futterumstellung oder Veränderung in der Umgebung?",
   };
 
   return {
@@ -431,6 +585,82 @@ function buildQuestionReason(fieldLabel: string, status: "missing" | "unclear", 
     return `${fieldLabel}: Pflichtfeld im gewählten Template fehlt.`;
   }
   return `${fieldLabel}: im Transkript bisher nicht erwähnt.`;
+}
+
+type ContextRule = {
+  triggerKeywords: string[];
+  questions: Array<{ text: string; priority: QuestionPriority; reason: string; key: string }>;
+};
+
+const CONTEXT_BONUS_QUESTIONS: ContextRule[] = [
+  {
+    triggerKeywords: ["erbrechen", "uebergeben", "übergeben", "vomitus", "kotzen", "spucken", "erbricht"],
+    questions: [
+      { text: "Wie sah das Erbrochene aus – eher Futter, Schaum, Schleim oder war Blut dabei?", priority: "high", reason: "Erbrechen erwähnt: Aussehen des Erbrochenen wichtig für Einordnung.", key: "inhalt_erbrechen" },
+      { text: "Könnte Ihr Tier etwas Ungewöhnliches gefressen haben – z.B. Spielzeug, Knochen, Müll oder etwas vom Boden draußen?", priority: "high", reason: "Fremdkörperaufnahme ist ein häufiger Grund für Erbrechen.", key: "context_followup" },
+      { text: "Haben Sie in letzter Zeit das Futter gewechselt oder etwas anderes als sonst gefüttert?", priority: "medium", reason: "Futterwechsel kann Erbrechen auslösen.", key: "futterwechsel" },
+      { text: "Wann war der letzte Kotabsatz und wie sah er aus?", priority: "medium", reason: "Letzter Kotabsatz gibt Hinweis auf GI-Passage.", key: "kotabsatz" },
+      { text: "Sind Ihnen noch weitere Symptome aufgefallen – z.B. Durchfall, Fieber oder Mattigkeit?", priority: "medium", reason: "Begleitsymptome wichtig für Gesamtbild.", key: "context_followup" },
+    ],
+  },
+  {
+    triggerKeywords: ["durchfall", "diarrhoe", "diarrhö", "weicher kot", "breiig"],
+    questions: [
+      { text: "Wie sieht der Kot aus – wässrig, breiig, schleimig oder ist Blut dabei?", priority: "high", reason: "Kotbeschaffenheit wichtig für Einordnung.", key: "context_followup" },
+      { text: "Könnte das Tier etwas Ungewöhnliches gefressen haben?", priority: "high", reason: "Fremdkörper/Giftstoffe können Durchfall verursachen.", key: "context_followup" },
+      { text: "Haben Sie kürzlich das Futter gewechselt?", priority: "medium", reason: "Futterwechsel häufige Durchfallursache.", key: "futterwechsel" },
+      { text: "Frisst und trinkt Ihr Tier noch normal?", priority: "medium", reason: "Appetit und Wasseraufnahme wichtig bei Durchfall.", key: "appetit" },
+    ],
+  },
+  {
+    triggerKeywords: ["lahm", "humpeln", "humpelt", "schont", "entlastet", "lahmheit"],
+    questions: [
+      { text: "Gab es ein Ereignis – z.B. einen Sprung, Sturz oder Zusammenstoß?", priority: "high", reason: "Trauma als Ursache abklären.", key: "trauma" },
+      { text: "Ist eine Schwellung, Wärme oder Verdickung an der betroffenen Stelle zu sehen?", priority: "medium", reason: "Lokale Entzündungszeichen wichtig.", key: "context_followup" },
+      { text: "Ist die Lahmheit morgens schlimmer oder nach Belastung?", priority: "medium", reason: "Belastungsabhängigkeit hilft bei Einordnung.", key: "belastung" },
+    ],
+  },
+  {
+    triggerKeywords: ["juckreiz", "kratzt", "leckt sich", "beisst sich", "beißt sich", "scheuert"],
+    questions: [
+      { text: "Ist die Parasitenprophylaxe aktuell – also Floh- und Zeckenschutz?", priority: "high", reason: "Parasitenbefall häufigste Juckreiz-Ursache.", key: "parasitenprophylaxe" },
+      { text: "Gab es kürzlich eine Futterumstellung oder neue Leckerlis?", priority: "medium", reason: "Futtermittelallergie abklären.", key: "futterumstellung" },
+      { text: "Sind andere Tiere im Haushalt auch betroffen?", priority: "medium", reason: "Ansteckende Ursachen eingrenzen.", key: "context_followup" },
+    ],
+  },
+  {
+    triggerKeywords: ["husten", "hustet", "atemnot", "dyspnoe", "hecheln"],
+    questions: [
+      { text: "Tritt der Husten eher bei Aufregung, nachts oder nach Belastung auf?", priority: "high", reason: "Zeitliches Muster hilft bei Einordnung.", key: "context_followup" },
+      { text: "Klingt der Husten eher trocken oder feucht/produktiv?", priority: "medium", reason: "Art des Hustens gibt diagnostische Hinweise.", key: "context_followup" },
+      { text: "Ist die Belastbarkeit eingeschränkt – wird das Tier schneller müde?", priority: "medium", reason: "Leistungseinschränkung wichtig bei respiratorischen Problemen.", key: "leistung" },
+    ],
+  },
+  {
+    triggerKeywords: ["anfall", "krampf", "zuckung", "epilep", "kollaps"],
+    questions: [
+      { text: "Wie lange dauern die Episoden ungefähr?", priority: "high", reason: "Anfallsdauer ist klinisch relevant.", key: "context_followup" },
+      { text: "Wie verhält sich das Tier danach – sofort wieder normal oder verwirrt/müde?", priority: "high", reason: "Postiktale Phase gibt Hinweis auf Schwere.", key: "postiktal" },
+      { text: "Gibt es einen erkennbaren Auslöser – Stress, Aufregung, bestimmte Geräusche?", priority: "medium", reason: "Trigger identifizieren hilft bei Einordnung.", key: "trigger" },
+    ],
+  },
+];
+
+function buildContextBonusQuestions(transcript: string, templateKey: TemplateKey): AnamnesisQuestion[] {
+  const bonus: AnamnesisQuestion[] = [];
+  for (const rule of CONTEXT_BONUS_QUESTIONS) {
+    if (!containsAny(transcript, rule.triggerKeywords)) continue;
+    for (const q of rule.questions) {
+      bonus.push({
+        text: q.text,
+        priority: q.priority,
+        category: templateKey,
+        key: q.key,
+        reason: q.reason,
+      });
+    }
+  }
+  return bonus;
 }
 
 function buildHeuristicAnalysis(
@@ -462,7 +692,11 @@ function buildHeuristicAnalysis(
       };
     });
 
-  const nextQuestions = filterUniqueQuestions(questionPool, {
+  // Add context-aware bonus questions based on detected symptoms
+  const bonusQuestions = buildContextBonusQuestions(transcript, templateKey);
+  const combinedPool = [...questionPool, ...bonusQuestions];
+
+  const nextQuestions = filterUniqueQuestions(combinedPool, {
     blockedTexts: blockedQuestions,
     blockedKeys: blockedQuestionKeys,
     state,
@@ -590,24 +824,34 @@ async function callModel(
     "Bereits offene Feld-Keys fuer Fragen (nicht doppeln):",
     openKeyBlock,
     "",
-    "Wichtig:",
-    "- Keine Diagnose.",
-    "- Keine Therapieempfehlungen.",
-    "- Fuer jeden Punkt im Template: known, unclear oder missing setzen.",
-    "- Nur fuer unclear oder missing Rueckfragen generieren.",
-    "- Maximal 3 Rueckfragen.",
+    "WICHTIG - Regeln fuer das value-Feld bei status=known:",
+    "- Extrahiere den KONKRETEN Wert woertlich oder zusammengefasst aus dem Transkript.",
+    '- Richtig: "seit 3 Tagen", "2x taeglich morgens und abends", "wässrig, gelblich", "linke Hintergliedmaße"',
+    '- FALSCH: "erwaehnt", "bekannt", "vorhanden", "genannt" – diese Woerter NIEMALS als value verwenden.',
+    "- Wenn ein Punkt klar benannt wurde, fasse den relevanten Inhalt zusammen.",
+    "",
+    "Fragen-Regeln:",
+    "- Generiere 4-6 Rueckfragen insgesamt.",
+    "- Decke SOWOHL fehlende Template-Felder ALS AUCH kontextbezogene Nachfragen ab.",
+    "- Kontextbezogen heisst: Wenn z.B. Erbrechen erwaehnt wird, frage gezielt nach Aussehen des Erbrochenen, Fremdkoerperaufnahme, Futterwechsel, letzer Kotabsatz, weitere Symptome.",
+    "- Fuer kontextbezogene Fragen die nicht zu einem Template-Feld passen: key='context_followup' verwenden.",
+    "- Formuliere alle Fragen so, dass eine TFA sie freundlich und verstaendlich dem Tierbesitzer stellen kann.",
+    "- Keine Diagnose, keine Therapieempfehlungen.",
     "- Prioritaet high/medium/low angeben.",
     "- category mit Template-Key fuellen.",
-    "- key mit Feld-Key fuellen (Pflicht).",
-    "- reason als kurze Begruendung pro Rueckfrage mitgeben (z.B. fehlend/unklar + Feldname).",
+    "- key mit Feld-Key fuellen (oder 'context_followup' fuer Kontextfragen).",
+    "- reason als kurze Begruendung pro Rueckfrage.",
     "- Keine Wiederholungen bereits gestellter/offener Fragen.",
-    "- Wenn ausreichend: nextQuestions leer lassen, isComplete=true und completionText='Fertig - keine weiteren Fragen erforderlich.' setzen.",
+    "- Wenn ausreichend: nextQuestions leer lassen, isComplete=true.",
     "- Rueckgabe ausschliesslich als valides JSON mit genau diesen Schluesseln:",
-    '{"state":{"key":{"status":"known|unclear|missing","value":"optional"}},"nextQuestions":[{"text":"...","priority":"high|medium|low","category":"...","key":"...","reason":"..."}],"isComplete":false,"completionText":""}',
+    '{"state":{"key":{"status":"known|unclear|missing","value":"konkreter Wert"}},"nextQuestions":[{"text":"...","priority":"high|medium|low","category":"...","key":"...","reason":"..."}],"isComplete":false,"completionText":""}',
     "",
     "TRANSKRIPT:",
     transcript,
   ].join("\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -615,17 +859,18 @@ async function callModel(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+    signal: controller.signal,
     body: JSON.stringify({
       model,
       store: false,
       temperature: 0,
-      max_output_tokens: 1200,
+      max_output_tokens: 2400,
       input: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: inputPrompt },
       ],
     }),
-  });
+  }).finally(() => clearTimeout(timeout));
 
   const payload = (await res.json()) as {
     output_text?: string;

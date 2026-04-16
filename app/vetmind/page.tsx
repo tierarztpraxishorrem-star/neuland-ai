@@ -123,6 +123,8 @@ export default function VetMind() {
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [dbReady, setDbReady] = useState(false);
+  const savingRef = useRef(false);
 
   const [fileContext, setFileContext] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedContextFile[]>([]);
@@ -222,12 +224,23 @@ export default function VetMind() {
   };
 
   const brand = {
-    primary: '#0F6B74',
+    primary: uiTokens.brand,
     border: '#E5E7EB',
-    text: '#1F2937',
-    muted: '#6B7280',
-    bg: '#F4F7F8',
-    card: '#FFFFFF'
+    text: uiTokens.textPrimary,
+    muted: uiTokens.textSecondary,
+    bg: uiTokens.pageBackground,
+    card: uiTokens.cardBackground,
+    sidebarBg: '#ffffff',
+    sidebarBorder: '#e5e7eb',
+    sidebarText: '#1f2937',
+    sidebarMuted: '#94a3b8',
+    sidebarActive: 'rgba(15,107,116,0.08)',
+    sidebarHover: '#f8fafc',
+    userBubble: 'linear-gradient(135deg, #0f6b74 0%, #0d5c64 100%)',
+    aiBubble: uiTokens.cardBackground,
+    inputBg: uiTokens.cardBackground,
+    shadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
+    shadowLg: '0 8px 32px rgba(15, 23, 42, 0.10)',
   };
 
   // 🔥 TEMPLATES LADEN
@@ -316,18 +329,9 @@ export default function VetMind() {
   const applyQuickPrompt = (entry: { id: string; prompt: string }) => {
     if (loading) return;
     setLastPromptId(entry.id);
-    localStorage.setItem("vetmind_last_prompt_id", entry.id);
     void sendMessage(entry.prompt);
   };
 
-  const actionStyle = {
-    padding: "10px 14px",
-    borderRadius: "10px",
-    border: `1px solid ${brand.border}`,
-    background: "#fff",
-    cursor: "pointer",
-    fontWeight: 600
-  };
 
 const formatCaseDate = (value: string | undefined) => {
   if (!value) return "";
@@ -569,6 +573,8 @@ const trimForList = (title: string) => (title.length > 32 ? `${title.slice(0, 32
   useEffect(() => {
     const handoff = localStorage.getItem("vetmind_context");
     if (handoff) {
+      // Consume immediately so re-opening VetMind starts fresh
+      localStorage.removeItem("vetmind_context");
       try {
         const parsed = JSON.parse(handoff);
         const normalized = normalizeCase(parsed);
@@ -721,23 +727,45 @@ const saveTemplate = async () => {
 };
 
 useEffect(() => {
-  if (!activeSessionId) return;
-if (messages.length <= 1 && activeSessionId) {
-  return;
-}
+  if (!activeSessionId || !dbReady) return;
+  if (messages.length <= 1) return;
+  if (savingRef.current) return;
 
   setSessions((prev) => {
     const updated = prev.map((s) =>
       s.id === activeSessionId ? { ...s, messages } : s
     );
-
-    localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
     return updated;
   });
-}, [messages, activeSessionId]);
+
+  // Debounced save to Supabase
+  const timeout = setTimeout(async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      // Delete old messages for this session, re-insert all
+      await supabase.from('vetmind_messages').delete().eq('session_id', activeSessionId);
+      const rows = messages.map((m, i) => ({
+        session_id: activeSessionId,
+        role: m.role,
+        content: m.content || '',
+        created_at: new Date(Date.now() + i).toISOString()
+      }));
+      if (rows.length > 0) {
+        await supabase.from('vetmind_messages').insert(rows);
+      }
+    } catch (err) {
+      console.error('VetMind: Fehler beim Speichern der Nachrichten', err);
+    } finally {
+      savingRef.current = false;
+    }
+  }, 1200);
+
+  return () => clearTimeout(timeout);
+}, [messages, activeSessionId, dbReady]);
 
 useEffect(() => {
-  if (!activeSessionId) return;
+  if (!activeSessionId || !dbReady) return;
 
   setSessions((prev) => {
     const updated = prev.map((s) =>
@@ -749,11 +777,22 @@ useEffect(() => {
           }
         : s
     );
-
-    localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
     return updated;
   });
-}, [selectedChatPatient, selectedPatientConsultations, activeSessionId]);
+
+  // Save patient context to Supabase
+  const timeout = setTimeout(async () => {
+    await supabase
+      .from('vetmind_sessions')
+      .update({
+        chat_patient: selectedChatPatient,
+        chat_patient_consultations: selectedPatientConsultations
+      })
+      .eq('id', activeSessionId);
+  }, 800);
+
+  return () => clearTimeout(timeout);
+}, [selectedChatPatient, selectedPatientConsultations, activeSessionId, dbReady]);
 
 // 📥 CASES LADEN (NEU RICHTIG!)
 const loadCases = async () => {
@@ -886,25 +925,101 @@ const getPromptTemplatesForCategory = (category: PromptCategory) =>
 
 const activePromptTemplates = openPromptDropdown ? getPromptTemplatesForCategory(openPromptDropdown) : [];
 
+// 📥 Sessions aus Supabase laden (+ einmalige localStorage-Migration)
 useEffect(() => {
-  const stored = localStorage.getItem("vetmind_sessions");
-  if (stored) {
-    const parsed = JSON.parse(stored);
-    setSessions(parsed);
+  if (!currentUser || !activePracticeId) return;
 
-    if (parsed.length > 0) {
-      setActiveSessionId(parsed[0].id);
-      setMessages(parsed[0].messages);
-      setSelectedChatPatient(parsed[0].chatPatient || null);
-      setSelectedPatientConsultations(parsed[0].chatPatientConsultations || []);
+  const loadSessions = async () => {
+    // 1. Einmalig localStorage-Sessions nach Supabase migrieren
+    const localRaw = localStorage.getItem("vetmind_sessions");
+    if (localRaw) {
+      try {
+        const localSessions = JSON.parse(localRaw);
+        if (Array.isArray(localSessions) && localSessions.length > 0) {
+          for (const ls of localSessions) {
+            const { data: inserted } = await supabase
+              .from('vetmind_sessions')
+              .insert({
+                user_id: currentUser.id,
+                practice_id: activePracticeId,
+                title: ls.title || 'Neuer Chat',
+                chat_patient: ls.chatPatient || null,
+                chat_patient_consultations: ls.chatPatientConsultations || [],
+                last_opened_at: ls.lastOpenedAt || new Date().toISOString(),
+                created_at: ls.lastOpenedAt || new Date().toISOString()
+              })
+              .select('id')
+              .single();
+
+            if (inserted && Array.isArray(ls.messages) && ls.messages.length > 0) {
+              const msgRows = ls.messages.map((m: any, i: number) => ({
+                session_id: inserted.id,
+                role: m.role || 'user',
+                content: m.content || '',
+                created_at: new Date(Date.now() + i).toISOString()
+              }));
+              await supabase.from('vetmind_messages').insert(msgRows);
+            }
+          }
+          localStorage.removeItem("vetmind_sessions");
+          console.log(`VetMind: ${localSessions.length} Sessions aus localStorage migriert.`);
+        }
+      } catch (err) {
+        console.error('VetMind: localStorage-Migration fehlgeschlagen', err);
+      }
     }
-  }
-}, []);
 
-useEffect(() => {
-  const storedLastPrompt = localStorage.getItem("vetmind_last_prompt_id") || "";
-  setLastPromptId(storedLastPrompt);
-}, []);
+    // 2. Sessions aus Supabase laden
+    const { data: dbSessions, error } = await supabase
+      .from('vetmind_sessions')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('last_opened_at', { ascending: false });
+
+    if (error) {
+      console.error('VetMind: Sessions laden fehlgeschlagen', error);
+      setDbReady(true);
+      return;
+    }
+
+    // 3. Messages für alle Sessions laden
+    const sessionIds = (dbSessions || []).map((s: any) => s.id);
+    let allMessages: any[] = [];
+    if (sessionIds.length > 0) {
+      const { data: msgs } = await supabase
+        .from('vetmind_messages')
+        .select('*')
+        .in('session_id', sessionIds)
+        .order('created_at', { ascending: true });
+      allMessages = msgs || [];
+    }
+
+    // 4. Sessions mit Messages zusammenführen
+    const sessionsWithMessages = (dbSessions || []).map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      lastOpenedAt: s.last_opened_at,
+      chatPatient: s.chat_patient,
+      chatPatientConsultations: s.chat_patient_consultations || [],
+      messages: allMessages
+        .filter((m: any) => m.session_id === s.id)
+        .map((m: any) => ({ role: m.role, content: m.content }))
+    }));
+
+    setSessions(sessionsWithMessages);
+
+    if (sessionsWithMessages.length > 0) {
+      setActiveSessionId(sessionsWithMessages[0].id);
+      setMessages(sessionsWithMessages[0].messages);
+      setSelectedChatPatient(sessionsWithMessages[0].chatPatient || null);
+      setSelectedPatientConsultations(sessionsWithMessages[0].chatPatientConsultations || []);
+    }
+
+    setDbReady(true);
+  };
+
+  loadSessions();
+}, [currentUser, activePracticeId]);
 
 useEffect(() => {
   const handleOutsideClick = (event: MouseEvent) => {
@@ -932,7 +1047,12 @@ const syncActiveSessionTitle = (msgList: any[] = messages, caseData: any = selec
     });
 
     if (changed) {
-      localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
+      // Save title to Supabase
+      supabase
+        .from('vetmind_sessions')
+        .update({ title: nextTitle })
+        .eq('id', activeSessionId)
+        .then();
       return updated;
     }
 
@@ -1170,11 +1290,12 @@ setResult(fullText);
   const runAction = (prompt: string) => {
     sendMessage(prompt);
   };
-const deleteSession = (id: string) => {
-  const updated = sessions.filter((s) => s.id !== id);
+const deleteSession = async (id: string) => {
+  // Delete from Supabase (messages cascade automatically)
+  await supabase.from('vetmind_sessions').delete().eq('id', id);
 
+  const updated = sessions.filter((s) => s.id !== id);
   setSessions(updated);
-  localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
 
   // falls aktiver Chat gelöscht wurde
   if (id === activeSessionId) {
@@ -1196,12 +1317,12 @@ const touchSession = (id: string) => {
   const now = new Date().toISOString();
   setSessions((prev) => {
     const updated = prev.map((s) => (s.id === id ? { ...s, lastOpenedAt: now } : s));
-    localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
     return updated;
   });
+  supabase.from('vetmind_sessions').update({ last_opened_at: now }).eq('id', id).then();
 };
 
-const renameSession = (id: string) => {
+const renameSession = async (id: string) => {
   const newTitle = prompt("Neuen Titel eingeben:");
 
   if (!newTitle) return;
@@ -1211,7 +1332,7 @@ const renameSession = (id: string) => {
   );
 
   setSessions(updated);
-  localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
+  await supabase.from('vetmind_sessions').update({ title: newTitle }).eq('id', id);
 };
 
 const resetChat = () => {
@@ -1230,7 +1351,6 @@ const resetChat = () => {
   setCopied(false);
   setPromptTab("clinical");
   setLastPromptId("");
-  localStorage.removeItem("vetmind_last_prompt_id");
 
   // Clear handoff context so fresh chats never inherit previous case data.
   localStorage.removeItem("vetmind_context");
@@ -1254,478 +1374,908 @@ const filteredSessions = sortedSessions.filter((s: any) => {
 
   return haystack.includes(query);
 });
-  const menuItemStyle = {
-    padding: "10px",
-    borderRadius: "8px",
+  const menuItemStyle: React.CSSProperties = {
+    padding: "10px 12px",
+    borderRadius: "10px",
     cursor: "pointer",
-    fontSize: "14px"
+    fontSize: "13px",
+    fontWeight: 500,
+    color: brand.text,
+    transition: "background 0.12s ease",
   };
 
   return (
     <main style={{
-  display: "flex",
-  height: "100vh",
-  background: brand.bg,
-      fontFamily: "Arial, sans-serif",
-  color: brand.text
-}}>
+      display: "flex",
+      height: "100vh",
+      background: brand.bg,
+      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+      color: brand.text,
+    }}>
 
-{/* SIDEBAR */}
+{/* ═══════════════ SIDEBAR ═══════════════ */}
 <div style={{
-  width: sidebarCollapsed ? "78px" : "260px",
-  borderRight: `1px solid ${brand.border}`,
-  padding: "20px",
-  background: "#fff",
+  width: sidebarCollapsed ? "72px" : "280px",
+  background: brand.sidebarBg,
+  padding: sidebarCollapsed ? "16px 10px" : "20px 16px",
   display: "flex",
   flexDirection: "column",
-  gap: "10px",
-  transition: "width 0.2s ease"
+  gap: "6px",
+  transition: "width 0.25s cubic-bezier(0.4,0,0.2,1)",
+  borderRight: `1px solid ${brand.sidebarBorder}`,
+  boxShadow: "1px 0 8px rgba(15, 23, 42, 0.04)",
+  overflow: "hidden",
 }}>
 
-  <div style={{ display: "flex", justifyContent: sidebarCollapsed ? "center" : "space-between", alignItems: "center" }}>
-    {!sidebarCollapsed && <div style={{ fontWeight: 700, color: brand.text }}>Chats</div>}
-    <Button
+  {/* Sidebar Header */}
+  <div style={{
+    display: "flex",
+    justifyContent: sidebarCollapsed ? "center" : "space-between",
+    alignItems: "center",
+    marginBottom: "8px",
+  }}>
+    {!sidebarCollapsed && (
+      <div style={{
+        fontSize: "11px",
+        fontWeight: 700,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        color: brand.sidebarMuted,
+      }}>
+        Gespräche
+      </div>
+    )}
+    <button
       onClick={() => setSidebarCollapsed((v) => !v)}
       title={sidebarCollapsed ? "Sidebar ausklappen" : "Sidebar einklappen"}
-      variant='secondary'
-      size='sm'
       style={{
-        background: "#fff",
-        width: "34px",
-        height: "34px",
-        padding: 0
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        width: "32px",
+        height: "32px",
+        borderRadius: "8px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: brand.sidebarMuted,
+        fontSize: "14px",
+        transition: "background 0.15s ease",
       }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
-      {sidebarCollapsed ? "▶" : "◀"}
-    </Button>
+      {sidebarCollapsed ? "›" : "‹"}
+    </button>
   </div>
 
+  {/* Search */}
   {!sidebarCollapsed && (
-    <div
-      style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 2,
-        background: "#fff",
-        paddingBottom: "8px"
-      }}
-    >
-      <div
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      borderRadius: "10px",
+      padding: "8px 10px",
+      background: "#f8fafc",
+      border: `1px solid ${brand.sidebarBorder}`,
+      marginBottom: "4px",
+    }}>
+      <span style={{ fontSize: "12px", color: brand.sidebarMuted, flexShrink: 0 }}>🔍</span>
+      <input
+        value={chatSearch}
+        onChange={(e) => setChatSearch(e.target.value)}
+        placeholder="Suchen..."
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          border: `1px solid ${brand.border}`,
-          borderRadius: "10px",
-          padding: "8px 10px",
-          background: "#f9fafb"
+          width: "100%",
+          border: "none",
+          outline: "none",
+          background: "transparent",
+          fontSize: "13px",
+          color: brand.sidebarText,
         }}
-      >
-        <span style={{ fontSize: "13px", color: "#6b7280" }}>🔍</span>
-        <input
-          value={chatSearch}
-          onChange={(e) => setChatSearch(e.target.value)}
-          placeholder="Chat suchen..."
-          style={{
-            width: "100%",
-            border: "none",
-            outline: "none",
-            background: "transparent",
-            fontSize: "13px",
-            color: brand.text
-          }}
-        />
-      </div>
+      />
     </div>
   )}
 
-  <Button
-    onClick={() => {
+  {/* New Chat Button */}
+  <button
+    onClick={async () => {
+      if (!currentUser) return;
       resetChat();
       const now = new Date().toISOString();
 
+      const { data: inserted } = await supabase
+        .from('vetmind_sessions')
+        .insert({
+          user_id: currentUser.id,
+          practice_id: activePracticeId,
+          title: 'Neuer Chat',
+          last_opened_at: now
+        })
+        .select('id')
+        .single();
+
+      if (!inserted) return;
+
       const newSession = {
-  id: Date.now().toString(),
-  title: "Neuer Chat",
-  lastOpenedAt: now,
-      chatPatient: null,
-      chatPatientConsultations: [],
-  messages: [
-          { role: "assistant", content: "Neuer Chat gestartet. Wie kann ich helfen?" }]
+        id: inserted.id,
+        title: "Neuer Chat",
+        lastOpenedAt: now,
+        chatPatient: null,
+        chatPatientConsultations: [],
+        messages: [
+          { role: "assistant", content: "Neuer Chat gestartet. Wie kann ich helfen?" }
+        ]
       };
 
-      const updated = [newSession, ...sessions];
+      await supabase.from('vetmind_messages').insert({
+        session_id: inserted.id,
+        role: 'assistant',
+        content: 'Neuer Chat gestartet. Wie kann ich helfen?'
+      });
 
+      const updated = [newSession, ...sessions];
       setSessions(updated);
       setActiveSessionId(newSession.id);
       setMessages(newSession.messages);
-
-      localStorage.setItem("vetmind_sessions", JSON.stringify(updated));
     }}
-    variant='secondary'
     style={{
-      padding: "10px",
-      background: "#f9fafb"
-    }}
-  >
-    {sidebarCollapsed ? "＋" : "➕ Neuer Chat"}
-  </Button>
-
-  {!sidebarCollapsed && filteredSessions.map((s) => (
-  <div
-    key={s.id}
-    style={{
+      padding: sidebarCollapsed ? "10px" : "10px 14px",
+      borderRadius: "10px",
+      border: `1px solid ${brand.sidebarBorder}`,
+      background: "rgba(15,107,116,0.08)",
+      color: brand.primary,
+      fontWeight: 600,
+      fontSize: "13px",
+      cursor: "pointer",
       display: "flex",
       alignItems: "center",
-      justifyContent: "space-between",
-      padding: "8px",
-      borderRadius: "8px",
-      background: s.id === activeSessionId ? "#E6F4F5" : "transparent"
+      justifyContent: "center",
+      gap: "8px",
+      transition: "background 0.15s ease",
+      marginBottom: "4px",
     }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(15,107,116,0.14)'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(15,107,116,0.08)'; }}
   >
-    {/* CLICK AREA */}
-    <div
-      onClick={() => {
-        setActiveSessionId(s.id);
-        setMessages(s.messages);
-        setSelectedChatPatient(s.chatPatient || null);
-        setSelectedPatientConsultations(s.chatPatientConsultations || []);
-        touchSession(s.id);
-      }}
-      title={s.title || "Neuer Chat"}
-      style={{
-        flex: 1,
-        fontSize: "14px",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        maxWidth: "150px"
-      }}
-    >
-      {trimForList(s.title || "Neuer Chat")}
-    </div>
+    <span style={{ fontSize: "16px" }}>＋</span>
+    {!sidebarCollapsed && "Neuer Chat"}
+  </button>
 
-    {/* ACTIONS */}
-    <div style={{ display: "flex", gap: "6px" }}>
-      
-      {/* ✏️ RENAME */}
-      <Button
-        onClick={() => renameSession(s.id)}
-        variant='ghost'
-        size='sm'
+  {/* Session List */}
+  <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "2px", marginTop: "4px" }}>
+    {!sidebarCollapsed && filteredSessions.map((s) => (
+      <div
+        key={s.id}
         style={{
-          padding: "2px 6px",
-          minWidth: 0
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "9px 10px",
+          borderRadius: "10px",
+          background: s.id === activeSessionId ? brand.sidebarActive : "transparent",
+          borderLeft: s.id === activeSessionId ? `3px solid ${brand.primary}` : "3px solid transparent",
+          transition: "all 0.15s ease",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          if (s.id !== activeSessionId) e.currentTarget.style.background = brand.sidebarHover;
+        }}
+        onMouseLeave={(e) => {
+          if (s.id !== activeSessionId) e.currentTarget.style.background = 'transparent';
         }}
       >
-        ✏️
-      </Button>
+        <div
+          onClick={() => {
+            setActiveSessionId(s.id);
+            setMessages(s.messages);
+            setSelectedChatPatient(s.chatPatient || null);
+            setSelectedPatientConsultations(s.chatPatientConsultations || []);
+            touchSession(s.id);
+          }}
+          title={s.title || "Neuer Chat"}
+          style={{
+            flex: 1,
+            fontSize: "13px",
+            color: s.id === activeSessionId ? brand.primary : brand.sidebarText,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "170px",
+          }}
+        >
+          {trimForList(s.title || "Neuer Chat")}
+        </div>
 
-      {/* ❌ DELETE */}
-      <Button
-        onClick={() => deleteSession(s.id)}
-        variant='ghost'
-        size='sm'
+        {s.id === activeSessionId && (
+          <div style={{ display: "flex", gap: "2px", flexShrink: 0 }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); renameSession(s.id); }}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "2px 4px",
+                fontSize: "12px",
+                borderRadius: "6px",
+                color: brand.sidebarMuted,
+              }}
+              title="Umbenennen"
+            >
+              ✏️
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "2px 4px",
+                fontSize: "12px",
+                borderRadius: "6px",
+                color: brand.sidebarMuted,
+              }}
+              title="Löschen"
+            >
+              🗑
+            </button>
+          </div>
+        )}
+      </div>
+    ))}
+
+    {sidebarCollapsed && filteredSessions.slice(0, 8).map((s) => (
+      <button
+        key={s.id}
+        onClick={() => {
+          setActiveSessionId(s.id);
+          setMessages(s.messages);
+          setSelectedChatPatient(s.chatPatient || null);
+          setSelectedPatientConsultations(s.chatPatientConsultations || []);
+          touchSession(s.id);
+        }}
+        title={s.title || "Neuer Chat"}
         style={{
-          padding: "2px 6px",
-          minWidth: 0
+          width: "40px",
+          height: "40px",
+          borderRadius: "10px",
+          border: "none",
+          background: s.id === activeSessionId ? brand.sidebarActive : "transparent",
+          color: s.id === activeSessionId ? "#fff" : brand.sidebarMuted,
+          fontSize: "14px",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          margin: "0 auto",
+          transition: "background 0.15s ease",
         }}
       >
-        ❌
-      </Button>
+        💬
+      </button>
+    ))}
 
-    </div>
+    {!sidebarCollapsed && filteredSessions.length === 0 && (
+      <div style={{ fontSize: "12px", color: brand.sidebarMuted, padding: "12px 8px", textAlign: "center" }}>
+        Keine Chats gefunden
+      </div>
+    )}
   </div>
-))}
-
-  {!sidebarCollapsed && filteredSessions.length === 0 && (
-    <div style={{ fontSize: "13px", color: brand.muted, padding: "8px 4px" }}>
-      Keine Chats gefunden
-    </div>
-  )}
-
 </div>
 
-      {/* RIGHT SIDE */}
+{/* ═══════════════ MAIN CONTENT ═══════════════ */}
 <div style={{
   flex: 1,
   minWidth: 0,
   display: "flex",
   flexDirection: "column",
-  background: brand.bg
+  background: brand.bg,
 }}>
 
-<div
-  style={{
-    padding: "14px 28px",
-    borderBottom: "1px solid #e9eef2",
-    background: "rgba(255,255,255,0.72)",
-    backdropFilter: "blur(8px)"
-  }}
->
-  <div style={{ fontSize: "20px", fontWeight: 700, color: brand.primary, lineHeight: 1.2 }}>VetMind</div>
-  <div style={{ fontSize: "12px", color: brand.muted, marginTop: "4px" }}>
-    {selectedCase?.patientName
-      ? `${selectedCase.patientName}${selectedCase?.external_id ? ` (#${selectedCase.external_id})` : ""}`
-      : (selectedCase?.title || "VetMind-Workspace")}
-  </div>
-</div>
+  {/* Header Bar */}
+  <div style={{
+    padding: "16px 32px",
+    borderBottom: "1px solid rgba(0,0,0,0.06)",
+    background: "rgba(255,255,255,0.80)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  }}>
+    <div>
+      <div style={{
+        fontSize: "18px",
+        fontWeight: 700,
+        color: brand.primary,
+        letterSpacing: "-0.01em",
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+      }}>
+        <span style={{
+          width: "28px",
+          height: "28px",
+          borderRadius: "8px",
+          background: `linear-gradient(135deg, ${brand.primary} 0%, #0d5c64 100%)`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "14px",
+          color: "#fff",
+        }}>🧠</span>
+        VetMind
+      </div>
+      <div style={{ fontSize: "12px", color: brand.muted, marginTop: "2px" }}>
+        {selectedCase?.patientName
+          ? `${selectedCase.patientName}${selectedCase?.external_id ? ` (#${selectedCase.external_id})` : ""}`
+          : (selectedCase?.title || "KI-Assistent für dein Praxisteam")}
+      </div>
+    </div>
 
-<div style={{ flex: 1, overflowY: "auto", padding: "18px 28px 12px" }}>
-      {/* AKTIVER FALL */}
+    {/* Context Chips */}
+    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
       {selectedCase && (
         <div style={{
-          marginBottom: "16px",
-          padding: "12px",
-          background: "#EAF4F5",
-          borderRadius: "10px"
+          padding: "4px 10px",
+          borderRadius: "999px",
+          background: "rgba(15,107,116,0.08)",
+          border: "1px solid rgba(15,107,116,0.15)",
+          fontSize: "12px",
+          fontWeight: 600,
+          color: brand.primary,
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
         }}>
-          <b>
-            {selectedCase.patientName
-              ? `${selectedCase.patientName}${selectedCase?.external_id ? ` (#${selectedCase.external_id})` : ""}`
-              : (selectedCase.title || "Geladener Fall")}
-          </b>
-          {(selectedCase.tierart || selectedCase.rasse || selectedCase.alter) ? (
-            <div style={{ fontSize: "13px", color: brand.text, marginTop: "2px" }}>
-              {[selectedCase.tierart, selectedCase.rasse, selectedCase.alter].filter(Boolean).join(" · ")}
-            </div>
-          ) : null}
-          {selectedCase.additionalInfo ? (
-            <div style={{ fontSize: "12px", color: brand.muted, marginTop: "4px", whiteSpace: "pre-wrap" }}>
-              {selectedCase.additionalInfo}
-            </div>
-          ) : null}
-          {selectedCase.external_id ? (
-            <div style={{ fontSize: "12px", color: brand.muted, marginTop: "4px" }}>
-              PMS-ID: {selectedCase.external_id}
-            </div>
-          ) : null}
-          {formatCaseDate(selectedCase.created_at || selectedCase.createdAt) ? (
-            <div style={{ fontSize: "12px", color: brand.muted, marginTop: "4px" }}>
-              {formatCaseDate(selectedCase.created_at || selectedCase.createdAt)}
-            </div>
-          ) : null}
+          📄 Fall geladen
         </div>
       )}
-
       {selectedChatPatient && (
-        <div
-          style={{
-            marginBottom: "16px",
-            padding: "10px 12px",
-            background: "#fff",
-            border: `1px solid ${brand.border}`,
-            borderRadius: "10px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: "10px"
-          }}
-        >
-          <div>
-            <div style={{ fontSize: "13px", fontWeight: 600, color: brand.text }}>
-              🐾 Patient: {selectedChatPatient.name}
-              {selectedChatPatient.tierart ? ` (${selectedChatPatient.tierart})` : ""}
-              {selectedChatPatient.external_id ? ` (#${selectedChatPatient.external_id})` : ""}
-            </div>
-            <div style={{ fontSize: "12px", color: brand.muted, marginTop: "4px" }}>
-              {selectedPatientConsultations[0]
-                ? `Letzte Konsultation: ${selectedPatientConsultations[0].title || "Konsultation"} (${formatCaseDateTime(selectedPatientConsultations[0].created_at) || "-"})`
-                : "Letzte Konsultation: keine verknuepfte Konsultation"}
-            </div>
-          </div>
-
-          <Button
+        <div style={{
+          padding: "4px 10px",
+          borderRadius: "999px",
+          background: "rgba(15,107,116,0.08)",
+          border: "1px solid rgba(15,107,116,0.15)",
+          fontSize: "12px",
+          fontWeight: 600,
+          color: brand.primary,
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+        }}>
+          🐾 {selectedChatPatient.name}
+          <button
             onClick={() => {
               setSelectedChatPatient(null);
               setSelectedPatientConsultations([]);
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: "Patientenkontext entfernt." }
-              ]);
+              setMessages((prev) => [...prev, { role: "assistant", content: "Patientenkontext entfernt." }]);
             }}
-            variant='secondary'
-            size='sm'
             style={{
-              background: "#fff",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: brand.muted,
               fontSize: "12px",
-              padding: "4px 8px"
+              padding: "0 0 0 2px",
             }}
           >
-            ✕ Entfernen
-          </Button>
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  </div>
+
+  {/* Chat + Input Area */}
+  <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+    {/* Context Bars */}
+    <div style={{ padding: "0 32px" }}>
+      {selectedCase && (
+        <div style={{
+          margin: "16px 0 0",
+          padding: "12px 16px",
+          background: "#fff",
+          borderRadius: uiTokens.radiusCard,
+          border: uiTokens.cardBorder,
+          boxShadow: brand.shadow,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "6px",
+              background: "rgba(15,107,116,0.08)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "12px",
+            }}>📋</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "13px", color: brand.text }}>
+                {selectedCase.patientName
+                  ? `${selectedCase.patientName}${selectedCase?.external_id ? ` (#${selectedCase.external_id})` : ""}`
+                  : (selectedCase.title || "Geladener Fall")}
+              </div>
+              {(selectedCase.tierart || selectedCase.rasse || selectedCase.alter) && (
+                <div style={{ fontSize: "12px", color: brand.muted, marginTop: "1px" }}>
+                  {[selectedCase.tierart, selectedCase.rasse, selectedCase.alter].filter(Boolean).join(" · ")}
+                  {formatCaseDate(selectedCase.created_at || selectedCase.createdAt) ? ` · ${formatCaseDate(selectedCase.created_at || selectedCase.createdAt)}` : ""}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* ═══════════════ CHAT MESSAGES ═══════════════ */}
+    <div
+      ref={chatScrollRef}
+      onScroll={handleChatScroll}
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "20px 32px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "16px",
+      }}
+    >
+      {messages.filter(m => m.role !== "system").map((m, i) => {
+        const isUser = m.role === "user";
+        const isEditableResultMessage = !isUser && !loading && i === messages.length - 1 && Boolean(result);
+        const showAiDisclaimer = m.role === "assistant" && String(m.content || '').trim().length > 0;
+
+        return (
+          <div
+            key={i}
+            data-message-index={i}
+            style={{
+              display: "flex",
+              justifyContent: isUser ? "flex-end" : "flex-start",
+              gap: "10px",
+              alignItems: "flex-start",
+            }}
+          >
+            {/* AI Avatar */}
+            {!isUser && (
+              <div style={{
+                width: "30px",
+                height: "30px",
+                borderRadius: "10px",
+                background: `linear-gradient(135deg, ${brand.primary} 0%, #0d5c64 100%)`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "14px",
+                flexShrink: 0,
+                marginTop: "2px",
+                boxShadow: "0 2px 8px rgba(15,107,116,0.2)",
+              }}>
+                🧠
+              </div>
+            )}
+
+            <div style={{
+              maxWidth: "72%",
+              width: isEditableResultMessage ? "72%" : "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+            }}>
+              {/* Message Bubble */}
+              <div style={{
+                width: isEditableResultMessage ? "100%" : "auto",
+                padding: isEditableResultMessage ? "4px" : "12px 16px",
+                borderRadius: isUser ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                background: isUser ? brand.userBubble : brand.aiBubble,
+                color: isUser ? "#fff" : brand.text,
+                fontSize: "14px",
+                lineHeight: "1.6",
+                whiteSpace: "pre-wrap",
+                boxShadow: isUser ? "0 2px 12px rgba(15,107,116,0.15)" : brand.shadow,
+                border: isUser ? "none" : uiTokens.cardBorder,
+              }}>
+                {isEditableResultMessage ? (
+                  <textarea
+                    value={result}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setResult(value);
+                      setMessages((prev) => prev.map((msg, idx) => (idx === i ? { ...msg, content: value } : msg)));
+                    }}
+                    placeholder="Text hier anpassen..."
+                    style={{
+                      width: "100%",
+                      minHeight: "200px",
+                      resize: "vertical",
+                      borderRadius: "12px",
+                      border: `1px solid ${brand.border}`,
+                      padding: "12px",
+                      fontSize: "14px",
+                      lineHeight: 1.6,
+                      color: brand.text,
+                      background: "#fff",
+                    }}
+                  />
+                ) : (
+                  renderMessageContent(String(m.content || ''))
+                )}
+              </div>
+
+              {showAiDisclaimer && <AiDisclaimer />}
+
+              {/* Copy & Actions for AI messages */}
+              {!isUser && String(m.content || '').trim().length > 20 && (
+                <div style={{ display: "flex", gap: "6px", justifyContent: "flex-start" }}>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(m.content)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "11px",
+                      color: brand.muted,
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      fontWeight: 500,
+                      transition: "color 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = brand.text; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = brand.muted as string; }}
+                  >
+                    📋 Kopieren
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* User Avatar */}
+            {isUser && (
+              <div style={{
+                width: "30px",
+                height: "30px",
+                borderRadius: "10px",
+                background: "linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "13px",
+                flexShrink: 0,
+                marginTop: "2px",
+              }}>
+                👤
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Loading Indicator */}
+      {loading && (
+        <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+          <div style={{
+            width: "30px",
+            height: "30px",
+            borderRadius: "10px",
+            background: `linear-gradient(135deg, ${brand.primary} 0%, #0d5c64 100%)`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "14px",
+            flexShrink: 0,
+            boxShadow: "0 2px 8px rgba(15,107,116,0.2)",
+          }}>
+            🧠
+          </div>
+          <div style={{
+            padding: "12px 16px",
+            borderRadius: "16px 16px 16px 4px",
+            background: "#fff",
+            border: uiTokens.cardBorder,
+            boxShadow: brand.shadow,
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}>
+            <span style={{
+              display: "inline-block",
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: brand.primary,
+              animation: "vetmind-pulse 1.2s ease-in-out infinite",
+            }} />
+            <span style={{
+              display: "inline-block",
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: brand.primary,
+              animation: "vetmind-pulse 1.2s ease-in-out 0.2s infinite",
+              opacity: 0.7,
+            }} />
+            <span style={{
+              display: "inline-block",
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: brand.primary,
+              animation: "vetmind-pulse 1.2s ease-in-out 0.4s infinite",
+              opacity: 0.4,
+            }} />
+          </div>
+          <style>{`@keyframes vetmind-pulse { 0%,100% { opacity:0.3; transform:scale(0.8); } 50% { opacity:1; transform:scale(1.1); } }`}</style>
         </div>
       )}
 
-
-
-      {/* CHAT */}
-<div style={{
-  border: "none",
-  borderRadius: "18px",
-  padding: "20px",
-  minHeight: "58vh",
-  maxHeight: "68vh",
-overflowY: "auto",
-  background: "#fff",
-  marginBottom: "16px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "14px",
-  boxShadow: "0 6px 24px rgba(15, 23, 42, 0.06)"
-}}
-ref={chatScrollRef}
-onScroll={handleChatScroll}
->
-
-  {messages.map((m, i) => {
-    const isUser = m.role === "user";
-    const isEditableResultMessage = !isUser && !loading && i === messages.length - 1 && Boolean(result);
-    const showAiDisclaimer = m.role === "assistant" && String(m.content || '').trim().length > 0;
-
-    return (
-      <div
-        key={i}
-        data-message-index={i}
-        style={{
-          display: "flex",
-          justifyContent: isUser ? "flex-end" : "flex-start"
-        }}
-      >
-        <div style={{
-  maxWidth: "75%",
-  width: isEditableResultMessage ? "75%" : "auto",
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px"
-}}>
-
-  {/* MESSAGE BUBBLE */}
-  <div style={{
-    width: isEditableResultMessage ? "100%" : "auto",
-    padding: "12px 14px",
-    borderRadius: "14px",
-    background: isUser
-      ? "#E6F4F5"
-      : "#F3F4F6",
-    color: brand.text,
-    fontSize: "14px",
-    lineHeight: "1.5",
-    whiteSpace: "pre-wrap",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.04)"
-  }}>
-    {isEditableResultMessage ? (
-      <textarea
-        value={result}
-        onChange={(e) => {
-          const value = e.target.value;
-          setResult(value);
-          setMessages((prev) => prev.map((msg, idx) => (idx === i ? { ...msg, content: value } : msg)));
-        }}
-        placeholder="Hier kannst du den generierten Text direkt anpassen..."
-        style={{
-          width: "100%",
-          minHeight: "220px",
-          resize: "vertical",
-          borderRadius: "10px",
-          border: `1px solid ${brand.border}`,
-          padding: "10px",
-          fontSize: "14px",
-          lineHeight: 1.5,
-          color: brand.text,
-          background: "#fff"
-        }}
-      />
-    ) : (
-      renderMessageContent(String(m.content || ''))
-    )}
-  </div>
-
-  {showAiDisclaimer && <AiDisclaimer />}
-
-  {/* 🔥 COPY BUTTON NUR FÜR VetMind */}
-  {!isUser && (
-    <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <Button
-        onClick={() => navigator.clipboard.writeText(m.content)}
-        variant='secondary'
-        size='sm'
-        style={{
-          fontSize: "12px",
-          padding: "4px 8px",
-          background: "#fff"
-        }}
-      >
-        📋 kopieren
-      </Button>
+      <div ref={chatEndRef} />
     </div>
-  )}
 
-</div>
-      </div>
-    );
-  })}
-
-  {loading && (
+    {/* ═══════════════ INPUT AREA ═══════════════ */}
     <div style={{
-      display: "flex",
-      justifyContent: "flex-start"
+      padding: "0 32px 20px",
+      background: `linear-gradient(180deg, transparent 0%, ${brand.bg} 20%)`,
     }}>
-      <div style={{
-        padding: "10px 14px",
-        borderRadius: "14px",
-        background: "#F3F4F6",
-        fontSize: "14px",
-        color: "#6B7280"
-      }}>
-        VetMind denkt...
-      </div>
-    </div>
-  )}
-<div ref={chatEndRef} />
 
-</div>
-      {/* ERGEBNIS EDITOR */}
-      <div
-        style={{
-          position: "sticky",
-          bottom: 0,
-          zIndex: 12,
-          background: "linear-gradient(180deg, rgba(244,247,248,0.2) 0%, rgba(244,247,248,1) 24%)",
-          paddingTop: "10px"
-        }}
-      >
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (!dragActive) setDragActive(true);
-        }}
-        onDragLeave={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setDragActive(false);
-        }}
-        onDrop={async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setDragActive(false);
-          const files = Array.from(e.dataTransfer.files || []);
-          await processContextFiles(files);
-        }}
-        onClick={() => contextFileInputRef.current?.click()}
-        style={{
-          marginBottom: "10px",
-          border: dragActive ? "2px dashed #0F6B74" : "1px dashed #cbd5e1",
-          borderRadius: "12px",
-          background: dragActive ? "#ecfeff" : "#f8fafc",
-          padding: "10px 12px",
-          cursor: "pointer"
-        }}
-      >
-        <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600 }}>Dateien hier ablegen oder klicken</div>
-        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>PDF/Bilder werden analysiert und als Kontext nutzbar gemacht</div>
+      {/* Uploaded Files */}
+      {uploadedFiles.length > 0 && (
+        <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+          {uploadedFiles.map((file) => (
+            <div
+              key={file.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "6px 10px",
+                borderRadius: "10px",
+                background: "#fff",
+                border: uiTokens.cardBorder,
+                fontSize: "12px",
+              }}
+            >
+              <span style={{ fontWeight: 600, color: brand.text }}>{file.name}</span>
+              <span style={{ color: brand.muted, fontSize: "11px" }}>
+                {file.status === 'uploading' ? '⏳' : file.status === 'error' ? '❌' : '✓'}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleContextFile(file.id); }}
+                style={{
+                  background: file.inContext ? "rgba(15,107,116,0.08)" : "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  color: file.inContext ? brand.primary : brand.muted,
+                  padding: "2px 6px",
+                  borderRadius: "6px",
+                  fontWeight: 600,
+                }}
+              >
+                {file.inContext ? '🧠 Aktiv' : '🧠 Inaktiv'}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); removeContextFile(file.id); }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  color: "#b91c1c",
+                  padding: "0 2px",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Input Composer */}
+      <div style={{
+        background: "#fff",
+        borderRadius: "16px",
+        border: uiTokens.cardBorder,
+        boxShadow: brand.shadowLg,
+        overflow: "visible",
+        position: "relative",
+      }}>
+        {/* Drag & Drop Zone (subtle, inside composer) */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!dragActive) setDragActive(true); }}
+          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+          onDrop={async (e) => {
+            e.preventDefault(); e.stopPropagation(); setDragActive(false);
+            const files = Array.from(e.dataTransfer.files || []);
+            await processContextFiles(files);
+          }}
+          style={{
+            display: dragActive ? "flex" : "none",
+            padding: "16px",
+            background: "rgba(15,107,116,0.04)",
+            borderBottom: `1px dashed ${brand.primary}`,
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "13px",
+            color: brand.primary,
+            fontWeight: 600,
+          }}
+        >
+          Dateien hier ablegen
+        </div>
+
+        {/* Textarea */}
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Frage stellen, Bericht diktieren, E-Mail erstellen..."
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+          onDragOver={(e) => { e.preventDefault(); if (!dragActive) setDragActive(true); }}
+          style={{
+            width: "100%",
+            padding: "16px 18px 8px",
+            border: "none",
+            outline: "none",
+            fontSize: "14px",
+            resize: "none",
+            minHeight: "52px",
+            maxHeight: "140px",
+            lineHeight: "1.5",
+            overflowY: "auto",
+            background: "transparent",
+            color: brand.text,
+          }}
+        />
+
+        {/* Input Toolbar */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px 10px",
+          borderTop: "1px solid rgba(0,0,0,0.04)",
+        }}>
+          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            {/* + Menu */}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                style={{
+                  width: "34px",
+                  height: "34px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background: showMenu ? "rgba(15,107,116,0.08)" : "transparent",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                  color: brand.muted,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background 0.12s ease",
+                }}
+                title="Kontext anhängen"
+              >
+                ＋
+              </button>
+
+              {showMenu && (
+                <div style={{
+                  position: "absolute",
+                  bottom: "42px",
+                  left: 0,
+                  background: "#fff",
+                  border: uiTokens.cardBorder,
+                  borderRadius: "12px",
+                  boxShadow: brand.shadowLg,
+                  padding: "6px",
+                  width: "220px",
+                  zIndex: 10,
+                }}>
+                  <div
+                    style={menuItemStyle}
+                    onClick={async () => { await loadCases(); setShowCases(true); setShowPatients(false); setShowMenu(false); }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    📄 Konsultation anhängen
+                  </div>
+                  <div
+                    style={menuItemStyle}
+                    onClick={async () => { await loadPatients(); setShowPatients(true); setShowCases(false); setShowMenu(false); }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    🐾 Patient anhängen
+                  </div>
+                  <div
+                    style={menuItemStyle}
+                    onClick={() => { setShowMenu(false); contextFileInputRef.current?.click(); }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    📎 Datei anhängen
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* File Upload */}
+            <button
+              onClick={() => contextFileInputRef.current?.click()}
+              style={{
+                width: "34px",
+                height: "34px",
+                borderRadius: "10px",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: "16px",
+                color: brand.muted,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="Datei hochladen"
+            >
+              📎
+            </button>
+
+            {/* Mic */}
+            <button
+              onClick={() => { setInput(""); recognition?.start(); }}
+              style={{
+                width: "34px",
+                height: "34px",
+                borderRadius: "10px",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: "16px",
+                color: brand.muted,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="Diktat starten"
+            >
+              🎤
+            </button>
+          </div>
+
+          {/* Send */}
+          <button
+            onClick={() => sendMessage()}
+            disabled={loading || !input.trim()}
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              border: "none",
+              background: (loading || !input.trim()) ? "#e2e8f0" : `linear-gradient(135deg, ${brand.primary} 0%, #0d5c64 100%)`,
+              cursor: (loading || !input.trim()) ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.15s ease",
+              boxShadow: (loading || !input.trim()) ? "none" : "0 2px 8px rgba(15,107,116,0.25)",
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ transform: "rotate(-45deg)" }}>
+              <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" stroke={loading || !input.trim() ? "#94a3b8" : "#fff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <input
@@ -1741,273 +2291,77 @@ onScroll={handleChatScroll}
         }}
       />
 
-      {uploadedFiles.length > 0 && (
-        <div style={{ display: "grid", gap: "8px", marginBottom: "10px" }}>
-          {uploadedFiles.map((file) => (
-            <div
-              key={file.id}
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: "10px",
-                background: "#fff",
-                padding: "8px 10px"
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontSize: "13px", fontWeight: 600 }}>{file.name}</div>
-                <div style={{ fontSize: "11px", color: "#475569" }}>
-                  {file.status === 'uploading' ? 'Wird analysiert ...' : file.status === 'error' ? 'Fehler' : (file.fileType === 'pdf' ? 'PDF' : file.fileType === 'image' ? 'Bild' : 'Datei')}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: "8px", marginTop: "6px", flexWrap: "wrap" }}>
-                <Button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    alert(file.extractedText || file.error || 'Kein Inhalt verfügbar.');
-                  }}
-                  variant='secondary'
-                  size='sm'
-                  style={{ background: "#fff", fontSize: "12px" }}
-                >
-                  👁 Vorschau
-                </Button>
-
-                <Button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleContextFile(file.id);
-                  }}
-                  variant='secondary'
-                  size='sm'
-                  style={{ background: "#fff", fontSize: "12px" }}
-                >
-                  🧠 {file.inContext ? 'Im Kontext' : 'Nicht im Kontext'}
-                </Button>
-
-                <Button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeContextFile(file.id);
-                  }}
-                  variant='secondary'
-                  size='sm'
-                  style={{ background: "#fff1f2", color: "#b91c1c", fontSize: "12px" }}
-                >
-                  🗑 löschen
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-
-  {/* + BUTTON */}
-  <div style={{ position: "relative" }}>
-    <div
-      onClick={() => setShowMenu(!showMenu)}
-      style={{
-        width: "42px",
-        height: "42px",
-        borderRadius: "10px",
-        border: `1px solid ${brand.border}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        background: "#fff",
-        fontSize: "20px",
-        fontWeight: 600
-      }}
-    >
-      +
-    </div>
-
-    {showMenu && (
-      <div style={{
-        position: "absolute",
-        bottom: "50px",
-        left: 0,
-        background: "#fff",
-        border: `1px solid ${brand.border}`,
-        borderRadius: "10px",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-        padding: "8px",
-        width: "220px",
-        zIndex: 10
-      }}>
-        <div style={menuItemStyle} onClick={async () => {
-          await loadCases();
-          setShowCases(true);
-          setShowPatients(false);
-          setShowMenu(false);
-        }}>
-          📄 Konsultation anhängen
-        </div>
-
-        <div
-          style={menuItemStyle}
-          onClick={async () => {
-            await loadPatients();
-            setShowPatients(true);
-            setShowCases(false);
-            setShowMenu(false);
-          }}
-        >
-          🐾 Patient anhängen
-        </div>
-        <div
-          style={menuItemStyle}
-          onClick={() => {
-            setShowMenu(false);
-            contextFileInputRef.current?.click();
-          }}
-        >
-          📎 Datei anhängen
-        </div>
-      </div>
-    )}
-  </div>
-
-  {/* INPUT */}
-  <textarea
-  ref={textareaRef}
-  value={input}
-  onChange={(e) => setInput(e.target.value)}
-  placeholder="Frage stellen oder SOP suchen..."
-  onKeyDown={(e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }}
-  style={{
-    flex: 1,
-    padding: "16px 14px",
-    borderRadius: "14px",
-    border: "1px solid #dbe3e9",
-    fontSize: "15px",
-    resize: "none",
-    minHeight: "52px",
-    maxHeight: "150px",
-    lineHeight: "1.5",
-    overflowY: "auto",
-    background: "#fff"
-  }}
-/>
-
-  {/* SEND */}
-  <Button
-    onClick={() => sendMessage()}
-    variant='primary'
-    size='sm'
-    style={{
-      width: "42px",
-      height: "42px",
-      background: brand.primary,
-      color: "#fff",
-      padding: 0
-    }}
-  >
-    ➤
-  </Button>
-
-  {/* MIC */}
-  <Button
-    onClick={() => {
-  setInput("");
-  recognition?.start();
-}}
-    variant='secondary'
-    size='sm'
-    style={{
-      width: "42px",
-      height: "42px",
-      background: "#fff",
-      padding: 0
-    }}
-  >
-    🎤
-  </Button>
-
-</div>
-
-      {/* PROMPT-LEISTE */}
-      <div
-        style={{
-          marginTop: "10px",
-          background: "transparent",
-          border: "none",
-          borderRadius: "0",
-          padding: "6px 2px 0"
-        }}
-      >
+      {/* Prompt Templates */}
+      <div style={{ marginTop: "10px" }}>
         <div ref={promptDropdownRef} style={{ position: "relative" }}>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
             {[
-              { key: 'clinical', label: 'Klinisch' },
-              { key: 'communication', label: 'Kommunikation' },
-              { key: 'internal', label: 'Intern' }
-            ].map((tab) => (
-              <Button
-                key={tab.key}
-                onClick={() => {
-                  const next = tab.key as PromptCategory;
-                  setPromptTab(next);
-                  setOpenPromptDropdown((prev) => (prev === next ? null : next));
-                }}
-                variant={openPromptDropdown === tab.key ? 'primary' : 'secondary'}
-                size='sm'
-                style={{
-                  borderRadius: "999px",
-                  fontWeight: 600,
-                  background: openPromptDropdown === tab.key ? brand.primary : "#fff",
-                  color: openPromptDropdown === tab.key ? "#fff" : brand.text,
-                  transition: "all 0.15s ease"
-                }}
-              >
-                {tab.label} ▾
-              </Button>
-            ))}
+              { key: 'clinical', label: 'Klinisch', icon: '🩺' },
+              { key: 'communication', label: 'Kommunikation', icon: '✉️' },
+              { key: 'internal', label: 'Intern', icon: '📋' },
+            ].map((tab) => {
+              const isActive = openPromptDropdown === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => {
+                    const next = tab.key as PromptCategory;
+                    setPromptTab(next);
+                    setOpenPromptDropdown((prev) => (prev === next ? null : next));
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "999px",
+                    border: isActive ? `1px solid ${brand.primary}` : "1px solid #e2e8f0",
+                    background: isActive ? "rgba(15,107,116,0.08)" : "#fff",
+                    color: isActive ? brand.primary : brand.muted,
+                    fontWeight: 600,
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  {tab.icon} {tab.label}
+                </button>
+              );
+            })}
 
-            <Button
-              onClick={() => {
-                setOpenPromptDropdown(null);
-                setShowTemplateBuilder(true);
-              }}
-              variant='secondary'
-              size='sm'
+            <button
+              onClick={() => { setOpenPromptDropdown(null); setShowTemplateBuilder(true); }}
               style={{
+                padding: "6px 12px",
                 borderRadius: "999px",
+                border: "1px dashed #cbd5e1",
+                background: "transparent",
+                color: brand.muted,
                 fontWeight: 600,
-                background: "#fff",
-                color: brand.text
+                fontSize: "12px",
+                cursor: "pointer",
               }}
             >
-              ➕ Vorlage erstellen
-            </Button>
+              ＋ Vorlage
+            </button>
           </div>
 
           {openPromptDropdown && (
-            <div
-              style={{
-                position: "absolute",
-                top: "44px",
-                left: 0,
-                minWidth: "260px",
-                maxWidth: "420px",
-                maxHeight: "240px",
-                overflowY: "auto",
-                background: "#fff",
-                border: "1px solid #dbe3e9",
-                borderRadius: "12px",
-                boxShadow: "0 10px 26px rgba(15, 23, 42, 0.12)",
-                padding: "8px",
-                zIndex: 20
-              }}
-            >
+            <div style={{
+              position: "absolute",
+              bottom: "40px",
+              left: 0,
+              minWidth: "260px",
+              maxWidth: "380px",
+              maxHeight: "220px",
+              overflowY: "auto",
+              background: "#fff",
+              border: uiTokens.cardBorder,
+              borderRadius: "12px",
+              boxShadow: brand.shadowLg,
+              padding: "6px",
+              zIndex: 20,
+            }}>
               {activePromptTemplates.map((entry: any) => (
                 <button
                   key={`db-${entry.id}`}
@@ -2016,98 +2370,92 @@ onScroll={handleChatScroll}
                     applyQuickPrompt({ id: `db-${entry.id}`, prompt: entry.content });
                     setOpenPromptDropdown(null);
                   }}
-                  title="Startet diese Vorlage sofort im Chat"
+                  title="Vorlage im Chat ausführen"
                   style={{
                     width: "100%",
                     textAlign: "left",
                     padding: "9px 10px",
                     borderRadius: "10px",
                     border: "none",
-                    background: lastPromptId === `db-${entry.id}` ? "#eef8fa" : "transparent",
+                    background: lastPromptId === `db-${entry.id}` ? "rgba(15,107,116,0.06)" : "transparent",
                     color: brand.text,
                     fontSize: "13px",
                     cursor: "pointer",
-                    marginBottom: "4px"
+                    marginBottom: "2px",
+                    transition: "background 0.12s",
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = lastPromptId === `db-${entry.id}` ? 'rgba(15,107,116,0.06)' : 'transparent'; }}
                 >
                   🧾 {entry.name}
                 </button>
               ))}
 
               {activePromptTemplates.length === 0 && (
-                <div style={{ fontSize: "13px", color: brand.muted, padding: "8px 10px" }}>
-                  Keine Vorlagen in dieser Kategorie.
+                <div style={{ fontSize: "12px", color: brand.muted, padding: "10px", textAlign: "center" }}>
+                  Keine Vorlagen in dieser Kategorie
                 </div>
               )}
             </div>
           )}
         </div>
       </div>
-      </div>
 
-{/* 🔥 AKTIONSLEISTE */}
-{result && (
-  <div style={{
-    marginTop: "12px",
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap"
-  }}>
-
-    <Button
-      onClick={copy}
-      variant='primary'
-      style={{
-        padding: "10px 14px",
-        background: brand.primary,
-        fontWeight: 600
-      }}
-    >
-      📋 Kopieren
-    </Button>
-
-    <Button
-      onClick={handleCreatePdf}
-      disabled={pdfLoading}
-      variant='secondary'
-      style={actionStyle}
-      title="PDF lokal speichern"
-    >
-      {pdfLoading ? "Speichere..." : "💾 PDF speichern"}
-    </Button>
-
-    <Button
-      onClick={handleShare}
-      disabled={shareLoading}
-      variant='secondary'
-      style={actionStyle}
-      title="PDF direkt ueber Teilen-Dialog versenden (z. B. Mail)"
-    >
-      {shareLoading ? "Teilen..." : "📄 PDF teilen"}
-    </Button>
-
-    {copied && (
-      <span style={{ color: "#1f7a1f", fontSize: "14px" }}>
-        Kopiert
-      </span>
-    )}
-
-  </div>
-)}
-
-    
-
-      {/* CASE LIST */}
-      {showCases && (
+      {/* Action Bar */}
+      {result && (
         <div style={{
-          marginTop: "20px",
-          background: "#fff",
-          padding: "16px",
-          borderRadius: "12px",
-          border: `1px solid ${brand.border}`
+          marginTop: "10px",
+          display: "flex",
+          gap: "8px",
+          flexWrap: "wrap",
         }}>
-          <h3>Konsultation auswählen</h3>
+          <Button onClick={copy} variant='primary' size='sm' style={{ borderRadius: "10px", fontWeight: 600 }}>
+            {copied ? "✓ Kopiert" : "📋 Kopieren"}
+          </Button>
+          <Button onClick={handleCreatePdf} disabled={pdfLoading} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
+            {pdfLoading ? "⏳ Speichere..." : "💾 PDF"}
+          </Button>
+          <Button onClick={handleShare} disabled={shareLoading} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
+            {shareLoading ? "⏳ Teilen..." : "↗ Teilen"}
+          </Button>
+        </div>
+      )}
+    </div>
+  </div>
 
+  {/* ═══════════════ PANELS (Cases, Patients) ═══════════════ */}
+  {showCases && (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(15, 23, 42, 0.3)",
+      backdropFilter: "blur(2px)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 100,
+    }}
+    onClick={() => setShowCases(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(600px, calc(100vw - 40px))",
+          maxHeight: "70vh",
+          background: "#fff",
+          borderRadius: uiTokens.radiusCard,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+          border: uiTokens.cardBorder,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0, fontSize: "16px" }}>Konsultation auswählen</h3>
+          <button onClick={() => setShowCases(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: brand.muted }}>✕</button>
+        </div>
+        <div style={{ padding: "12px 20px 0" }}>
           <input
             value={caseSearch}
             onChange={(e) => setCaseSearch(e.target.value)}
@@ -2115,104 +2463,94 @@ onScroll={handleChatScroll}
             style={{
               width: "100%",
               padding: "10px 12px",
-              borderRadius: "8px",
-              border: `1px solid ${brand.border}`,
-              marginBottom: "10px"
+              borderRadius: "10px",
+              border: uiTokens.cardBorder,
+              fontSize: "14px",
             }}
           />
-
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 20px" }}>
           {filteredCases.map((c: any, i: number) => {
             const lineOne = c.patientName
-              ? `${c.patientName}${c.external_id ? ` (#${c.external_id})` : ""} - ${c.title || "Unbenannte Konsultation"}`
+              ? `${c.patientName}${c.external_id ? ` (#${c.external_id})` : ""} – ${c.title || "Konsultation"}`
               : (c.title || "Unbenannte Konsultation");
-            const lineTwo = [
-              formatCaseDateTime(c.created_at) || "-",
-              c.category ? (categoryLabels[c.category] || c.category) : ""
-            ].filter(Boolean).join(" · ");
-
+            const lineTwo = [formatCaseDateTime(c.created_at) || "-", c.category ? (categoryLabels[c.category] || c.category) : ""].filter(Boolean).join(" · ");
             return (
-            <div key={i}
-              onClick={() => {
-                setSelectedCaseId(c.id);
-                const normalized = normalizeCase(c);
-                setSelectedCase(normalized);
-                setResult(c.result || "");
-                setShowCases(false);
-
-                const contextMessage = caseContextLines({ ...normalized, result: c.result || "" }).join("\n\n");
-
-                setMessages([
-                  {
-                    role: "assistant",
-                    content: "Fall wurde geladen. Du kannst jetzt Fragen stellen."
-                  },
-                  {
-                    role: "system",
-                    content: contextMessage
-                  },
-                  {
-                    role: "assistant",
-                    content: `Übergebener Bericht:\n\n${c.result || ""}`
-                  }
-                ]);
-
-                setInput("");
-              }}
-              style={{
-                padding: "10px 12px",
-                cursor: "pointer",
-                borderRadius: "10px",
-                border: selectedCaseId === c.id ? `1px solid ${brand.primary}` : "1px solid transparent",
-                background: selectedCaseId === c.id ? "#EAF4F5" : "#fff",
-                marginBottom: "6px",
-                transition: "background 0.15s ease"
-              }}
-              onMouseEnter={(e) => {
-                if (selectedCaseId !== c.id) e.currentTarget.style.background = "#F9FAFB";
-              }}
-              onMouseLeave={(e) => {
-                if (selectedCaseId !== c.id) e.currentTarget.style.background = "#fff";
-              }}
-            >
-              <div style={{ fontWeight: 600, color: brand.text }}>{lineOne}</div>
-              <div style={{ fontSize: "12px", color: brand.muted, marginTop: "2px" }}>{lineTwo}</div>
-              {c.preview ? (
-                <div style={{ fontSize: "13px", color: "#4b5563", marginTop: "4px" }}>{c.preview}</div>
-              ) : null}
-            </div>
-          );
+              <div key={i}
+                onClick={() => {
+                  setSelectedCaseId(c.id);
+                  const normalized = normalizeCase(c);
+                  setSelectedCase(normalized);
+                  setResult(c.result || "");
+                  setShowCases(false);
+                  const contextMessage = caseContextLines({ ...normalized, result: c.result || "" }).join("\n\n");
+                  setMessages([
+                    { role: "assistant", content: "Fall wurde geladen. Du kannst jetzt Fragen stellen." },
+                    { role: "system", content: contextMessage },
+                    { role: "assistant", content: `Übergebener Bericht:\n\n${c.result || ""}` },
+                  ]);
+                  setInput("");
+                }}
+                style={{
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                  borderRadius: "10px",
+                  border: selectedCaseId === c.id ? `1px solid ${brand.primary}` : "1px solid transparent",
+                  background: selectedCaseId === c.id ? "rgba(15,107,116,0.06)" : "#fff",
+                  marginBottom: "4px",
+                  transition: "background 0.12s ease",
+                }}
+                onMouseEnter={(e) => { if (selectedCaseId !== c.id) e.currentTarget.style.background = "#f8fafc"; }}
+                onMouseLeave={(e) => { if (selectedCaseId !== c.id) e.currentTarget.style.background = "#fff"; }}
+              >
+                <div style={{ fontWeight: 600, fontSize: "13px", color: brand.text }}>{lineOne}</div>
+                <div style={{ fontSize: "12px", color: brand.muted, marginTop: "2px" }}>{lineTwo}</div>
+                {c.preview && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{c.preview}</div>}
+              </div>
+            );
           })}
-
           {filteredCases.length === 0 && (
-            <div style={{ color: brand.muted, fontSize: "13px", marginTop: "6px" }}>
+            <div style={{ color: brand.muted, fontSize: "13px", textAlign: "center", padding: "20px" }}>
               Keine passenden Konsultationen gefunden.
             </div>
           )}
         </div>
-      )}
+      </div>
+    </div>
+  )}
 
-      {showPatients && (
-        <div
-          style={{
-            marginTop: "20px",
-            background: "#fff",
-            padding: "16px",
-            borderRadius: "12px",
-            border: `1px solid ${brand.border}`
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <h3 style={{ margin: 0 }}>Patient auswählen</h3>
-            <Button
-              onClick={() => setShowPatients(false)}
-              variant='ghost'
-              style={{ fontSize: "18px" }}
-              title="Schliessen"
-            >
-              ✕
-            </Button>
-          </div>
-
+  {showPatients && (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(15, 23, 42, 0.3)",
+      backdropFilter: "blur(2px)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 100,
+    }}
+    onClick={() => setShowPatients(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(600px, calc(100vw - 40px))",
+          maxHeight: "70vh",
+          background: "#fff",
+          borderRadius: uiTokens.radiusCard,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+          border: uiTokens.cardBorder,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0, fontSize: "16px" }}>Patient auswählen</h3>
+          <button onClick={() => setShowPatients(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: brand.muted }}>✕</button>
+        </div>
+        <div style={{ padding: "12px 20px 0" }}>
           <input
             value={patientSearch}
             onChange={(e) => setPatientSearch(e.target.value)}
@@ -2220,47 +2558,26 @@ onScroll={handleChatScroll}
             style={{
               width: "100%",
               padding: "10px 12px",
-              borderRadius: "8px",
-              border: `1px solid ${brand.border}`,
-              marginBottom: "10px"
+              borderRadius: "10px",
+              border: uiTokens.cardBorder,
+              fontSize: "14px",
             }}
           />
-
-          {patientsLoading && (
-            <div style={{ color: brand.muted, fontSize: "13px" }}>
-              Patienten werden geladen...
-            </div>
-          )}
-
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 20px" }}>
+          {patientsLoading && <div style={{ color: brand.muted, fontSize: "13px", textAlign: "center", padding: "20px" }}>Patienten werden geladen...</div>}
+          
           {!patientsLoading && patients.length === 0 && (
-            <div
-              style={{
-                border: `1px dashed ${brand.border}`,
-                borderRadius: "10px",
-                padding: "14px",
-                color: brand.muted,
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px"
-              }}
-            >
+            <div style={{ border: "1px dashed #cbd5e1", borderRadius: "10px", padding: "20px", color: brand.muted, textAlign: "center" }}>
               <div>Noch keine Patienten vorhanden</div>
-              <Button
-                onClick={() => {
-                  window.location.href = "/patienten";
-                }}
-                variant='secondary'
-                style={{ ...actionStyle, width: "fit-content" }}
-              >
+              <Button onClick={() => { window.location.href = "/patienten"; }} variant='secondary' size='sm' style={{ marginTop: "8px", borderRadius: "10px" }}>
                 Patient erstellen
               </Button>
             </div>
           )}
 
           {!patientsLoading && patients.length > 0 && filteredPatients.length === 0 && (
-            <div style={{ color: brand.muted, fontSize: "13px" }}>
-              Keine passenden Patienten gefunden.
-            </div>
+            <div style={{ color: brand.muted, fontSize: "13px", textAlign: "center", padding: "20px" }}>Keine passenden Patienten gefunden.</div>
           )}
 
           {!patientsLoading && filteredPatients.map((patient) => (
@@ -2272,18 +2589,14 @@ onScroll={handleChatScroll}
                 cursor: "pointer",
                 borderRadius: "10px",
                 border: selectedChatPatient?.id === patient.id ? `1px solid ${brand.primary}` : "1px solid transparent",
-                background: selectedChatPatient?.id === patient.id ? "#EAF4F5" : "#fff",
-                marginBottom: "6px",
-                transition: "background 0.15s ease"
+                background: selectedChatPatient?.id === patient.id ? "rgba(15,107,116,0.06)" : "#fff",
+                marginBottom: "4px",
+                transition: "background 0.12s ease",
               }}
-              onMouseEnter={(e) => {
-                if (selectedChatPatient?.id !== patient.id) e.currentTarget.style.background = "#F9FAFB";
-              }}
-              onMouseLeave={(e) => {
-                if (selectedChatPatient?.id !== patient.id) e.currentTarget.style.background = "#fff";
-              }}
+              onMouseEnter={(e) => { if (selectedChatPatient?.id !== patient.id) e.currentTarget.style.background = "#f8fafc"; }}
+              onMouseLeave={(e) => { if (selectedChatPatient?.id !== patient.id) e.currentTarget.style.background = "#fff"; }}
             >
-              <div style={{ fontWeight: 600, color: brand.text }}>
+              <div style={{ fontWeight: 600, fontSize: "13px", color: brand.text }}>
                 {patient.name}
                 {patient.tierart ? ` (${patient.tierart})` : ""}
                 {patient.external_id ? ` (#${patient.external_id})` : ""}
@@ -2294,76 +2607,67 @@ onScroll={handleChatScroll}
             </div>
           ))}
         </div>
-      )}
+      </div>
+    </div>
+  )}
 
-{showTemplateBuilder && (
-  <div
-    onClick={() => setShowTemplateBuilder(false)}
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(15, 23, 42, 0.36)",
-      backdropFilter: "blur(2px)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 120
-    }}
-  >
+  {/* Template Builder Modal */}
+  {showTemplateBuilder && (
     <div
-      onClick={(e) => e.stopPropagation()}
+      onClick={() => setShowTemplateBuilder(false)}
       style={{
-        width: "min(640px, calc(100vw - 32px))",
-        background: "#fff",
-        padding: "18px",
-        borderRadius: "14px",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
-        border: "1px solid #e5e7eb"
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15, 23, 42, 0.36)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 120,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-        <h3 style={{ margin: 0 }}>Neue Vorlage erstellen</h3>
-        <Button
-          onClick={() => setShowTemplateBuilder(false)}
-          variant='ghost'
-          style={{ fontSize: "18px" }}
-          title="Schliessen"
-        >
-          ✕
-        </Button>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(560px, calc(100vw - 32px))",
+          background: "#fff",
+          padding: "24px",
+          borderRadius: uiTokens.radiusCard,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+          border: uiTokens.cardBorder,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ margin: 0, fontSize: "16px" }}>Neue Vorlage erstellen</h3>
+          <button onClick={() => setShowTemplateBuilder(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: brand.muted }}>✕</button>
+        </div>
+
+        <Input
+          placeholder="Name der Vorlage"
+          value={newTemplateName}
+          onChange={(e) => setNewTemplateName(e.target.value)}
+          style={{ marginBottom: "12px" }}
+        />
+
+        <TextAreaInput
+          placeholder="Inhalt / Struktur der Vorlage"
+          value={newTemplateContent}
+          onChange={(e) => setNewTemplateContent(e.target.value)}
+          style={{ minHeight: "180px", marginBottom: "16px" }}
+        />
+
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          <Button onClick={() => setShowTemplateBuilder(false)} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
+            Abbrechen
+          </Button>
+          <Button onClick={saveTemplate} variant='primary' size='sm' style={{ borderRadius: "10px" }}>
+            Speichern
+          </Button>
+        </div>
       </div>
-
-      <Input
-        placeholder="Name der Vorlage"
-        value={newTemplateName}
-        onChange={(e) => setNewTemplateName(e.target.value)}
-        style={{ marginBottom: "10px" }}
-      />
-
-      <TextAreaInput
-        placeholder="Inhalt / Struktur der Vorlage"
-        value={newTemplateContent}
-        onChange={(e) => setNewTemplateContent(e.target.value)}
-        style={{ minHeight: "190px", marginBottom: "10px" }}
-      />
-
-      <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-        <Button
-          onClick={() => setShowTemplateBuilder(false)}
-          variant='secondary'
-          style={{ ...actionStyle, background: "#f8fafb" }}
-        >
-          Abbrechen
-        </Button>
-        <Button onClick={saveTemplate} variant='secondary' style={actionStyle}>
-          💾 Speichern
-        </Button>
-      </div>
     </div>
-  </div>
-)}
-    </div>
-    </div>
+  )}
+</div>
 </main>
   );
 }

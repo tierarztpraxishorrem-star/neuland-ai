@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { showToast } from "../../lib/toast";
+import { uiTokens, Card, Button, Section } from "../../components/ui/System";
 
 type Session = {
   id: string;
@@ -328,101 +329,73 @@ export default function HrPage() {
   }, [isRunning]);
 
   return (
-    <main className="mx-auto w-full max-w-[800px] px-4 py-10">
-      <h1 className="text-2xl font-semibold">HR Zeiterfassung</h1>
-      <p className="mt-2 text-sm text-black/60">Starte und beende deinen Arbeitstag mit einem Klick.</p>
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding, fontFamily: "inherit" }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>HR Zeiterfassung</h1>
+          <p style={{ marginTop: 6, fontSize: 14, color: uiTokens.textSecondary }}>Starte und beende deinen Arbeitstag mit einem Klick.</p>
+        </div>
 
-      <div className="mt-6 rounded-xl border border-black/10 bg-gradient-to-b from-white to-gray-50 p-5 shadow-sm">
-        <p className="text-sm text-black/60">Status</p>
-        <p className={`mt-1 text-lg font-semibold ${isRunning ? "text-green-600" : "text-gray-500"}`}>
-          {isRunning ? "läuft" : "nicht gestartet"}
-        </p>
-
-        {isRunning && currentSessionStart ? (
-          <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
-            <p className="text-sm text-green-700">Aktiv seit</p>
-            <p className="text-2xl font-semibold tracking-wide text-green-700">{runningClock}</p>
+        <Card style={{ background: "linear-gradient(180deg, #ffffff 0%, #f8fafb 100%)" }}>
+          <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Status</div>
+          <div style={{ marginTop: 4, fontSize: 18, fontWeight: 600, color: isRunning ? "#16a34a" : uiTokens.textMuted }}>
+            {isRunning ? "läuft" : "nicht gestartet"}
           </div>
-        ) : null}
 
-        {showStopReminder ? (
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
-            <p className="text-sm font-medium text-amber-800">
-              Du arbeitest seit ueber 8 Stunden - moechtest du deinen Tag beenden?
-            </p>
-            <button
-              type="button"
-              onClick={handleStop}
-              disabled={loading || actionState !== null || !isRunning}
-              className="mt-2 inline-flex min-h-10 items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
+          {isRunning && currentSessionStart ? (
+            <div style={{ marginTop: 12, borderRadius: 12, border: "1px solid #bbf7d0", background: "#f0fdf4", padding: "10px 14px" }}>
+              <div style={{ fontSize: 13, color: "#166534" }}>Aktiv seit</div>
+              <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: "0.02em", color: "#166534" }}>{runningClock}</div>
+            </div>
+          ) : null}
+
+          {showStopReminder ? (
+            <div style={{ marginTop: 12, borderRadius: 12, border: "1px solid #fde68a", background: "#fffbeb", padding: "12px 14px" }}>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "#92400e" }}>Du arbeitest seit über 8 Stunden – möchtest du deinen Tag beenden?</div>
+              <Button variant="primary" size="sm" style={{ marginTop: 8, background: "#d97706" }} onClick={handleStop} disabled={loading || actionState !== null || !isRunning}>
+                {actionState === "stop" ? "Stoppt..." : "Arbeitszeit stoppen"}
+              </Button>
+            </div>
+          ) : null}
+
+          {error ? <div style={{ marginTop: 12, fontSize: 13, color: "#dc2626" }}>{error}</div> : null}
+          {warning ? <div style={{ marginTop: 12, fontSize: 13, color: "#d97706" }}>Hinweis: {warning}</div> : null}
+
+          <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Button variant="primary" size="lg" style={{ background: "#16a34a", minWidth: 180 }} onClick={handleStart} disabled={loading || actionState !== null || isRunning}>
+              {actionState === "start" ? "Startet..." : "Arbeitszeit starten"}
+            </Button>
+            <Button variant="secondary" size="lg" style={{ minWidth: 180 }} onClick={handleStop} disabled={loading || actionState !== null || !isRunning}>
               {actionState === "stop" ? "Stoppt..." : "Arbeitszeit stoppen"}
-            </button>
+            </Button>
           </div>
-        ) : null}
+        </Card>
 
-        {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
-        {warning ? <p className="mt-3 text-sm text-amber-700">Hinweis: {warning}</p> : null}
-
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-          <button
-            type="button"
-            onClick={handleStart}
-            disabled={loading || actionState !== null || isRunning}
-            className="inline-flex min-h-12 items-center justify-center rounded-lg bg-green-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {actionState === "start" ? "Startet..." : "Arbeitszeit starten"}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleStop}
-            disabled={loading || actionState !== null || !isRunning}
-            className="inline-flex min-h-12 items-center justify-center rounded-lg bg-gray-700 px-6 py-3 text-base font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {actionState === "stop" ? "Stoppt..." : "Arbeitszeit stoppen"}
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-black/10 bg-white p-5">
-          <p className="text-sm text-black/60">Heute gearbeitet</p>
-          <p className="mt-1 text-xl font-semibold text-black">{formatHours(todayMs)}</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Card>
+            <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Heute gearbeitet</div>
+            <div style={{ marginTop: 4, fontSize: 22, fontWeight: 600 }}>{formatHours(todayMs)}</div>
+          </Card>
+          <Card>
+            <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Diese Woche</div>
+            <div style={{ marginTop: 4, fontSize: 22, fontWeight: 600 }}>{formatHours(weekMs)}</div>
+          </Card>
         </div>
 
-        <div className="rounded-xl border border-black/10 bg-white p-5">
-          <p className="text-sm text-black/60">Diese Woche</p>
-          <p className="mt-1 text-xl font-semibold text-black">{formatHours(weekMs)}</p>
-        </div>
-      </div>
-
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold">Letzte Sessions</h2>
-
-        {loading ? <p className="mt-3 text-sm text-black/60">Lade Sessions...</p> : null}
-
-        {!loading && sessions.length === 0 ? (
-          <p className="mt-3 text-sm text-black/60">Noch keine Sessions vorhanden.</p>
-        ) : null}
-
-        <div className="mt-4 space-y-3">
+        <Section title="Letzte Sessions">
+          {loading ? <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Lade Sessions...</div> : null}
+          {!loading && sessions.length === 0 ? <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Noch keine Sessions vorhanden.</div> : null}
           {sessions.map((session) => (
-            <article key={session.id} className="rounded-lg border border-black/10 bg-white p-4">
-              <p className="text-sm">
-                <span className="font-medium">Start:</span> {formatDateTime(session.started_at)}
-              </p>
-              <p className="mt-1 text-sm">
-                <span className="font-medium">Ende:</span>{" "}
-                {session.ended_at ? formatDateTime(session.ended_at) : "offen"}
-              </p>
-              <p className="mt-1 text-sm">
-                <span className="font-medium">Dauer:</span> {formatDuration(session.started_at, session.ended_at)}
-              </p>
-            </article>
+            <Card key={session.id} style={{ padding: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: 14 }}>
+                <div><span style={{ fontWeight: 600 }}>Start:</span> {formatDateTime(session.started_at)}</div>
+                <div><span style={{ fontWeight: 600 }}>Ende:</span> {session.ended_at ? formatDateTime(session.ended_at) : "offen"}</div>
+                <div><span style={{ fontWeight: 600 }}>Dauer:</span> {formatDuration(session.started_at, session.ended_at)}</div>
+              </div>
+            </Card>
           ))}
-        </div>
-      </section>
+        </Section>
+      </div>
     </main>
   );
 }

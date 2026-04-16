@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { uiTokens, Card, Badge } from "@/components/ui/System";
 
 type Contact = {
   id: string;
@@ -27,11 +28,11 @@ const STATUS_LABELS: Record<string, string> = {
   closed: "Geschlossen",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  open: "bg-red-100 text-red-800",
-  waiting: "bg-amber-100 text-amber-800",
-  resolved: "bg-green-100 text-green-800",
-  closed: "bg-gray-100 text-gray-600",
+const STATUS_TONES: Record<string, "danger" | "accent" | "success" | "default"> = {
+  open: "danger",
+  waiting: "accent",
+  resolved: "success",
+  closed: "default",
 };
 
 async function fetchWithAuth(url: string, init?: RequestInit) {
@@ -99,104 +100,118 @@ export default function WhatsAppInboxPage() {
   );
 
   return (
-    <div className="mx-auto max-w-[900px] space-y-4 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">WhatsApp Inbox</h1>
-          {totalUnread > 0 && (
-            <span className="rounded-full bg-red-500 px-2.5 py-0.5 text-xs font-bold text-white">
-              {totalUnread}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Filter tabs */}
-      <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-        {(["active", "resolved", "all"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-              filter === f
-                ? "bg-white shadow-sm"
-                : "text-gray-600 hover:text-gray-800"
-            }`}
-          >
-            {f === "active"
-              ? "Aktiv"
-              : f === "resolved"
-                ? "Erledigt"
-                : "Alle"}
-          </button>
-        ))}
-      </div>
-
-      {/* Conversation list */}
-      <div className="rounded-lg border border-black/10 bg-white">
-        {loading ? (
-          <div className="p-4 text-sm text-gray-500">Laden…</div>
-        ) : conversations.length === 0 ? (
-          <div className="p-4 text-sm text-gray-500">
-            Keine Konversationen.
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}>
+      <div style={{ width: "min(900px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>WhatsApp Inbox</h1>
+            {totalUnread > 0 && (
+              <span style={{
+                borderRadius: 999, background: "#ef4444", color: "#fff",
+                padding: "2px 10px", fontSize: 12, fontWeight: 700,
+              }}>
+                {totalUnread}
+              </span>
+            )}
           </div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {conversations.map((conv) => (
-              <Link
-                key={conv.id}
-                href={`/kommunikation/whatsapp/${conv.id}`}
-                className="flex items-center gap-3 px-4 py-3 transition hover:bg-gray-50"
-              >
-                {/* Avatar */}
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-lg">
-                  💬
-                </div>
+        </div>
 
-                {/* Content */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="truncate text-sm font-medium">
-                      {conv.contact?.display_name || conv.contact?.phone || "Unbekannt"}
-                    </span>
-                    <span className="shrink-0 text-xs text-gray-400">
-                      {timeAgo(conv.last_message_at)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="truncate text-xs text-gray-500">
-                      {conv.last_message_preview || "—"}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-1.5 pl-2">
-                      <span
-                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${STATUS_COLORS[conv.status] || ""}`}
-                      >
-                        {STATUS_LABELS[conv.status] || conv.status}
-                      </span>
-                      {conv.unread_count > 0 && (
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] font-bold text-white">
-                          {conv.unread_count}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {conv.assignee?.display_name && (
-                    <div className="text-[10px] text-gray-400">
-                      Zugewiesen: {conv.assignee.display_name}
-                    </div>
-                  )}
-                </div>
-              </Link>
-            ))}
+        {error && (
+          <div style={{ padding: 12, borderRadius: uiTokens.radiusCard, border: "1px solid #fca5a5", background: "#fef2f2", color: "#b91c1c", fontSize: 14 }}>
+            {error}
           </div>
         )}
+
+        {/* Filter tabs */}
+        <div style={{ display: "flex", gap: 4, borderRadius: uiTokens.radiusCard, background: "#f3f4f6", padding: 4 }}>
+          {(["active", "resolved", "all"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              style={{
+                padding: "8px 16px", borderRadius: 12, fontSize: 14, fontWeight: 500,
+                border: "none", cursor: "pointer",
+                background: filter === f ? "#fff" : "transparent",
+                boxShadow: filter === f ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                color: filter === f ? uiTokens.textPrimary : uiTokens.textSecondary,
+              }}
+            >
+              {f === "active" ? "Aktiv" : f === "resolved" ? "Erledigt" : "Alle"}
+            </button>
+          ))}
+        </div>
+
+        {/* Conversation list */}
+        <Card style={{ padding: 0 }}>
+          {loading ? (
+            <div style={{ padding: 16, fontSize: 14, color: uiTokens.textMuted }}>Laden…</div>
+          ) : conversations.length === 0 ? (
+            <div style={{ padding: 16, fontSize: 14, color: uiTokens.textMuted }}>Keine Konversationen.</div>
+          ) : (
+            <div>
+              {conversations.map((conv, idx) => (
+                <Link
+                  key={conv.id}
+                  href={`/kommunikation/whatsapp/${conv.id}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "12px 16px", textDecoration: "none", color: "inherit",
+                    borderTop: idx > 0 ? "1px solid #f3f4f6" : "none",
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {/* Avatar */}
+                  <div style={{
+                    width: 40, height: 40, borderRadius: "50%", background: "#dcfce7",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18, flexShrink: 0,
+                  }}>
+                    💬
+                  </div>
+
+                  {/* Content */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: uiTokens.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {conv.contact?.display_name || conv.contact?.phone || "Unbekannt"}
+                      </span>
+                      <span style={{ fontSize: 12, color: uiTokens.textMuted, flexShrink: 0 }}>
+                        {timeAgo(conv.last_message_at)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 13, color: uiTokens.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {conv.last_message_preview || "—"}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, paddingLeft: 8 }}>
+                        <Badge tone={STATUS_TONES[conv.status] || "accent"}>
+                          {STATUS_LABELS[conv.status] || conv.status}
+                        </Badge>
+                        {conv.unread_count > 0 && (
+                          <span style={{
+                            width: 20, height: 20, borderRadius: "50%", background: "#22c55e",
+                            color: "#fff", fontSize: 10, fontWeight: 700,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            {conv.unread_count}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {conv.assignee?.display_name && (
+                      <div style={{ fontSize: 11, color: uiTokens.textMuted }}>
+                        Zugewiesen: {conv.assignee.display_name}
+                      </div>
+                    )}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </Card>
       </div>
-    </div>
+    </main>
   );
 }

@@ -1,3 +1,5 @@
+import { uiTokens, Card } from "../ui/System";
+
 type VacationBudgetProps = {
   daysTotal: number;
   daysCarry: number;
@@ -17,43 +19,37 @@ export default function VacationBudget({
   const pendingPercent = total > 0 ? Math.min((daysPending / total) * 100, 100 - usedPercent) : 0;
 
   return (
-    <div className="rounded-lg border border-black/10 bg-white p-4">
-      <div className="mb-3 text-sm font-semibold">Urlaubskontingent</div>
-      <div className="mb-2 text-xs text-gray-500">
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 600, color: uiTokens.textPrimary, marginBottom: 12 }}>Urlaubskontingent</div>
+      <div style={{ fontSize: 13, color: uiTokens.textMuted, marginBottom: 8 }}>
         Jahresanspruch: {daysTotal} Tage
         {daysCarry > 0 && <> + {daysCarry} Tage Übertrag</>} = {total} Tage
         gesamt
       </div>
 
       {/* Progress bar */}
-      <div className="mb-2 h-4 overflow-hidden rounded-full bg-gray-200">
-        <div className="flex h-full">
-          <div
-            className="h-full rounded-l-full bg-green-500 transition-all"
-            style={{ width: `${usedPercent}%` }}
-          />
-          <div
-            className="h-full bg-amber-400 transition-all"
-            style={{ width: `${pendingPercent}%` }}
-          />
+      <div style={{ height: 16, borderRadius: 999, background: "#e5e7eb", overflow: "hidden", marginBottom: 8 }}>
+        <div style={{ display: "flex", height: "100%" }}>
+          <div style={{ height: "100%", borderRadius: "999px 0 0 999px", background: "#22c55e", width: `${usedPercent}%`, transition: "width 0.3s" }} />
+          <div style={{ height: "100%", background: "#fbbf24", width: `${pendingPercent}%`, transition: "width 0.3s" }} />
         </div>
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-4 text-xs">
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13, color: uiTokens.textSecondary }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#22c55e" }} />
           {daysUsed} genommen
         </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#fbbf24" }} />
           {daysPending} beantragt
         </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-200" />
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#e5e7eb" }} />
           {remaining} verfügbar
         </span>
       </div>
-    </div>
+    </Card>
   );
 }

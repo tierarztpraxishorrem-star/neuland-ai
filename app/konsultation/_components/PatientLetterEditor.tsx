@@ -36,7 +36,6 @@ export default function PatientLetterEditor({
           padding: '12px',
           borderRadius: '8px',
           border: '1px solid #ccc',
-          fontFamily: 'Arial',
         }}
       />
 
@@ -54,7 +53,6 @@ export default function PatientLetterEditor({
             padding: '12px',
             borderRadius: '8px',
             border: '1px solid #ccc',
-            fontFamily: 'Arial',
           }}
         />
       </div>

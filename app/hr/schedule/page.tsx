@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { uiTokens, Card, Button } from "../../../components/ui/System";
 
 type Shift = {
   id: string;
@@ -91,87 +92,65 @@ export default function SchedulePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[800px] space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Dienstplan</h1>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding, fontFamily: "inherit" }}>
+      <div style={{ width: "min(800px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>Dienstplan</h1>
         </div>
-      )}
 
-      {/* Week navigation */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => setWeekOffset((w) => w - 1)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          ← Vorherige Woche
-        </button>
-        <button
-          onClick={() => setWeekOffset(0)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          Aktuelle Woche
-        </button>
-        <button
-          onClick={() => setWeekOffset((w) => w + 1)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          Nächste Woche →
-        </button>
-      </div>
-
-      {/* Week grid */}
-      <div className="rounded-lg border border-black/10 bg-white p-4">
-        {loading ? (
-          <p className="text-sm text-gray-500">Laden…</p>
-        ) : (
-          <div className="grid grid-cols-7 gap-2">
-            {weekDays.map((day, idx) => {
-              const key = formatDateKey(day);
-              const dayShifts = shiftsByDate.get(key) || [];
-              const today = isToday(day);
-
-              return (
-                <div
-                  key={key}
-                  className={`min-h-[100px] rounded-md border p-2 ${
-                    today
-                      ? "border-blue-300 bg-blue-50"
-                      : "border-gray-200 bg-gray-50"
-                  }`}
-                >
-                  <div
-                    className={`mb-1 text-xs font-semibold ${today ? "text-blue-700" : "text-gray-600"}`}
-                  >
-                    {DAY_LABELS[idx]}
-                    <br />
-                    {formatDayDisplay(day)}
-                  </div>
-                  {dayShifts.length === 0 ? (
-                    <div className="text-xs text-gray-400">frei</div>
-                  ) : (
-                    dayShifts.map((s) => (
-                      <div
-                        key={s.id}
-                        className="mb-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-800"
-                      >
-                        {s.starts_at}–{s.ends_at}
-                        {s.note && (
-                          <div className="truncate text-[10px] text-green-600">
-                            {s.note}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              );
-            })}
-          </div>
+        {error && (
+          <Card style={{ border: "1px solid #fecaca", background: "#fff1f2" }}>
+            <div style={{ fontSize: 13, color: "#b91c1c" }}>{error}</div>
+          </Card>
         )}
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Button variant="secondary" size="sm" onClick={() => setWeekOffset((w) => w - 1)}>← Vorherige Woche</Button>
+          <Button variant="secondary" size="sm" onClick={() => setWeekOffset(0)}>Aktuelle Woche</Button>
+          <Button variant="secondary" size="sm" onClick={() => setWeekOffset((w) => w + 1)}>Nächste Woche →</Button>
+        </div>
+
+        <Card>
+          {loading ? (
+            <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Laden…</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
+              {weekDays.map((day, idx) => {
+                const key = formatDateKey(day);
+                const dayShifts = shiftsByDate.get(key) || [];
+                const today = isToday(day);
+
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      minHeight: 100,
+                      borderRadius: 12,
+                      border: today ? "1px solid #93c5fd" : uiTokens.cardBorder,
+                      background: today ? "#eff6ff" : "#f8fafc",
+                      padding: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 600, color: today ? "#1d4ed8" : uiTokens.textSecondary, marginBottom: 4 }}>
+                      {DAY_LABELS[idx]}<br />{formatDayDisplay(day)}
+                    </div>
+                    {dayShifts.length === 0 ? (
+                      <div style={{ fontSize: 11, color: uiTokens.textMuted }}>frei</div>
+                    ) : (
+                      dayShifts.map((s) => (
+                        <div key={s.id} style={{ marginBottom: 3, borderRadius: 6, background: "#dcfce7", padding: "2px 6px", fontSize: 11, color: "#166534" }}>
+                          {s.starts_at}–{s.ends_at}
+                          {s.note && <div style={{ fontSize: 10, color: "#16a34a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.note}</div>}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
       </div>
-    </div>
+    </main>
   );
 }

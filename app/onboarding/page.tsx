@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
+import { uiTokens, Card } from '../../components/ui/System';
 
 type MembershipRow = {
   id: string;
@@ -391,26 +392,22 @@ export default function OnboardingPage() {
     <main
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(180deg, #f4f7f8 0%, #e8f0f1 100%)',
-        padding: 32,
+        background: uiTokens.pageBackground,
+        padding: uiTokens.pagePadding,
         display: 'grid',
         placeItems: 'center'
       }}
     >
-      <div
+      <Card
         style={{
           width: 'min(780px, 100%)',
-          borderRadius: 16,
-          border: '1px solid #dbe3e5',
-          background: '#fff',
-          padding: 24,
           display: 'grid',
           gap: 18
         }}
       >
-        <h1 style={{ margin: 0, color: '#0f6b74' }}>Praxis-Zuordnung</h1>
-        <p style={{ margin: 0, color: '#64748b' }}>
-          Damit Patienten und Faelle korrekt getrennt sind, brauchst du zuerst eine Praxiszuordnung.
+        <h1 style={{ margin: 0, color: uiTokens.brand }}>Praxis-Zuordnung</h1>
+        <p style={{ margin: 0, color: uiTokens.textSecondary }}>
+          Damit Patienten und Fälle korrekt getrennt sind, brauchst du zuerst eine Praxiszuordnung.
         </p>
 
         {autoJoinMessage && (
@@ -425,9 +422,9 @@ export default function OnboardingPage() {
           </div>
         ) : (
           <>
-            <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
+            <section style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: 16, display: 'grid', gap: 10 }}>
               <h2 style={{ margin: 0, fontSize: 18 }}>Praxis suchen</h2>
-              <p style={{ margin: 0, color: '#64748b', fontSize: 13 }}>
+              <p style={{ margin: 0, color: uiTokens.textSecondary, fontSize: 13 }}>
                 Suche ist nicht case-sensitiv und findet auch Teilbegriffe (z. B. TZN).
               </p>
 
@@ -436,14 +433,14 @@ export default function OnboardingPage() {
                   value={practiceDirectoryQuery}
                   onChange={(e) => setPracticeDirectoryQuery(e.target.value)}
                   placeholder='Praxisname eingeben'
-                  style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14, flex: 1 }}
+                  style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14, flex: 1 }}
                 />
                 <button
                   onClick={searchExistingPractices}
                   disabled={searchingPractices}
                   style={{
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 10,
+                    border: uiTokens.cardBorder,
+                    borderRadius: uiTokens.radiusCard,
                     background: '#fff',
                     padding: '10px 12px',
                     fontWeight: 600,
@@ -455,7 +452,7 @@ export default function OnboardingPage() {
               </div>
 
               {practiceDirectoryResults.length > 0 ? (
-                <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, maxHeight: 220, overflow: 'auto' }}>
+                <div style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, maxHeight: 220, overflow: 'auto' }}>
                   {practiceDirectoryResults.map((practice) => (
                     <button
                       key={practice.id}
@@ -471,14 +468,14 @@ export default function OnboardingPage() {
                       }}
                     >
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{practice.name}</div>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>{practice.slug || 'ohne Kürzel'}</div>
+                      <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>{practice.slug || 'ohne Kürzel'}</div>
                     </button>
                   ))}
                 </div>
               ) : null}
 
               {joinMessage ? (
-                <div style={{ border: '1px solid #fcd34d', borderRadius: 10, background: '#fffbeb', color: '#92400e', padding: '10px 12px', fontSize: 13 }}>
+                <div style={{ border: '1px solid #fcd34d', borderRadius: uiTokens.radiusCard, background: '#fffbeb', color: '#92400e', padding: '10px 12px', fontSize: 13 }}>
                   {joinMessage}
                 </div>
               ) : null}
@@ -488,10 +485,10 @@ export default function OnboardingPage() {
                   onClick={requestPracticeJoin}
                   disabled={requestingJoin || !selectedPractice}
                   style={{
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 10,
+                    border: uiTokens.cardBorder,
+                    borderRadius: uiTokens.radiusCard,
                     background: '#fff',
-                    color: '#0f172a',
+                    color: uiTokens.textPrimary,
                     padding: '10px 14px',
                     fontWeight: 600,
                     cursor: requestingJoin || !selectedPractice ? 'not-allowed' : 'pointer'
@@ -508,8 +505,8 @@ export default function OnboardingPage() {
                     }}
                     style={{
                       border: 'none',
-                      borderRadius: 10,
-                      background: '#0f6b74',
+                      borderRadius: uiTokens.radiusCard,
+                      background: uiTokens.brand,
                       color: '#fff',
                       padding: '10px 14px',
                       fontWeight: 600,
@@ -522,30 +519,30 @@ export default function OnboardingPage() {
               </div>
             </section>
 
-            <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
+            <section style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: 16, display: 'grid', gap: 10 }}>
               <div id='create-practice' />
               <h2 style={{ margin: 0, fontSize: 18 }}>Neue Praxis erstellen</h2>
 
               <div style={{ display: 'grid', gap: 8 }}>
-                <label style={{ fontSize: 13, color: '#475569' }}>Praxis suchen (Adresse uebernehmen)</label>
+                <label style={{ fontSize: 13, color: uiTokens.textSecondary }}>Praxis suchen (Adresse übernehmen)</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     value={placeSearch}
                     onChange={(e) => setPlaceSearch(e.target.value)}
                     placeholder='z. B. Tierarztpraxis Horrem'
-                    style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14, flex: 1 }}
+                    style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14, flex: 1 }}
                   />
                   <button
                     onClick={searchPlaces}
                     disabled={searchingPlaces}
-                    style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', padding: '10px 12px', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, background: '#fff', padding: '10px 12px', fontWeight: 600, cursor: 'pointer' }}
                   >
                     {searchingPlaces ? 'Suche...' : 'Suchen'}
                   </button>
                 </div>
 
                 {placeResults.length > 0 && (
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, maxHeight: 180, overflow: 'auto' }}>
+                  <div style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, maxHeight: 180, overflow: 'auto' }}>
                     {placeResults.map((place) => (
                       <button
                         key={place.placeId}
@@ -566,7 +563,7 @@ export default function OnboardingPage() {
                         }}
                       >
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{place.name}</div>
-                        <div style={{ fontSize: 12, color: '#64748b' }}>{place.address || place.displayName}</div>
+                        <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>{place.address || place.displayName}</div>
                       </button>
                     ))}
                   </div>
@@ -577,34 +574,34 @@ export default function OnboardingPage() {
                 value={practiceName}
                 onChange={(e) => setPracticeName(e.target.value)}
                 placeholder='Praxisname'
-                style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14 }}
+                style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14 }}
               />
               <input
                 value={practiceAddress}
                 onChange={(e) => setPracticeAddress(e.target.value)}
                 placeholder='Adresse'
-                style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14 }}
+                style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14 }}
               />
               <input
                 value={practicePhone}
                 onChange={(e) => setPracticePhone(e.target.value)}
                 placeholder='Telefon (optional)'
-                style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14 }}
+                style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14 }}
               />
               <input
                 value={practiceEmail}
                 onChange={(e) => setPracticeEmail(e.target.value)}
                 placeholder='Praxis-E-Mail (optional)'
-                style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14 }}
+                style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14 }}
               />
               <input
                 value={practiceWebsite}
                 onChange={(e) => setPracticeWebsite(e.target.value)}
                 placeholder='Website (optional)'
-                style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14 }}
+                style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14 }}
               />
 
-              <div style={{ fontSize: 12, color: '#64748b' }}>
+              <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>
                 Bei professioneller Mail-Domain wird diese Praxis fuer Auto-Zuordnungen neuer Nutzer registriert.
               </div>
 
@@ -613,8 +610,8 @@ export default function OnboardingPage() {
                 disabled={saving}
                 style={{
                   border: 'none',
-                  borderRadius: 10,
-                  background: '#0f6b74',
+                  borderRadius: uiTokens.radiusCard,
+                  background: uiTokens.brand,
                   color: '#fff',
                   padding: '10px 14px',
                   fontWeight: 600,
@@ -625,22 +622,22 @@ export default function OnboardingPage() {
               </button>
             </section>
 
-            <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
+            <section style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: 16, display: 'grid', gap: 10 }}>
               <h2 style={{ margin: 0, fontSize: 18 }}>Mit Einladungscode beitreten</h2>
               <input
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value)}
                 placeholder='Einladungscode'
-                style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', fontSize: 14 }}
+                style={{ border: uiTokens.cardBorder, borderRadius: uiTokens.radiusCard, padding: '10px 12px', fontSize: 14 }}
               />
               <button
                 onClick={joinByInvite}
                 disabled={saving}
                 style={{
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 10,
+                  border: uiTokens.cardBorder,
+                  borderRadius: uiTokens.radiusCard,
                   background: '#fff',
-                  color: '#0f172a',
+                  color: uiTokens.textPrimary,
                   padding: '10px 14px',
                   fontWeight: 600,
                   cursor: saving ? 'not-allowed' : 'pointer'
@@ -651,7 +648,7 @@ export default function OnboardingPage() {
             </section>
           </>
         )}
-      </div>
+      </Card>
     </main>
   );
 }

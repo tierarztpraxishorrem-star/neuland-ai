@@ -267,11 +267,11 @@ function sentenceFromField(label: string, entry?: AnamnesisStateEntry, options?:
 
   if (entry.status === "unclear") {
     const value = entry.value?.trim();
-    return value ? `${label}: unklar (${value}).` : `${label}: unklar.`;
+    return value ? `${label}: ${value} (genauere Angabe ausstehend).` : `${label}: unklar.`;
   }
 
   const value = entry.value?.trim();
-  if (!value || value.toLowerCase() === "bekannt" || value.toLowerCase() === "erwaehnt") {
+  if (!value || value.toLowerCase() === "bekannt" || value.toLowerCase() === "erwaehnt" || value.toLowerCase() === "erhoben") {
     return `${label}: erhoben.`;
   }
 
@@ -404,38 +404,82 @@ export function normalizeAnalysis(input: Partial<LiveAnamnesisAnalysis> | null |
 }
 
 export function formatAnalysisForCaseResult(analysis: LiveAnamnesisAnalysis) {
+  const templateLabel = ANAMNESIS_TEMPLATE_META[analysis.templateKey]?.label || analysis.templateKey;
+  const fields = ANAMNESIS_TEMPLATES[analysis.templateKey] || [];
+
   const narrative = formatAnalysisNarrative(analysis, {
     includeMissing: false,
     omitFieldKeys: ["vorerkrankungen", "medikation"],
   });
   const finalNotes = extractFinalNotes(analysis);
 
-  const missing = analysis.missingPoints.length
-    ? analysis.missingPoints.map((item) => `- ${item}`).join("\n")
-    : "- Keine offenen Punkte erkannt";
+  // Build detailed field table
+  const knownFields = fields
+    .filter((f) => analysis.state[f.key]?.status === "known")
+    .map((f) => {
+      const val = analysis.state[f.key]?.value?.trim();
+      const display = val && val.toLowerCase() !== "erwaehnt" && val.toLowerCase() !== "bekannt" && val.toLowerCase() !== "erhoben"
+        ? val : "erhoben";
+      return `- **${f.label}**: ${display}`;
+    });
+
+  const unclearFields = fields
+    .filter((f) => analysis.state[f.key]?.status === "unclear")
+    .map((f) => {
+      const val = analysis.state[f.key]?.value?.trim();
+      return `- **${f.label}**: ${val || "unklar"}`;
+    });
+
+  const missingFields = fields
+    .filter((f) => !analysis.state[f.key] || analysis.state[f.key]?.status === "missing")
+    .map((f) => `- ${f.label}`);
 
   const questions = analysis.nextQuestions.length
     ? analysis.nextQuestions.map((item) => `- [${item.priority}] ${item.text}`).join("\n")
-    : "- Keine weiteren Fragen vorgeschlagen";
+    : "";
 
   const completion = analysis.isComplete
-    ? analysis.completionText || "Fertig - keine weiteren Fragen erforderlich."
+    ? analysis.completionText || "Anamnese vollständig."
     : "Noch nicht abgeschlossen.";
 
-  return [
-    "# Live Anamnese",
+  const total = fields.length;
+  const known = knownFields.length;
+  const pct = total > 0 ? Math.round(((known + unclearFields.length * 0.5) / total) * 100) : 0;
+
+  const sections: string[] = [
+    `# Live-Anamnese – ${templateLabel}`,
+    "",
+    `**Vollständigkeit: ${pct}%** (${known} erhoben, ${unclearFields.length} unklar, ${missingFields.length} fehlend)`,
+    "",
+    "## Zusammenfassung",
     narrative,
-    "# Vorerkrankungen",
-    finalNotes.vorerkrankungen,
-    "# Aktuelle Medikation",
-    finalNotes.medikation,
-    "# Empfohlene nächste Fragen",
-    questions,
-    "# Status",
-    completion,
-    "# Interner Hinweis (fehlende Angaben)",
-    missing,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ];
+
+  if (knownFields.length) {
+    sections.push("", "## Erhobene Befunde", knownFields.join("\n"));
+  }
+
+  if (unclearFields.length) {
+    sections.push("", "## Unklare Angaben", unclearFields.join("\n"));
+  }
+
+  if (finalNotes.vorerkrankungen !== "nicht erhoben") {
+    sections.push("", "## Vorerkrankungen", finalNotes.vorerkrankungen);
+  }
+
+  if (finalNotes.medikation !== "nicht erhoben") {
+    sections.push("", "## Aktuelle Medikation", finalNotes.medikation);
+  }
+
+  if (questions) {
+    sections.push("", "## Empfohlene nächste Fragen", questions);
+  }
+
+  if (missingFields.length) {
+    sections.push("", "## Fehlende Angaben", missingFields.join("\n"));
+  }
+
+  sections.push("", "## Status", completion);
+
+  return sections.join("\n");
 }

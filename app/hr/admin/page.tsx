@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import { uiTokens, Card, Section, Badge } from "../../../components/ui/System";
 
 type Session = {
   id: string;
@@ -13,6 +14,7 @@ type Session = {
 type Employee = {
   id: string;
   user_id: string;
+  display_name?: string | null;
 };
 
 type ApiResponse = {
@@ -51,9 +53,13 @@ function sanitizeEmployees(value: unknown): Employee[] {
 
   return value.filter((item): item is Employee => {
     if (!item || typeof item !== "object") return false;
-    const row = item as Employee;
+    const row = item as Record<string, unknown>;
     return typeof row.id === "string" && typeof row.user_id === "string";
-  });
+  }).map((item) => ({
+    id: item.id,
+    user_id: item.user_id,
+    display_name: (item as Record<string, unknown>).display_name as string | null | undefined,
+  }));
 }
 
 function sanitizeSessions(value: unknown): Session[] {
@@ -207,81 +213,72 @@ export default function HrAdminPage() {
   const reminderCount = missingStartEmployees.size + missingStopEmployees.size;
 
   return (
-    <main className="mx-auto max-w-[900px] px-4 py-10">
-      <h1 className="text-2xl font-semibold">HR Dashboard</h1>
-      <p className="mt-2 text-sm text-black/60">Live-Uebersicht fuer Teamzeiten und fehlende Stempel.</p>
-
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-lg border border-black/10 bg-white p-4">
-          <p className="text-sm text-black/60">Mitarbeiter</p>
-          <p className="mt-1 text-xl font-semibold">{employees.length}</p>
+    <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding, fontFamily: "inherit" }}>
+      <div style={{ width: "min(900px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: uiTokens.brand, margin: 0 }}>HR Dashboard</h1>
+          <p style={{ marginTop: 6, fontSize: 14, color: uiTokens.textSecondary }}>Live-Übersicht für Teamzeiten und fehlende Stempel.</p>
         </div>
-        <div className="rounded-lg border border-black/10 bg-white p-4">
-          <p className="text-sm text-black/60">Aktiv</p>
-          <p className="mt-1 text-xl font-semibold text-green-600">{runningEmployees.size}</p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          <Card>
+            <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Mitarbeiter</div>
+            <div style={{ marginTop: 4, fontSize: 22, fontWeight: 600 }}>{employees.length}</div>
+          </Card>
+          <Card>
+            <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Aktiv</div>
+            <div style={{ marginTop: 4, fontSize: 22, fontWeight: 600, color: "#16a34a" }}>{runningEmployees.size}</div>
+          </Card>
+          <Card>
+            <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Erinnerungen nötig</div>
+            <div style={{ marginTop: 4, fontSize: 22, fontWeight: 600, color: "#d97706" }}>{reminderCount}</div>
+          </Card>
         </div>
-        <div className="rounded-lg border border-black/10 bg-white p-4">
-          <p className="text-sm text-black/60">Erinnerungen noetig</p>
-          <p className="mt-1 text-xl font-semibold text-amber-600">{reminderCount}</p>
-        </div>
-      </div>
 
-      {loading ? <p className="mt-4 text-sm">Lade...</p> : null}
-      {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
+        {loading ? <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Lade...</div> : null}
+        {error ? <div style={{ fontSize: 14, color: "#dc2626" }}>{error}</div> : null}
 
-      {!loading && !error && reminderCount > 0 ? (
-        <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h2 className="text-sm font-semibold text-amber-900">Automatische Erinnerung</h2>
-          {missingStopEmployees.size > 0 ? (
-            <p className="mt-2 text-sm text-amber-900">
-              {missingStopEmployees.size} Mitarbeiter haben vermutlich das Ausstempeln vergessen.
-            </p>
-          ) : null}
-          {missingStartEmployees.size > 0 ? (
-            <p className="mt-2 text-sm text-amber-900">
-              {missingStartEmployees.size} Mitarbeiter haben heute noch keine Stempelung.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      <div className="mt-6 space-y-3">
-        {employees.map((emp) => {
-          const isRunning = runningEmployees.has(emp.id);
-          const today = todayStats[emp.id] || 0;
-          const forgotStop = missingStopEmployees.has(emp.id);
-          const missingStart = missingStartEmployees.has(emp.id);
-
-          return (
-            <div
-              key={emp.id}
-              className="flex items-center justify-between rounded-lg border border-black/10 bg-white p-4"
-            >
-              <div>
-                <p className="font-medium">Mitarbeiter {emp.id.slice(0, 6)}</p>
-                <p className="text-sm text-gray-500">Heute: {formatHours(today)}</p>
-                {forgotStop ? (
-                  <p className="mt-1 text-xs text-amber-700">Hat wahrscheinlich vergessen auszustempeln.</p>
-                ) : null}
-                {!forgotStop && missingStart ? (
-                  <p className="mt-1 text-xs text-amber-700">Hat heute noch nicht gestempelt.</p>
-                ) : null}
-              </div>
-
-              <div>
-                {isRunning ? (
-                  <span className="font-semibold text-green-600">aktiv</span>
-                ) : (
-                  <span className="text-gray-500">offline</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {!loading && !error && employees.length === 0 ? (
-          <p className="text-sm text-black/60">Keine Mitarbeiter gefunden.</p>
+        {!loading && !error && reminderCount > 0 ? (
+          <Card style={{ border: "1px solid #fde68a", background: "#fffbeb" }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#92400e" }}>Automatische Erinnerung</div>
+            {missingStopEmployees.size > 0 ? (
+              <div style={{ marginTop: 8, fontSize: 14, color: "#92400e" }}>{missingStopEmployees.size} Mitarbeiter haben vermutlich das Ausstempeln vergessen.</div>
+            ) : null}
+            {missingStartEmployees.size > 0 ? (
+              <div style={{ marginTop: 8, fontSize: 14, color: "#92400e" }}>{missingStartEmployees.size} Mitarbeiter haben heute noch keine Stempelung.</div>
+            ) : null}
+          </Card>
         ) : null}
+
+        <Section title="Team-Übersicht">
+          {employees.map((emp) => {
+            const isRunning = runningEmployees.has(emp.id);
+            const today = todayStats[emp.id] || 0;
+            const forgotStop = missingStopEmployees.has(emp.id);
+            const missingStart = missingStartEmployees.has(emp.id);
+
+            return (
+              <Card key={emp.id} style={{ padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{emp.display_name || `Mitarbeiter ${emp.id.slice(0, 6)}`}</div>
+                    <div style={{ fontSize: 13, color: uiTokens.textSecondary, marginTop: 2 }}>Heute: {formatHours(today)}</div>
+                    {forgotStop ? <div style={{ marginTop: 4, fontSize: 12, color: "#d97706" }}>Hat wahrscheinlich vergessen auszustempeln.</div> : null}
+                    {!forgotStop && missingStart ? <div style={{ marginTop: 4, fontSize: 12, color: "#d97706" }}>Hat heute noch nicht gestempelt.</div> : null}
+                  </div>
+                  <div>
+                    {isRunning ? (
+                      <Badge tone="success">aktiv</Badge>
+                    ) : (
+                      <Badge>offline</Badge>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+          {!loading && !error && employees.length === 0 ? <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Keine Mitarbeiter gefunden.</div> : null}
+        </Section>
       </div>
     </main>
   );
