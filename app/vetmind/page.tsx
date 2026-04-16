@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createPDFBlob, generatePDF, type PracticeProfile } from '../../lib/pdfReport';
 import AiDisclaimer from '../../components/AiDisclaimer';
 import { Button, Card, Input, TextAreaInput, uiTokens } from '../../components/ui/System';
+import PatientInfoMailDialog from '../../components/PatientInfoMailDialog';
 
 type ChatPatient = {
   id: string;
@@ -109,6 +110,7 @@ export default function VetMind() {
   const [result, setResult] = useState("");
   const [copied, setCopied] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [mailDialogOpen, setMailDialogOpen] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile | null>(null);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -2773,8 +2775,27 @@ const filteredSessions = sortedSessions.filter((s: any) => {
           <Button onClick={handleShare} disabled={shareLoading} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
             {shareLoading ? "⏳ Teilen..." : "↗ Teilen"}
           </Button>
+          <Button onClick={() => setMailDialogOpen(true)} variant='secondary' size='sm' style={{ borderRadius: "10px" }}>
+            ✉️ Per Mail
+          </Button>
         </div>
       )}
+
+      <PatientInfoMailDialog
+        open={mailDialogOpen}
+        onClose={() => setMailDialogOpen(false)}
+        defaultText={result}
+        practice={{
+          name: practiceProfile?.practiceName || 'Tierärztezentrum Neuland',
+          address: practiceProfile?.address,
+          phone: practiceProfile?.phone,
+          website: (practiceProfile as unknown as { website?: string })?.website || 'tzn-bergheim.de',
+          logoUrl: practiceProfile?.logoDataUrl || undefined,
+          primaryColor: '#0F6B74',
+        }}
+        patientName={selectedCase?.patient_name || selectedCase?.patient?.name || undefined}
+        ownerName={selectedCase?.owner_name || undefined}
+      />
 
       {/* ═══════════════ TEXT-TO-SPEECH ═══════════════ */}
       <div className="mt-3 bg-white border border-gray-200 rounded-2xl overflow-hidden">

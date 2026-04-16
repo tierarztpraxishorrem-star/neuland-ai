@@ -1602,9 +1602,27 @@ fontSize: isMobile ? '22px' : '28px',  }}
   onCopy={copyResult}
   onExtractLetter={extractPatientLetter}
   onPrintLetter={printPatientLetter}
+  onMailLetter={() => setMailDialogOpen(true)}
   onShare={shareResult}
   onDownload={downloadReport}
   buttonStyle={buttonStyle}
+/>
+
+<PatientInfoMailDialog
+  open={mailDialogOpen}
+  onClose={() => setMailDialogOpen(false)}
+  defaultText={[patientLetter, medication && `Medikation:\n${medication}`, followUp && `Kontrolle / weiteres Vorgehen:\n${followUp}`]
+    .filter(Boolean)
+    .join('\n\n')}
+  practice={{
+    name: currentPractice.name,
+    address: currentPractice.address,
+    phone: currentPractice.phone,
+    website: currentPractice.website,
+    logoUrl: currentPractice.logo,
+    primaryColor: brand.primary,
+  }}
+  patientName={patientName || undefined}
 />
 
 <CaseDetailPanel
