@@ -97,6 +97,10 @@ export default function MailDetailPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiInstruction, setAiInstruction] = useState("");
 
+  type MailTemplate = { id: string; name: string; subject: string | null; body: string };
+  const [templates, setTemplates] = useState<MailTemplate[]>([]);
+  const [signature, setSignature] = useState("");
+
   const [categorySaving, setCategorySaving] = useState(false);
 
   // Case-Verknüpfung
@@ -139,6 +143,27 @@ export default function MailDetailPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const [tRes, sRes] = await Promise.all([
+          fetchWithAuth("/api/mail/templates"),
+          fetchWithAuth("/api/mail/signature"),
+        ]);
+        if (tRes.ok) {
+          const data = await tRes.json();
+          setTemplates(data.templates || []);
+        }
+        if (sRes.ok) {
+          const data = await sRes.json();
+          setSignature(data.signature || "");
+        }
+      } catch {
+        // silently ignore
+      }
+    })();
+  }, []);
+
   const sanitizedBody = useMemo(() => {
     if (!message) return "";
     if (message.bodyContentType === "html") return sanitizeHtmlBody(message.body);
@@ -168,8 +193,12 @@ export default function MailDetailPage() {
 
     try {
       setReplySending(true);
+      // Signatur automatisch anhängen
+      const bodyWithSig = signature && !replyBody.includes(signature.trim())
+        ? `${replyBody.replace(/\s+$/, "")}\n\n${signature}`
+        : replyBody;
       const form = new FormData();
-      form.append("body", replyBody);
+      form.append("body", bodyWithSig);
       form.append("replyAll", String(replyAll));
       for (const f of replyFiles) form.append("files", f);
       const res = await fetchWithAuth(`/api/mail/messages/${encodeURIComponent(messageId)}/reply`, {
@@ -615,12 +644,42 @@ export default function MailDetailPage() {
 
             {replyOpen && (
               <form onSubmit={handleSendReply} style={{ display: "grid", gap: 10 }}>
+                {templates.length > 0 && (
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span style={{ fontSize: 12, color: uiTokens.textSecondary }}>Vorlage einfügen (optional)</span>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const t = templates.find((x) => x.id === e.target.value);
+                        if (t) setReplyBody(t.body);
+                        e.target.value = "";
+                      }}
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        border: uiTokens.cardBorder,
+                        fontSize: 13,
+                        background: "#fff",
+                      }}
+                    >
+                      <option value="">– Vorlage wählen –</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <TextAreaInput
                   label={replyAll ? "Antwort an alle Empfänger" : `Antwort an ${addrLabel(message.from)}`}
                   value={replyBody}
                   onChange={(e) => setReplyBody(e.target.value)}
                   style={{ minHeight: 200 }}
                 />
+                {signature && (
+                  <div style={{ fontSize: 11, color: uiTokens.textSecondary, fontStyle: "italic" }}>
+                    ✍️ Signatur wird automatisch beim Versenden angehängt.
+                  </div>
+                )}
 
                 <label style={{ display: "grid", gap: 6 }}>
                   <span style={{ fontSize: 12, color: uiTokens.textSecondary }}>

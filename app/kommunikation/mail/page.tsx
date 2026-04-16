@@ -74,6 +74,40 @@ export default function MailInboxPage() {
   const [composeSending, setComposeSending] = useState(false);
   const [composeInfo, setComposeInfo] = useState<string | null>(null);
 
+  // Templates + Signatur (geteilt, einmal geladen)
+  type MailTemplate = { id: string; name: string; subject: string | null; body: string };
+  const [templates, setTemplates] = useState<MailTemplate[]>([]);
+  const [signature, setSignature] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [tRes, sRes] = await Promise.all([
+          fetchWithAuth("/api/mail/templates"),
+          fetchWithAuth("/api/mail/signature"),
+        ]);
+        if (tRes.ok) {
+          const data = await tRes.json();
+          setTemplates(data.templates || []);
+        }
+        if (sRes.ok) {
+          const data = await sRes.json();
+          setSignature(data.signature || "");
+        }
+      } catch {
+        // silently ignore
+      }
+    })();
+  }, []);
+
+  function applyTemplate(tplId: string) {
+    const t = templates.find((x) => x.id === tplId);
+    if (!t) return;
+    if (t.subject && !composeSubject.trim()) setComposeSubject(t.subject);
+    // Body: Vorlage + (evtl. Signatur noch nicht dran, wird beim Senden ergänzt)
+    setComposeBody(t.body);
+  }
+
   const MAX_FILE_MB = 3;
   const MAX_TOTAL_MB = 10;
   function formatSize(bytes: number) {
@@ -142,11 +176,15 @@ export default function MailInboxPage() {
 
     try {
       setComposeSending(true);
+      // Signatur automatisch anhängen (wenn gesetzt und noch nicht im Body)
+      const bodyWithSig = signature && !composeBody.includes(signature.trim())
+        ? `${composeBody.replace(/\s+$/, "")}\n\n${signature}`
+        : composeBody;
       const form = new FormData();
       form.append("to", composeTo);
       form.append("cc", composeCc);
       form.append("subject", composeSubject);
-      form.append("body", composeBody);
+      form.append("body", bodyWithSig);
       for (const f of composeFiles) form.append("files", f);
       const res = await fetchWithAuth("/api/mail/send", { method: "POST", body: form });
       const data = await res.json();
@@ -182,7 +220,10 @@ export default function MailInboxPage() {
               </span>
             )}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Link href="/kommunikation/mail/vorlagen" style={{ textDecoration: "none" }}>
+              <Button variant="ghost">📄 Vorlagen</Button>
+            </Link>
             <Button variant="secondary" onClick={() => load()}>🔄 Aktualisieren</Button>
             <Button variant="primary" onClick={() => setShowCompose((v) => !v)}>
               {showCompose ? "Abbrechen" : "✏️ Neue Mail"}
@@ -202,6 +243,23 @@ export default function MailInboxPage() {
               Neue E-Mail
             </div>
             <form onSubmit={handleSend} style={{ display: "grid", gap: 10 }}>
+              {templates.length > 0 && (
+                <SelectInput
+                  label="Vorlage einfügen (optional)"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      applyTemplate(e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                >
+                  <option value="">– Vorlage wählen –</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </SelectInput>
+              )}
               <Input
                 label="An"
                 placeholder="empfaenger@beispiel.de (mehrere mit Komma trennen)"
