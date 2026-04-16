@@ -157,6 +157,132 @@ export default function VetMind() {
     if (ttsAudioUrlRef.current) URL.revokeObjectURL(ttsAudioUrlRef.current);
   }, []);
 
+  // ───── SharePoint state ─────
+  type SpResult = {
+    id: string;
+    driveId?: string;
+    itemId?: string;
+    name: string;
+    url: string;
+    summary?: string;
+    lastModified?: string;
+    fileType: string;
+  };
+  const [spOpen, setSpOpen] = useState(false);
+  const [spQuery, setSpQuery] = useState("");
+  const [spLoading, setSpLoading] = useState(false);
+  const [spError, setSpError] = useState<string | null>(null);
+  const [spResults, setSpResults] = useState<SpResult[]>([]);
+  const [spInsertingId, setSpInsertingId] = useState<string | null>(null);
+  const [spEditItem, setSpEditItem] = useState<SpResult | null>(null);
+  const [spEditContent, setSpEditContent] = useState("");
+  const [spEditLoading, setSpEditLoading] = useState(false);
+  const [spEditSaving, setSpEditSaving] = useState(false);
+  const [spEditError, setSpEditError] = useState<string | null>(null);
+  const [spEditInfo, setSpEditInfo] = useState<string | null>(null);
+
+  const spFetch = async (url: string, init?: RequestInit) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers = new Headers(init?.headers);
+    if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+    return fetch(url, { ...init, headers });
+  };
+
+  const handleSpSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = spQuery.trim();
+    if (!q) return;
+    setSpError(null);
+    setSpLoading(true);
+    try {
+      const res = await spFetch("/api/sharepoint/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fehler bei der Suche.");
+      setSpResults(data.results || []);
+    } catch (err) {
+      setSpError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSpLoading(false);
+    }
+  };
+
+  const handleSpInsert = async (result: SpResult) => {
+    if (!result.driveId || !result.itemId) {
+      setSpError("driveId/itemId fehlt – diese Datei kann nicht geladen werden.");
+      return;
+    }
+    setSpInsertingId(result.id);
+    setSpError(null);
+    try {
+      const url = `/api/sharepoint/files/${encodeURIComponent(result.itemId)}?driveId=${encodeURIComponent(result.driveId)}`;
+      const res = await spFetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Dateiinhalt konnte nicht geladen werden.");
+      const text = String(data.text || "").slice(0, 20000);
+      const message = `[SharePoint: ${result.name}]\n${text}`;
+      setMessages((prev) => [...prev, { role: "user", content: message }]);
+    } catch (err) {
+      setSpError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSpInsertingId(null);
+    }
+  };
+
+  const openSpEdit = async (result: SpResult) => {
+    if (!result.driveId || !result.itemId) {
+      setSpError("driveId/itemId fehlt.");
+      return;
+    }
+    setSpEditItem(result);
+    setSpEditContent("");
+    setSpEditError(null);
+    setSpEditInfo(null);
+    setSpEditLoading(true);
+    try {
+      const url = `/api/sharepoint/files/${encodeURIComponent(result.itemId)}?driveId=${encodeURIComponent(result.driveId)}`;
+      const res = await spFetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Dateiinhalt konnte nicht geladen werden.");
+      setSpEditContent(String(data.text || ""));
+    } catch (err) {
+      setSpEditError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSpEditLoading(false);
+    }
+  };
+
+  const saveSpEdit = async () => {
+    if (!spEditItem?.driveId || !spEditItem.itemId) return;
+    setSpEditSaving(true);
+    setSpEditError(null);
+    try {
+      const res = await spFetch(`/api/sharepoint/files/${encodeURIComponent(spEditItem.itemId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driveId: spEditItem.driveId, content: spEditContent }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Speichern fehlgeschlagen.");
+      setSpEditInfo("Gespeichert.");
+      setTimeout(() => setSpEditItem(null), 800);
+    } catch (err) {
+      setSpEditError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSpEditSaving(false);
+    }
+  };
+
+  const improveSpEditWithAi = () => {
+    if (!spEditItem) return;
+    const instruction = `Hier ist der Inhalt von [SharePoint: ${spEditItem.name}]. Bitte verbessere den Text (Klarheit, Rechtschreibung, Struktur) und gib nur den überarbeiteten Text zurück:\n\n${spEditContent}`;
+    setMessages((prev) => [...prev, { role: "user", content: instruction }]);
+    setSpEditItem(null);
+  };
+
   const takeLastAssistantText = () => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -2598,8 +2724,225 @@ const filteredSessions = sortedSessions.filter((s: any) => {
           </div>
         )}
       </div>
+
+      {/* ═══════════════ SHAREPOINT ═══════════════ */}
+      <div className="mt-3 bg-white border border-gray-200 rounded-2xl overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setSpOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <span>📂</span>
+            <span>SharePoint</span>
+          </span>
+          <span className={`text-gray-400 transition-transform ${spOpen ? "rotate-180" : ""}`}>▾</span>
+        </button>
+
+        {spOpen && (
+          <div className="border-t border-gray-100 p-4 space-y-3">
+            <form onSubmit={handleSpSearch} className="flex gap-2">
+              <input
+                type="text"
+                value={spQuery}
+                onChange={(e) => setSpQuery(e.target.value)}
+                placeholder="🔍 Suchen in SharePoint..."
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#0f6b74] focus:ring-2 focus:ring-[#0f6b74]/15"
+              />
+              <button
+                type="submit"
+                disabled={spLoading || !spQuery.trim()}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#0f6b74] hover:bg-[#0d5c64] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                {spLoading ? "Sucht..." : "Suchen"}
+              </button>
+            </form>
+
+            {spError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {spError}
+              </div>
+            )}
+
+            {!spLoading && spResults.length === 0 && !spError && spQuery && (
+              <div className="text-xs text-gray-500">Keine Treffer.</div>
+            )}
+
+            {spResults.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs text-gray-500">Ergebnisse: {spResults.length}</div>
+                {spResults.map((r) => (
+                  <div key={r.id} className="rounded-xl border border-gray-200 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-gray-800 truncate">
+                          📄 {r.name}
+                        </div>
+                        {r.summary && (
+                          <div
+                            className="text-xs text-gray-500 mt-1 line-clamp-2"
+                            dangerouslySetInnerHTML={{
+                              __html: r.summary.replace(/<c0>/g, '<mark>').replace(/<\/c0>/g, '</mark>')
+                            }}
+                          />
+                        )}
+                        <div className="text-[11px] text-gray-400 mt-1">
+                          {r.lastModified ? `Zuletzt geändert: ${new Date(r.lastModified).toLocaleDateString("de-DE")}` : ""}
+                          {r.fileType ? ` · .${r.fileType}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSpInsert(r)}
+                        disabled={spInsertingId === r.id || !r.driveId}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {spInsertingId === r.id ? "Lädt..." : "📥 In Chat einfügen"}
+                      </button>
+                      {r.url && (
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors"
+                        >
+                          ↗ Öffnen
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => openSpEdit(r)}
+                        disabled={!r.driveId}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ✎ Bearbeiten
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   </div>
+
+  {/* ═══════════════ SHAREPOINT EDIT MODAL ═══════════════ */}
+  {spEditItem && (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15, 23, 42, 0.45)",
+        backdropFilter: "blur(2px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 110,
+      }}
+      onClick={() => !spEditSaving && setSpEditItem(null)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(720px, calc(100vw - 40px))",
+          maxHeight: "82vh",
+          background: "#fff",
+          borderRadius: uiTokens.radiusCard,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+          border: uiTokens.cardBorder,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{
+          padding: "14px 18px",
+          borderBottom: uiTokens.cardBorder,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: uiTokens.brand }}>
+              ✎ {spEditItem.name}
+            </div>
+            <div style={{ fontSize: 11, color: uiTokens.textSecondary, marginTop: 2 }}>
+              SharePoint · .{spEditItem.fileType}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => !spEditSaving && setSpEditItem(null)}
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: 20,
+              color: uiTokens.textSecondary,
+              cursor: spEditSaving ? "not-allowed" : "pointer",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ padding: 16, flex: 1, overflow: "auto", display: "grid", gap: 10 }}>
+          {spEditLoading ? (
+            <div style={{ fontSize: 13, color: uiTokens.textSecondary }}>Lade Inhalt…</div>
+          ) : (
+            <textarea
+              value={spEditContent}
+              onChange={(e) => setSpEditContent(e.target.value)}
+              style={{
+                width: "100%",
+                minHeight: 340,
+                padding: 12,
+                borderRadius: 10,
+                border: uiTokens.cardBorder,
+                fontSize: 13,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                resize: "vertical",
+                outline: "none",
+              }}
+            />
+          )}
+          {spEditError && (
+            <div style={{ fontSize: 12, color: "#b91c1c", background: "#fff1f2", border: "1px solid #fecaca", borderRadius: 10, padding: "8px 10px" }}>
+              {spEditError}
+            </div>
+          )}
+          {spEditInfo && (
+            <div style={{ fontSize: 12, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "8px 10px" }}>
+              {spEditInfo}
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          padding: "12px 16px",
+          borderTop: uiTokens.cardBorder,
+          display: "flex",
+          gap: 8,
+          justifyContent: "flex-end",
+          flexWrap: "wrap",
+        }}>
+          <Button variant="ghost" onClick={improveSpEditWithAi} disabled={spEditLoading || spEditSaving}>
+            ✨ Mit KI verbessern
+          </Button>
+          <Button variant="secondary" onClick={() => !spEditSaving && setSpEditItem(null)} disabled={spEditSaving}>
+            Abbrechen
+          </Button>
+          <Button variant="primary" onClick={saveSpEdit} disabled={spEditLoading || spEditSaving}>
+            {spEditSaving ? "Speichert…" : "Speichern"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )}
 
   {/* ═══════════════ PANELS (Cases, Patients) ═══════════════ */}
   {showCases && (
