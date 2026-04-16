@@ -4,8 +4,33 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { uiTokens, Card, Button, TextAreaInput, Badge } from "@/components/ui/System";
+import { uiTokens, Card, Button, Badge } from "@/components/ui/System";
 import { MAIL_CATEGORIES, categoryStyle } from "@/lib/mailCategories";
+import RichTextEditor from "@/components/RichTextEditor";
+
+function plainToHtml(text: string): string {
+  if (/<[a-z][^>]*>/i.test(text)) return text;
+  return text
+    .split(/\n\n+/)
+    .map((p) => `<p>${p
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function htmlToPlain(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
 
 type MailAddress = { name?: string; address: string };
 
@@ -174,7 +199,7 @@ export default function MailDetailPage() {
     e.preventDefault();
     setReplyInfo(null);
     setError(null);
-    if (!replyBody.trim()) {
+    if (!htmlToPlain(replyBody).trim()) {
       setError("Antworttext fehlt.");
       return;
     }
@@ -193,13 +218,14 @@ export default function MailDetailPage() {
 
     try {
       setReplySending(true);
-      // Signatur automatisch anhängen
-      const bodyWithSig = signature && !replyBody.includes(signature.trim())
-        ? `${replyBody.replace(/\s+$/, "")}\n\n${signature}`
+      const sigHtml = signature ? plainToHtml(signature) : "";
+      const bodyWithSig = sigHtml && !replyBody.includes(sigHtml)
+        ? `${replyBody}<br><br>${sigHtml}`
         : replyBody;
       const form = new FormData();
       form.append("body", bodyWithSig);
       form.append("replyAll", String(replyAll));
+      form.append("isHtml", "true");
       for (const f of replyFiles) form.append("files", f);
       const res = await fetchWithAuth(`/api/mail/messages/${encodeURIComponent(messageId)}/reply`, {
         method: "POST",
@@ -331,7 +357,7 @@ export default function MailDetailPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "KI-Entwurf fehlgeschlagen.");
-      setReplyBody(data.draft || "");
+      setReplyBody(plainToHtml(data.draft || ""));
       setReplyOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
@@ -651,7 +677,7 @@ export default function MailDetailPage() {
                       defaultValue=""
                       onChange={(e) => {
                         const t = templates.find((x) => x.id === e.target.value);
-                        if (t) setReplyBody(t.body);
+                        if (t) setReplyBody(plainToHtml(t.body));
                         e.target.value = "";
                       }}
                       style={{
@@ -669,11 +695,12 @@ export default function MailDetailPage() {
                     </select>
                   </label>
                 )}
-                <TextAreaInput
+                <RichTextEditor
                   label={replyAll ? "Antwort an alle Empfänger" : `Antwort an ${addrLabel(message.from)}`}
                   value={replyBody}
-                  onChange={(e) => setReplyBody(e.target.value)}
-                  style={{ minHeight: 200 }}
+                  onChange={setReplyBody}
+                  minHeight={220}
+                  placeholder="Antwort schreiben…"
                 />
                 {signature && (
                   <div style={{ fontSize: 11, color: uiTokens.textSecondary, fontStyle: "italic" }}>

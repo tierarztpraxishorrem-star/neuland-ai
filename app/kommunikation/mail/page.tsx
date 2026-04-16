@@ -4,8 +4,33 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { uiTokens, Card, Button, Input, SelectInput, TextAreaInput, Badge } from "@/components/ui/System";
+import { uiTokens, Card, Button, Input, SelectInput, Badge } from "@/components/ui/System";
 import { MAIL_CATEGORIES, categoryStyle } from "@/lib/mailCategories";
+import RichTextEditor from "@/components/RichTextEditor";
+
+function plainToHtml(text: string): string {
+  if (/<[a-z][^>]*>/i.test(text)) return text; // sieht wie HTML aus
+  return text
+    .split(/\n\n+/)
+    .map((p) => `<p>${p
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function htmlToPlain(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
 
 type MailMessage = {
   id: string;
@@ -104,8 +129,8 @@ export default function MailInboxPage() {
     const t = templates.find((x) => x.id === tplId);
     if (!t) return;
     if (t.subject && !composeSubject.trim()) setComposeSubject(t.subject);
-    // Body: Vorlage + (evtl. Signatur noch nicht dran, wird beim Senden ergänzt)
-    setComposeBody(t.body);
+    // Vorlage ist meist plain-text – in HTML überführen, damit die Formatierung im Editor passt
+    setComposeBody(plainToHtml(t.body));
   }
 
   const MAX_FILE_MB = 3;
@@ -158,7 +183,8 @@ export default function MailInboxPage() {
       setError("Betreff fehlt.");
       return;
     }
-    if (!composeBody.trim()) {
+    // Editor liefert HTML; leeren wir sinngemäß durch Abfrage des Plaintext-Anteils
+    if (!htmlToPlain(composeBody).trim()) {
       setError("Inhalt fehlt.");
       return;
     }
@@ -176,15 +202,17 @@ export default function MailInboxPage() {
 
     try {
       setComposeSending(true);
-      // Signatur automatisch anhängen (wenn gesetzt und noch nicht im Body)
-      const bodyWithSig = signature && !composeBody.includes(signature.trim())
-        ? `${composeBody.replace(/\s+$/, "")}\n\n${signature}`
+      // Signatur als HTML-Block anhängen, falls noch nicht enthalten
+      const sigHtml = signature ? plainToHtml(signature) : "";
+      const bodyWithSig = sigHtml && !composeBody.includes(sigHtml)
+        ? `${composeBody}<br><br>${sigHtml}`
         : composeBody;
       const form = new FormData();
       form.append("to", composeTo);
       form.append("cc", composeCc);
       form.append("subject", composeSubject);
       form.append("body", bodyWithSig);
+      form.append("isHtml", "true");
       for (const f of composeFiles) form.append("files", f);
       const res = await fetchWithAuth("/api/mail/send", { method: "POST", body: form });
       const data = await res.json();
@@ -279,12 +307,12 @@ export default function MailInboxPage() {
                 onChange={(e) => setComposeSubject(e.target.value)}
                 required
               />
-              <TextAreaInput
+              <RichTextEditor
                 label="Nachricht"
                 value={composeBody}
-                onChange={(e) => setComposeBody(e.target.value)}
-                style={{ minHeight: 200 }}
-                required
+                onChange={setComposeBody}
+                minHeight={220}
+                placeholder="Nachricht schreiben…"
               />
 
               <label style={{ display: "grid", gap: 6 }}>
