@@ -59,7 +59,15 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const needle = normalizeForSearch(q);
+    const tokens = normalizeForSearch(q)
+      .split(/\s+/)
+      .filter((t) => t.length >= 2);
+    if (tokens.length === 0) {
+      return NextResponse.json(
+        { error: "Suchbegriff zu kurz oder nur Stoppwörter." },
+        { status: 400 }
+      );
+    }
 
     const [channels, users] = await Promise.all([listChannels(200), listUsers()]);
     const userMap: Record<string, string> = {};
@@ -76,7 +84,8 @@ export async function GET(req: NextRequest) {
           const { messages } = await getChannelHistory(ch.id, HISTORY_PER_CHANNEL);
           for (const m of messages) {
             if (!m.text) continue;
-            if (!normalizeForSearch(m.text).includes(needle)) continue;
+            const haystack = normalizeForSearch(m.text);
+            if (!tokens.every((t) => haystack.includes(t))) continue;
             const tsNum = parseFloat(m.ts);
             matches.push({
               id: `${ch.id}-${m.ts}`,
