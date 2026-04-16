@@ -1,380 +1,460 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
-import { supabase } from "../../../lib/supabase";
-import { uiTokens } from "../../../components/ui/System";
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, PieChart, Pie, Cell, CartesianGrid,
+} from 'recharts';
+import { supabase } from '../../../lib/supabase';
+import { uiTokens } from '../../../components/ui/System';
 
-type AdminStatsPayload = {
+// ───────────────────────── Types ─────────────────────────
+
+type DayCount = { date: string; count: number };
+
+type Stats = {
   practiceId: string;
   updatedAt: string;
-  cases: {
-    total: number;
-    last7Days: number;
-    last30Days: number;
-    missingTitle: number;
-    missingRequiredFields: number;
-    estimatedTimeSavedMinutes: number;
-    averageProcessingMinutes: number | null;
-    perWeek: Array<{ week: string; count: number }>;
-    perMonth: Array<{ month: string; count: number }>;
-    byPractice: Array<{ practiceId: string; label: string; total: number; last30Days: number }>;
+  days: number;
+  konsultationen: {
+    heute: number;
+    zeitraum: number;
+    trend: number;
+    proTag: DayCount[];
   };
-  templates: {
-    total: number;
-    usage: Array<{ template: string; count: number; sharePercent: number }>;
+  team: {
+    proMitarbeiter: {
+      userId: string;
+      name: string;
+      konsultationen: number;
+      patientenbriefe: number;
+      durchschnittMinuten: number;
+    }[];
   };
-  invitations: {
-    total: number;
-    open: number;
-    accepted: number;
-    expired: number;
+  vorlagen: {
+    nutzungsrate: number;
+    top5: { name: string; count: number }[];
+    ohneVorlage: number;
   };
-  joinRequests: {
-    total: number;
-    pending: number;
-    approved: number;
-    rejected: number;
+  zeit: {
+    durchschnittMinutenProFall: number;
+    gespaarteStunden: number;
+    gespaarteMinuten: number;
+    patientenbriefeErstellt: number;
+    verteilungNachDauer: { bucket: string; count: number }[];
   };
-  memberships: {
-    total: number;
-    owners: number;
-    admins: number;
-    members: number;
+  vetmind: {
+    chatsGesamt: number;
+    chatsZeitraum: number;
+    proTag: DayCount[];
+    aktivNutzer: number;
   };
-  activityByRole: {
-    owner: number;
-    admin: number;
-    member: number;
-    unknown: number;
-  };
-  systemStability: {
-    windowDays: number;
-    dataAvailable: boolean;
-    totalRequests: number;
-    errorRequests: number;
-    errorRatePercent: number | null;
-    p50LatencyMs: number | null;
-    p95LatencyMs: number | null;
+  qualitaet: {
+    vollstaendig: number;
+    fehlendePflichtfelder: number;
+    ohnePatientenbrief: number;
+    score: number;
   };
 };
 
-export default function AdminStatisticsPage() {
+// ───────────────────────── Constants ─────────────────────────
+
+const BRAND = '#0f6b74';
+const BRAND_LIGHT = '#14b8a6';
+const GREEN = '#22c55e';
+const AMBER = '#f59e0b';
+const RED = '#ef4444';
+const GRAY = '#94a3b8';
+
+const PERIOD_OPTIONS: { label: string; days: number }[] = [
+  { label: 'Heute', days: 1 },
+  { label: '7 Tage', days: 7 },
+  { label: '30 Tage', days: 30 },
+  { label: '90 Tage', days: 90 },
+];
+
+const PIE_COLORS = [BRAND, BRAND_LIGHT, GREEN, AMBER, GRAY];
+
+// ───────────────────────── Page ─────────────────────────
+
+export default function AdminStatistikPage() {
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<AdminStatsPayload | null>(null);
-  const [reloadTick, setReloadTick] = useState(0);
+  const [days, setDays] = useState(30);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
+  const load = useCallback(async (d: number) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error('Bitte einloggen.');
+      const res = await fetch(`/api/admin/stats?days=${d}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Fehler beim Laden.');
+      setStats(json);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unbekannter Fehler');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData.session?.access_token;
+  useEffect(() => { load(days); }, [days, load]);
 
-        if (!token) {
-          setError("Bitte einloggen, um Statistiken zu laden.");
-          setStats(null);
-          return;
-        }
+  const handlePeriod = (d: number) => {
+    setDays(d);
+  };
 
-        const res = await fetch("/api/admin/stats", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-
-        const json = (await res.json()) as AdminStatsPayload & { error?: string };
-        if (!res.ok) {
-          throw new Error(json.error || "Statistiken konnten nicht geladen werden.");
-        }
-
-        setStats(json);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Statistiken konnten nicht geladen werden.");
-        setStats(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-  }, [reloadTick]);
-
-  const topTemplate = useMemo(() => {
-    if (!stats?.templates.usage.length) return null;
-    return stats.templates.usage[0];
-  }, [stats]);
+  // Short date label for charts
+  const shortDate = (d: string) => {
+    const parts = d.split('-');
+    return `${parts[2]}.${parts[1]}.`;
+  };
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: uiTokens.pageBackground,
-        padding: uiTokens.pagePadding,
-        fontFamily: "inherit",
-      }}
-    >
-      <div style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ fontSize: 32, color: uiTokens.brand, margin: 0, fontWeight: 700 }}>Admin Statistik</h1>
-          <div style={{ marginTop: 6, fontSize: 14, color: uiTokens.textSecondary }}>
-            Datenschutzfreundliche Kennzahlen ohne inhaltliches Chat-Insights-Tracking.
+    <main style={{ minHeight: '100vh', background: uiTokens.pageBackground, padding: '24px 16px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+
+        {/* ── Header ── */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 24 }}>
+          <div>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: BRAND, margin: 0 }}>Admin Statistik</h1>
+            <div style={{ fontSize: 13, color: GRAY, marginTop: 4 }}>
+              KPIs, Trends, Team-Produktivität, VetMind
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            {PERIOD_OPTIONS.map((p) => (
+              <button
+                key={p.days}
+                type="button"
+                onClick={() => handlePeriod(p.days)}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: 10,
+                  border: days === p.days ? `2px solid ${BRAND}` : '1px solid #e5e7eb',
+                  background: days === p.days ? BRAND : '#fff',
+                  color: days === p.days ? '#fff' : '#334155',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => load(days)}
+              style={{ padding: '7px 12px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: 13, color: BRAND, fontWeight: 600 }}
+            >
+              🔄
+            </button>
+            <Link href="/admin" style={{ padding: '7px 14px', borderRadius: 10, background: '#f1f5f9', color: '#334155', textDecoration: 'none', fontWeight: 600, fontSize: 13 }}>
+              ← Admin
+            </Link>
           </div>
         </div>
 
-        <Link
-          href="/admin"
-          style={{
-            alignSelf: "flex-start",
-            background: "#0F6B74",
-            color: "#fff",
-            textDecoration: "none",
-            borderRadius: 10,
-            padding: "10px 14px",
-            fontWeight: 600,
-          }}
-        >
-          Zurück zu Admin
-        </Link>
-      </div>
+        {/* ── Error ── */}
+        {error && (
+          <div style={{ padding: 14, borderRadius: 12, background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', fontSize: 14, marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
 
-      {loading ? <div>Lade Statistiken...</div> : null}
-      {error ? (
-        <div style={{ color: "#b91c1c", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={() => setReloadTick((v) => v + 1)}
-            style={{
-              border: "1px solid #fecaca",
-              background: "#fff1f2",
-              color: "#9f1239",
-              borderRadius: 8,
-              padding: "6px 10px",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            Erneut laden
-          </button>
-        </div>
-      ) : null}
+        {/* ── Loading Skeletons ── */}
+        {loading && !stats && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} style={{ ...cardStyle, height: 100 }}>
+                <div style={{ width: '60%', height: 14, background: '#e2e8f0', borderRadius: 6, marginBottom: 12 }} />
+                <div style={{ width: '40%', height: 28, background: '#e2e8f0', borderRadius: 6 }} />
+              </div>
+            ))}
+          </div>
+        )}
 
-      {!loading && !error && stats ? (
-        <>
-          <section style={{ marginBottom: 24, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            <StatCard label="Fälle gesamt" value={String(stats.cases.total)} />
-            <StatCard label="Fälle letzte 7 Tage" value={String(stats.cases.last7Days)} />
-            <StatCard label="Fälle letzte 30 Tage" value={String(stats.cases.last30Days)} />
-            <StatCard label="Durchschn. Bearbeitungszeit/Fall" value={stats.cases.averageProcessingMinutes !== null ? `${stats.cases.averageProcessingMinutes} min` : "keine Daten"} />
-            <StatCard label="Vorlagen gesamt" value={String(stats.templates.total)} />
-            <StatCard label="Top-Vorlage" value={topTemplate ? `${topTemplate.template} (${topTemplate.count})` : "keine Daten"} />
-            <StatCard label="Einladungen offen" value={String(stats.invitations.open)} />
-            <StatCard label="Join-Requests offen" value={String(stats.joinRequests.pending)} />
-            <StatCard label="Fälle mit fehlenden Pflichtfeldern" value={String(stats.cases.missingRequiredFields)} />
-            <StatCard label="Eingesparte Zeit (Schätzung)" value={`${stats.cases.estimatedTimeSavedMinutes} min`} />
-          </section>
-
-          <section style={sectionStyle}>
-            <h2 style={sectionTitleStyle}>Fälle pro Woche / Monat</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
-              <HorizontalBars
-                title="Pro Woche"
-                rows={stats.cases.perWeek.map((item) => ({ label: item.week, value: item.count }))}
+        {stats && (
+          <>
+            {/* ── KPI Cards ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 24 }}>
+              <KpiCard
+                label="Konsultationen"
+                value={stats.konsultationen.zeitraum}
+                sub={`Heute: ${stats.konsultationen.heute}`}
+                trend={stats.konsultationen.trend}
               />
-              <HorizontalBars
-                title="Pro Monat"
-                rows={stats.cases.perMonth.map((item) => ({ label: item.month, value: item.count }))}
+              <KpiCard
+                label="VetMind Chats"
+                value={stats.vetmind.chatsZeitraum}
+                sub={`${stats.vetmind.aktivNutzer} aktive Nutzer`}
+              />
+              <KpiCard
+                label="Gesparte Zeit"
+                value={`${stats.zeit.gespaarteStunden}h ${stats.zeit.gespaarteMinuten}m`}
+                sub={`Ø ${stats.zeit.durchschnittMinutenProFall} min/Fall`}
+                isText
+              />
+              <KpiCard
+                label="Patientenbriefe"
+                value={stats.zeit.patientenbriefeErstellt}
+                sub={`${stats.vorlagen.nutzungsrate}% nutzen Vorlagen`}
               />
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <SimpleTable
-                title="Je Praxis (im aktuellen Zugriff)"
-                rows={stats.cases.byPractice.map((item) => [item.label, `${item.total} gesamt / ${item.last30Days} in 30d`])}
-                col1="Praxis"
-                col2="Fälle"
-              />
-            </div>
-          </section>
+            {/* ── Konsultationen pro Tag ── */}
+            <SectionCard title="Konsultationen im Zeitverlauf">
+              <div style={{ width: '100%', height: 260 }}>
+                <ResponsiveContainer>
+                  <BarChart data={stats.konsultationen.proTag} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 11, fill: GRAY }} interval="preserveStartEnd" />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: GRAY }} />
+                    <Tooltip
+                      formatter={(v) => [v, 'Konsultationen']}
+                      labelFormatter={(l) => `Datum: ${l}`}
+                      contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    />
+                    <Bar dataKey="count" fill={BRAND} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </SectionCard>
 
-          <section style={sectionStyle}>
-            <h2 style={sectionTitleStyle}>Nutzungsquote Vorlagen</h2>
-            {stats.templates.usage.length === 0 ? (
-              <div style={{ color: "#64748b", fontSize: 14 }}>Noch keine Vorlagennutzung in den ausgewerteten Fällen.</div>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {stats.templates.usage.map((item) => (
-                  <div key={item.template} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                    <div style={{ fontWeight: 700, color: "#0f172a" }}>{item.template}</div>
-                    <div style={{ fontSize: 13, color: "#475569" }}>
-                      Nutzung: {item.count} ({item.sharePercent.toFixed(1)}%)
-                    </div>
-                    <div style={{ marginTop: 6, height: 8, background: "#e2e8f0", borderRadius: 999 }}>
-                      <div
-                        style={{
-                          width: `${Math.max(2, Math.min(100, item.sharePercent))}%`,
-                          height: "100%",
-                          borderRadius: 999,
-                          background: "#0F6B74",
-                        }}
-                      />
+            {/* ── 2-Column: Team + Vorlagen ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16, marginBottom: 16 }}>
+
+              {/* Team */}
+              <SectionCard title="Team-Produktivität">
+                {stats.team.proMitarbeiter.length === 0 ? (
+                  <div style={{ color: GRAY, fontSize: 13 }}>Keine Daten im Zeitraum.</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {stats.team.proMitarbeiter.map((m) => {
+                      const max = stats.team.proMitarbeiter[0]?.konsultationen || 1;
+                      return (
+                        <div key={m.userId}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#334155', marginBottom: 4 }}>
+                            <span style={{ fontWeight: 600 }}>{m.name}</span>
+                            <span>{m.konsultationen} Kons. · {m.patientenbriefe} Briefe · Ø {m.durchschnittMinuten}m</span>
+                          </div>
+                          <div style={{ height: 8, background: '#e2e8f0', borderRadius: 999 }}>
+                            <div style={{ width: `${Math.max(3, (m.konsultationen / max) * 100)}%`, height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${BRAND} 0%, ${BRAND_LIGHT} 100%)` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </SectionCard>
+
+              {/* Vorlagen */}
+              <SectionCard title="Vorlagen-Nutzung">
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ width: 160, height: 160 }}>
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'Mit Vorlage', value: stats.vorlagen.nutzungsrate },
+                            { name: 'Ohne Vorlage', value: 100 - stats.vorlagen.nutzungsrate },
+                          ]}
+                          dataKey="value"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={70}
+                          startAngle={90}
+                          endAngle={-270}
+                        >
+                          <Cell fill={BRAND} />
+                          <Cell fill="#e2e8f0" />
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ textAlign: 'center', marginTop: -85, fontSize: 22, fontWeight: 700, color: BRAND }}>
+                      {stats.vorlagen.nutzungsrate}%
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section style={sectionStyle}>
-            <h2 style={sectionTitleStyle}>Nutzeraktivität je Rolle (30 Tage)</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              <StatCard label="Owner" value={String(stats.activityByRole.owner)} compact />
-              <StatCard label="Admin" value={String(stats.activityByRole.admin)} compact />
-              <StatCard label="Member" value={String(stats.activityByRole.member)} compact />
-              <StatCard label="Unbekannt" value={String(stats.activityByRole.unknown)} compact />
+                  <div style={{ flex: 1, minWidth: 150 }}>
+                    <div style={{ fontSize: 12, color: GRAY, marginBottom: 8 }}>Top-Vorlagen</div>
+                    {stats.vorlagen.top5.length === 0 ? (
+                      <div style={{ fontSize: 13, color: GRAY }}>Keine Daten.</div>
+                    ) : (
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {stats.vorlagen.top5.map((t, i) => (
+                          <div key={t.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span style={{ width: 8, height: 8, borderRadius: 999, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }} />
+                              <span style={{ color: '#334155' }}>{t.name}</span>
+                            </span>
+                            <span style={{ fontWeight: 700, color: BRAND }}>{t.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: AMBER, marginTop: 8 }}>
+                      {stats.vorlagen.ohneVorlage} Fälle ohne Vorlage
+                    </div>
+                  </div>
+                </div>
+              </SectionCard>
             </div>
-          </section>
 
-          <section style={sectionStyle}>
-            <h2 style={sectionTitleStyle}>Einladungen und Join-Requests</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <StatCard label="Einladungen erstellt" value={String(stats.invitations.total)} compact />
-              <StatCard label="Einladungen angenommen" value={String(stats.invitations.accepted)} compact />
-              <StatCard label="Einladungen abgelaufen" value={String(stats.invitations.expired)} compact />
-              <StatCard label="Join-Requests gesamt" value={String(stats.joinRequests.total)} compact />
-              <StatCard label="Join-Requests offen" value={String(stats.joinRequests.pending)} compact />
-              <StatCard label="Join-Requests freigegeben" value={String(stats.joinRequests.approved)} compact />
-              <StatCard label="Join-Requests abgelehnt" value={String(stats.joinRequests.rejected)} compact />
+            {/* ── 2-Column: VetMind + Zeiteffizienz ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16, marginBottom: 16 }}>
+
+              {/* VetMind */}
+              <SectionCard title="VetMind-Nutzung">
+                <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <MiniStat label="Chats gesamt" value={String(stats.vetmind.chatsGesamt)} />
+                  <MiniStat label="Im Zeitraum" value={String(stats.vetmind.chatsZeitraum)} />
+                  <MiniStat label="Aktive Nutzer" value={String(stats.vetmind.aktivNutzer)} />
+                </div>
+                <div style={{ width: '100%', height: 180 }}>
+                  <ResponsiveContainer>
+                    <AreaChart data={stats.vetmind.proTag} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="gradVetmind" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={BRAND_LIGHT} stopOpacity={0.4} />
+                          <stop offset="95%" stopColor={BRAND_LIGHT} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: GRAY }} interval="preserveStartEnd" />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: GRAY }} />
+                      <Tooltip
+                        formatter={(v) => [v, 'VetMind Chats']}
+                        labelFormatter={(l) => `Datum: ${l}`}
+                        contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }}
+                      />
+                      <Area type="monotone" dataKey="count" stroke={BRAND_LIGHT} fill="url(#gradVetmind)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </SectionCard>
+
+              {/* Zeiteffizienz */}
+              <SectionCard title="Zeiteffizienz">
+                <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <MiniStat label="Ø pro Fall" value={`${stats.zeit.durchschnittMinutenProFall} min`} />
+                  <MiniStat label="Gespart" value={`${stats.zeit.gespaarteStunden}h ${stats.zeit.gespaarteMinuten}m`} />
+                  <MiniStat label="Briefe" value={String(stats.zeit.patientenbriefeErstellt)} />
+                </div>
+                <div style={{ width: '100%', height: 180 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={stats.zeit.verteilungNachDauer} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="bucket" tick={{ fontSize: 12, fill: GRAY }} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: GRAY }} />
+                      <Tooltip
+                        formatter={(v) => [v, 'Fälle']}
+                        contentStyle={{ borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12 }}
+                      />
+                      <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                        <Cell fill={GREEN} />
+                        <Cell fill={AMBER} />
+                        <Cell fill={RED} />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </SectionCard>
             </div>
-          </section>
 
-          <section style={sectionStyle}>
-            <h2 style={sectionTitleStyle}>Datenqualität</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <StatCard label="Fälle ohne Titel" value={String(stats.cases.missingTitle)} compact />
-              <StatCard label="Fälle mit fehlenden Pflichtfeldern" value={String(stats.cases.missingRequiredFields)} compact />
-            </div>
-          </section>
-
-          <section style={sectionStyle}>
-            <h2 style={sectionTitleStyle}>Systemstabilität</h2>
-            {stats.systemStability.dataAvailable ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-                <StatCard label={`API Requests (${stats.systemStability.windowDays}d)`} value={String(stats.systemStability.totalRequests)} compact />
-                <StatCard label="API Fehler" value={String(stats.systemStability.errorRequests)} compact />
-                <StatCard label="API Fehlerrate" value={`${stats.systemStability.errorRatePercent ?? 0}%`} compact />
-                <StatCard label="Antwortzeit p50" value={stats.systemStability.p50LatencyMs !== null ? `${Math.round(stats.systemStability.p50LatencyMs)} ms` : "-"} compact />
-                <StatCard label="Antwortzeit p95" value={stats.systemStability.p95LatencyMs !== null ? `${Math.round(stats.systemStability.p95LatencyMs)} ms` : "-"} compact />
+            {/* ── Datenqualität ── */}
+            <SectionCard title="Datenqualität">
+              <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', width: 110, height: 110 }}>
+                  <svg viewBox="0 0 36 36" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
+                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                    <path
+                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      fill="none"
+                      stroke={stats.qualitaet.score >= 70 ? GREEN : stats.qualitaet.score >= 40 ? AMBER : RED}
+                      strokeWidth="3"
+                      strokeDasharray={`${stats.qualitaet.score}, 100`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 24, fontWeight: 700, color: '#0f172a' }}>
+                    {stats.qualitaet.score}
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <QualityRow icon="✓" label="Vollständig" value={stats.qualitaet.vollstaendig} color={GREEN} />
+                  <QualityRow icon="⚠" label="Fehlende Pflichtfelder" value={stats.qualitaet.fehlendePflichtfelder} color={AMBER} />
+                  <QualityRow icon="✉" label="Ohne Patientenbrief" value={stats.qualitaet.ohnePatientenbrief} color={RED} />
+                </div>
               </div>
-            ) : (
-              <div style={{ color: "#64748b", fontSize: 14 }}>
-                API-Fehlerrate und Antwortzeiten sind noch nicht verfügbar (keine kompatible Log-Tabelle gefunden).
-              </div>
-            )}
-          </section>
-        </>
-      ) : null}
+            </SectionCard>
+          </>
+        )}
+      </div>
     </main>
   );
 }
 
-function StatCard({ label, value, compact }: { label: string; value: string; compact?: boolean }) {
-  return (
-    <div
-      style={{
-        background: uiTokens.cardBackground,
-        borderRadius: 14,
-        border: uiTokens.cardBorder,
-        padding: compact ? 14 : 18,
-      }}
-    >
-      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: compact ? 24 : 30, fontWeight: 700, color: "#0F6B74" }}>{value}</div>
-    </div>
-  );
-}
+// ───────────────────────── Components ─────────────────────────
 
-function SimpleTable({ title, rows, col1, col2 }: { title: string; rows: string[][]; col1: string; col2: string }) {
+function KpiCard({ label, value, sub, trend, isText }: { label: string; value: string | number; sub?: string; trend?: number; isText?: boolean }) {
   return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-      <div style={{ fontWeight: 700, padding: "10px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>{title}</div>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ textAlign: "left", fontSize: 12, color: "#64748b" }}>
-            <th style={{ padding: "10px 12px" }}>{col1}</th>
-            <th style={{ padding: "10px 12px" }}>{col2}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td style={{ padding: "10px 12px", color: "#64748b" }} colSpan={2}>Keine Daten</td>
-            </tr>
-          ) : (
-            rows.map((row) => (
-              <tr key={`${row[0]}_${row[1]}`} style={{ borderTop: "1px solid #f1f5f9" }}>
-                <td style={{ padding: "10px 12px", color: "#334155" }}>{row[0]}</td>
-                <td style={{ padding: "10px 12px", color: "#0f172a", fontWeight: 600 }}>{row[1]}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function HorizontalBars({ title, rows }: { title: string; rows: Array<{ label: string; value: number }> }) {
-  const max = rows.reduce((m, r) => (r.value > m ? r.value : m), 0);
-
-  return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-      <div style={{ fontWeight: 700, padding: "10px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>{title}</div>
-      <div style={{ padding: 12, display: "grid", gap: 10 }}>
-        {rows.length === 0 ? (
-          <div style={{ color: "#64748b", fontSize: 13 }}>Keine Daten</div>
-        ) : (
-          rows.map((row) => {
-            const width = max > 0 ? (row.value / max) * 100 : 0;
-            return (
-              <div key={`${title}_${row.label}`}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#334155", marginBottom: 4 }}>
-                  <span>{row.label}</span>
-                  <span style={{ fontWeight: 700 }}>{row.value}</span>
-                </div>
-                <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999 }}>
-                  <div
-                    style={{
-                      width: `${Math.max(2, width)}%`,
-                      height: "100%",
-                      borderRadius: 999,
-                      background: "linear-gradient(90deg, #0F6B74 0%, #14b8a6 100%)",
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })
+    <div style={cardStyle}>
+      <div style={{ fontSize: 12, color: GRAY, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: isText ? 24 : 32, fontWeight: 700, color: BRAND, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+        {sub && <span style={{ fontSize: 12, color: GRAY }}>{sub}</span>}
+        {trend !== undefined && trend !== 0 && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: trend > 0 ? '#22c55e' : '#ef4444' }}>
+            {trend > 0 ? '▲' : '▼'} {trend > 0 ? '+' : ''}{trend}%
+          </span>
         )}
       </div>
     </div>
   );
 }
 
-const sectionStyle: CSSProperties = {
-  marginBottom: 18,
-  background: uiTokens.cardBackground,
-  borderRadius: 16,
-  border: uiTokens.cardBorder,
-  padding: 18,
-};
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ ...cardStyle, marginBottom: 16 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 14 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
 
-const sectionTitleStyle: CSSProperties = {
-  fontSize: 20,
-  marginTop: 0,
-  marginBottom: 12,
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: GRAY }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: BRAND }}>{value}</div>
+    </div>
+  );
+}
+
+function QualityRow({ icon, label, value, color }: { icon: string; label: string; value: number; color: string }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+      <span style={{ color, fontWeight: 700 }}>{icon}</span>
+      <span style={{ color: '#334155' }}>{label}:</span>
+      <span style={{ fontWeight: 700, color: '#0f172a' }}>{value}</span>
+    </div>
+  );
+}
+
+// ───────────────────────── Styles ─────────────────────────
+
+const cardStyle: React.CSSProperties = {
+  background: '#fff',
+  borderRadius: 14,
+  border: '1px solid #e5e7eb',
+  padding: 18,
 };

@@ -1,456 +1,359 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getUserPractice } from '../../../../lib/server/getUserPractice';
 
-type PracticeMembershipRow = {
-  user_id?: string | null;
-  practice_id: string;
-  role: string;
-  created_at: string;
-};
+export const runtime = 'nodejs';
 
-type CaseRow = {
-  created_at: string | null;
-  updated_at: string | null;
-  template: string | null;
-  user_id?: string | null;
-  title?: string | null;
-  result?: string | null;
-};
+// ───────────────────────────────── types ─────────────────────────────────
 
-type InvitationRow = {
-  accepted_at: string | null;
-  expires_at: string | null;
-};
+type DayCount = { date: string; count: number };
 
-type JoinRequestStatus = 'pending' | 'approved' | 'rejected';
-
-type JoinRequestRow = {
-  status: JoinRequestStatus;
-};
-
-type ApiRequestLogRow = {
-  status_code: number | null;
-  latency_ms: number | null;
-};
-
-type AdminStatsPayload = {
+type StatsPayload = {
   practiceId: string;
   updatedAt: string;
-  cases: {
-    total: number;
-    last7Days: number;
-    last30Days: number;
-    missingTitle: number;
-    missingRequiredFields: number;
-    estimatedTimeSavedMinutes: number;
-    averageProcessingMinutes: number | null;
-    perWeek: Array<{ week: string; count: number }>;
-    perMonth: Array<{ month: string; count: number }>;
-    byPractice: Array<{ practiceId: string; label: string; total: number; last30Days: number }>;
+  days: number;
+
+  konsultationen: {
+    heute: number;
+    zeitraum: number;
+    trend: number; // % vs Vorperiode
+    proTag: DayCount[];
   };
-  templates: {
-    total: number;
-    usage: Array<{ template: string; count: number; sharePercent: number }>;
+
+  team: {
+    proMitarbeiter: {
+      userId: string;
+      name: string;
+      konsultationen: number;
+      patientenbriefe: number;
+      durchschnittMinuten: number;
+    }[];
   };
-  invitations: {
-    total: number;
-    open: number;
-    accepted: number;
-    expired: number;
+
+  vorlagen: {
+    nutzungsrate: number;
+    top5: { name: string; count: number }[];
+    ohneVorlage: number;
   };
-  joinRequests: {
-    total: number;
-    pending: number;
-    approved: number;
-    rejected: number;
+
+  zeit: {
+    durchschnittMinutenProFall: number;
+    gespaarteStunden: number;
+    gespaarteMinuten: number;
+    patientenbriefeErstellt: number;
+    verteilungNachDauer: { bucket: string; count: number }[];
   };
-  memberships: {
-    total: number;
-    owners: number;
-    admins: number;
-    members: number;
+
+  vetmind: {
+    chatsGesamt: number;
+    chatsZeitraum: number;
+    proTag: DayCount[];
+    aktivNutzer: number;
   };
-  activityByRole: {
-    owner: number;
-    admin: number;
-    member: number;
-    unknown: number;
-  };
-  systemStability: {
-    windowDays: number;
-    dataAvailable: boolean;
-    totalRequests: number;
-    errorRequests: number;
-    errorRatePercent: number | null;
-    p50LatencyMs: number | null;
-    p95LatencyMs: number | null;
+
+  qualitaet: {
+    vollstaendig: number;
+    fehlendePflichtfelder: number;
+    ohnePatientenbrief: number;
+    score: number;
   };
 };
 
-const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
+// ───────────────────────────────── helpers ─────────────────────────────────
 
-const weekKey = (value: Date) => {
-  const d = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
-  const day = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
-};
+const dayKey = (d: Date) =>
+  `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 
-const monthKey = (value: Date) => `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}`;
+function fillDays(start: Date, end: Date, counts: Map<string, number>): DayCount[] {
+  const result: DayCount[] = [];
+  const d = new Date(start);
+  while (d <= end) {
+    const key = dayKey(d);
+    result.push({ date: key, count: counts.get(key) || 0 });
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return result;
+}
 
-const percentile = (values: number[], p: number): number | null => {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.floor((sorted.length - 1) * p);
-  return sorted[idx] ?? null;
-};
-
-const safeDate = (value: string | null) => {
+function safeDate(value: string | null): Date | null {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
-};
+}
 
-const getBearerToken = (req: Request) => {
-  const header = req.headers.get('authorization') || '';
-  if (!header.toLowerCase().startsWith('bearer ')) return null;
-  const token = header.slice(7).trim();
-  return token || null;
-};
+function trendPercent(current: number, previous: number): number {
+  if (previous === 0) return current > 0 ? 100 : 0;
+  return Math.round(((current - previous) / previous) * 100);
+}
 
-const getSupabaseClientForToken = (token: string) => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return null;
-
-  return createClient(url, anon, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-};
-
-const rankRole = (role: string) => {
-  if (role === 'owner') return 0;
-  if (role === 'admin') return 1;
-  return 2;
-};
-
-const resolvePracticeAccess = async (req: Request) => {
-  const token = getBearerToken(req);
-  if (!token) {
-    return { error: NextResponse.json({ error: 'Nicht angemeldet.' }, { status: 401 }) };
-  }
-
-  const supabase = getSupabaseClientForToken(token);
-  if (!supabase) {
-    return { error: NextResponse.json({ error: 'Supabase-Konfiguration fehlt.' }, { status: 500 }) };
-  }
-
-  const userRes = await supabase.auth.getUser(token);
-  if (!userRes.data.user) {
-    return { error: NextResponse.json({ error: 'Ungültige Sitzung.' }, { status: 401 }) };
-  }
-
-  const membershipsRes = await supabase
-    .from('practice_memberships')
-    .select('practice_id, role, created_at')
-    .order('created_at', { ascending: true });
-
-  const memberships = (membershipsRes.data || []) as PracticeMembershipRow[];
-  if (membershipsRes.error || memberships.length === 0) {
-    return { error: NextResponse.json({ error: 'Keine Praxiszuordnung gefunden.' }, { status: 403 }) };
-  }
-
-  const sorted = [...memberships].sort((a, b) => {
-    const ra = rankRole(a.role);
-    const rb = rankRole(b.role);
-    if (ra !== rb) return ra - rb;
-    return String(a.created_at || '').localeCompare(String(b.created_at || ''));
-  });
-
-  const practiceId = sorted[0]?.practice_id || null;
-  if (!practiceId) {
-    return { error: NextResponse.json({ error: 'Praxis-ID fehlt.' }, { status: 403 }) };
-  }
-
-  return {
-    supabase,
-    practiceId,
-  };
-};
+// ───────────────────────────────── GET ─────────────────────────────────
 
 export async function GET(req: Request) {
   try {
-    const access = await resolvePracticeAccess(req);
-    if ('error' in access) return access.error;
+    const auth = await getUserPractice(req, { allowedRoles: ['admin', 'owner'] });
+    if (!auth.ok) return auth.response;
 
-    const { supabase, practiceId } = access;
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    const from7Days = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const from30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const from365Days = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
+    const { supabase, practiceId } = auth.context;
 
+    const url = new URL(req.url);
+    const daysParam = Number(url.searchParams.get('days')) || 30;
+    const days = [1, 7, 30, 90].includes(daysParam) ? daysParam : 30;
+
+    const now = new Date();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const periodStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const prevPeriodStart = new Date(periodStart.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const periodIso = periodStart.toISOString();
+    const prevIso = prevPeriodStart.toISOString();
+    const todayIso = todayStart.toISOString();
+
+    // ── Parallel: main data fetches ──
     const [
-      casesTotalRes,
-      cases7Res,
-      cases30Res,
-      casesMissingTitleRes,
-      templatesTotalRes,
-      invitationsRes,
-      joinRequestsRes,
+      casesAllRes,
+      casesPrevRes,
+      casesTodayRes,
+      vetmindAllRes,
+      vetmindPrevRes,
+      vetmindTodayRes,
       membershipsRes,
     ] = await Promise.all([
-      supabase.from('cases').select('id', { count: 'exact', head: true }).eq('practice_id', practiceId),
-      supabase
-        .from('cases')
-        .select('id', { count: 'exact', head: true })
-        .eq('practice_id', practiceId)
-        .gte('created_at', from7Days),
-      supabase
-        .from('cases')
-        .select('id', { count: 'exact', head: true })
-        .eq('practice_id', practiceId)
-        .gte('created_at', from30Days),
-      supabase
-        .from('cases')
-        .select('id', { count: 'exact', head: true })
-        .eq('practice_id', practiceId)
-        .or('title.is.null,title.eq.'),
-      supabase.from('templates').select('id', { count: 'exact', head: true }).eq('practice_id', practiceId),
-      supabase
-        .from('practice_invitations')
-        .select('accepted_at, expires_at')
-        .eq('practice_id', practiceId)
-        .limit(2000),
-      supabase
-        .from('practice_join_requests')
-        .select('status')
-        .eq('practice_id', practiceId)
-        .limit(2000),
-      supabase.from('practice_memberships').select('role, user_id').eq('practice_id', practiceId).limit(5000),
-    ]);
-
-    if (
-      casesTotalRes.error ||
-      cases7Res.error ||
-      cases30Res.error ||
-      casesMissingTitleRes.error ||
-      templatesTotalRes.error ||
-      invitationsRes.error ||
-      joinRequestsRes.error ||
-      membershipsRes.error
-    ) {
-      return NextResponse.json({ error: 'Statistiken konnten nicht geladen werden.' }, { status: 500 });
-    }
-
-    const [casesMissingRequiredRes, casesRowsRes, practiceSettingsRes] = await Promise.all([
-      supabase
-        .from('cases')
-        .select('id', { count: 'exact', head: true })
-        .eq('practice_id', practiceId)
-        .or('title.is.null,title.eq.,result.is.null,result.eq.'),
       supabase
         .from('cases')
         .select('created_at, updated_at, template, user_id, title, result')
         .eq('practice_id', practiceId)
-        .gte('created_at', from365Days)
+        .gte('created_at', periodIso)
+        .order('created_at', { ascending: true })
         .limit(20000),
-      supabase.from('practice_settings').select('practice_name').eq('practice_id', practiceId).maybeSingle(),
+      supabase
+        .from('cases')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .gte('created_at', prevIso)
+        .lt('created_at', periodIso),
+      supabase
+        .from('cases')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .gte('created_at', todayIso),
+      supabase
+        .from('vetmind_sessions')
+        .select('user_id, created_at')
+        .eq('practice_id', practiceId)
+        .gte('created_at', periodIso)
+        .order('created_at', { ascending: true })
+        .limit(20000),
+      supabase
+        .from('vetmind_sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .gte('created_at', prevIso)
+        .lt('created_at', periodIso),
+      supabase
+        .from('vetmind_sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('practice_id', practiceId)
+        .gte('created_at', todayIso),
+      supabase
+        .from('practice_memberships')
+        .select('user_id, role')
+        .eq('practice_id', practiceId)
+        .limit(500),
     ]);
 
-    const invitations = (invitationsRes.data || []) as InvitationRow[];
-    const joinRequests = (joinRequestsRes.data || []) as JoinRequestRow[];
-    const memberships = (membershipsRes.data || []) as Array<{ role: string | null; user_id: string | null }>;
-    const cases = casesRowsRes.error ? [] : ((casesRowsRes.data || []) as CaseRow[]);
-    const practiceName = typeof practiceSettingsRes.data?.practice_name === 'string'
-      ? practiceSettingsRes.data.practice_name
-      : null;
+    // Vetmind total count
+    const vetmindTotalRes = await supabase
+      .from('vetmind_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('practice_id', practiceId);
 
-    const invitationAccepted = invitations.filter((item) => Boolean(item.accepted_at)).length;
-    const invitationExpired = invitations.filter((item) => {
-      if (!item.expires_at || item.accepted_at) return false;
-      return new Date(item.expires_at).getTime() < Date.now();
-    }).length;
-    const invitationOpen = Math.max(invitations.length - invitationAccepted - invitationExpired, 0);
+    type CaseRow = {
+      created_at: string | null;
+      updated_at: string | null;
+      template: string | null;
+      user_id: string | null;
+      title: string | null;
+      result: string | null;
+    };
 
-    const pending = joinRequests.filter((item) => item.status === 'pending').length;
-    const approved = joinRequests.filter((item) => item.status === 'approved').length;
-    const rejected = joinRequests.filter((item) => item.status === 'rejected').length;
+    const cases = (casesAllRes.data || []) as CaseRow[];
+    const vetmindSessions = (vetmindPrevRes.error ? [] : (vetmindAllRes.data || [])) as Array<{
+      user_id: string | null;
+      created_at: string | null;
+    }>;
 
-    const owners = memberships.filter((item) => item.role === 'owner').length;
-    const admins = memberships.filter((item) => item.role === 'admin').length;
-    const members = memberships.filter((item) => item.role === 'member').length;
-
-    const last30Boundary = new Date(from30Days).getTime();
+    // ── Konsultationen ──
+    const caseDayCounts = new Map<string, number>();
     const templateCounts = new Map<string, number>();
-    const weeklyCounts = new Map<string, number>();
-    const monthlyCounts = new Map<string, number>();
+    const userStats = new Map<string, { konsultationen: number; patientenbriefe: number; totalMinutes: number }>();
     const processingMinutes: number[] = [];
-    let roleOwnerActivity = 0;
-    let roleAdminActivity = 0;
-    let roleMemberActivity = 0;
-    let roleUnknownActivity = 0;
+    let patientenbriefe = 0;
+    let ohneVorlage = 0;
+    let ohnePatientenbrief = 0;
+    let vollstaendig = 0;
+    let fehlendePflichtfelder = 0;
+    let bucketUnder5 = 0;
+    let bucket5to15 = 0;
+    let bucketOver15 = 0;
 
-    const roleByUserId = new Map<string, string>();
-    for (const membership of memberships) {
-      if (membership.user_id) roleByUserId.set(membership.user_id, membership.role || '');
+    const memberMap = new Map<string, string>();
+    for (const m of (membershipsRes.data || []) as Array<{ user_id: string; role: string }>) {
+      if (m.user_id) memberMap.set(m.user_id, m.role);
+    }
+
+    // Fetch user emails for names
+    const userIds = [...new Set(cases.map((c) => c.user_id).filter(Boolean))] as string[];
+    const userNameMap = new Map<string, string>();
+    if (userIds.length > 0) {
+      // We can't query auth.users directly via RLS. Use practice_memberships + a fallback.
+      // For display we'll use userId short form
+      for (const uid of userIds) {
+        userNameMap.set(uid, uid.slice(0, 8));
+      }
     }
 
     for (const row of cases) {
       const created = safeDate(row.created_at);
       if (!created) continue;
 
-      const wk = weekKey(created);
-      weeklyCounts.set(wk, (weeklyCounts.get(wk) || 0) + 1);
-
-      const mk = monthKey(created);
-      monthlyCounts.set(mk, (monthlyCounts.get(mk) || 0) + 1);
+      const dk = dayKey(created);
+      caseDayCounts.set(dk, (caseDayCounts.get(dk) || 0) + 1);
 
       const template = (row.template || '').trim();
       if (template) {
         templateCounts.set(template, (templateCounts.get(template) || 0) + 1);
+      } else {
+        ohneVorlage++;
       }
+
+      const hasResult = Boolean(row.result && row.result.trim().length > 20);
+      const hasTitle = Boolean(row.title && row.title.trim());
+
+      const resultText = (row.result || '').toLowerCase();
+      const hasBrief = resultText.includes('patientenbrief') || resultText.includes('liebe') || resultText.includes('lieber');
+      if (hasBrief) patientenbriefe++;
+      else ohnePatientenbrief++;
+
+      if (hasResult && hasTitle) vollstaendig++;
+      if (!hasResult || !hasTitle) fehlendePflichtfelder++;
 
       const updated = safeDate(row.updated_at);
       if (updated && updated.getTime() > created.getTime()) {
-        const minutes = (updated.getTime() - created.getTime()) / 60000;
-        if (Number.isFinite(minutes) && minutes >= 0 && minutes <= 60 * 24 * 30) {
-          processingMinutes.push(minutes);
+        const mins = (updated.getTime() - created.getTime()) / 60000;
+        if (Number.isFinite(mins) && mins >= 0 && mins <= 1440) {
+          processingMinutes.push(mins);
+          if (mins < 5) bucketUnder5++;
+          else if (mins <= 15) bucket5to15++;
+          else bucketOver15++;
         }
       }
 
-      if (created.getTime() >= last30Boundary) {
-        const role = row.user_id ? (roleByUserId.get(row.user_id) || '') : '';
-        if (role === 'owner') roleOwnerActivity += 1;
-        else if (role === 'admin') roleAdminActivity += 1;
-        else if (role === 'member') roleMemberActivity += 1;
-        else roleUnknownActivity += 1;
+      if (row.user_id) {
+        const existing = userStats.get(row.user_id) || { konsultationen: 0, patientenbriefe: 0, totalMinutes: 0 };
+        existing.konsultationen++;
+        if (hasBrief) existing.patientenbriefe++;
+        if (updated && updated.getTime() > created.getTime()) {
+          const m = (updated.getTime() - created.getTime()) / 60000;
+          if (Number.isFinite(m) && m >= 0 && m <= 1440) existing.totalMinutes += m;
+        }
+        userStats.set(row.user_id, existing);
       }
     }
 
-    const templateUsageTotal = [...templateCounts.values()].reduce((sum, value) => sum + value, 0);
-    const topTemplateUsage = [...templateCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([template, count]) => ({
-        template,
-        count,
-        sharePercent: templateUsageTotal > 0 ? clampPercent((count / templateUsageTotal) * 100) : 0,
-      }));
-
-    const perWeek = [...weeklyCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .slice(-12)
-      .map(([week, count]) => ({ week, count }));
-
-    const perMonth = [...monthlyCounts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .slice(-12)
-      .map(([month, count]) => ({ month, count }));
-
-    const avgProcessingMinutes = processingMinutes.length
-      ? Number((processingMinutes.reduce((sum, value) => sum + value, 0) / processingMinutes.length).toFixed(1))
-      : null;
-
-    let systemStability: AdminStatsPayload['systemStability'] = {
-      windowDays: 30,
-      dataAvailable: false,
-      totalRequests: 0,
-      errorRequests: 0,
-      errorRatePercent: null,
-      p50LatencyMs: null,
-      p95LatencyMs: null,
-    };
-
-    const apiLogsRes = await supabase
-      .from('api_request_logs')
-      .select('status_code, latency_ms')
-      .eq('practice_id', practiceId)
-      .gte('created_at', from30Days)
-      .limit(10000);
-
-    if (!apiLogsRes.error) {
-      const logs = (apiLogsRes.data || []) as ApiRequestLogRow[];
-      const totalRequests = logs.length;
-      const errorRequests = logs.filter((row) => (row.status_code || 0) >= 500).length;
-      const latencies = logs
-        .map((row) => row.latency_ms)
-        .filter((value): value is number => Number.isFinite(value ?? NaN) && (value ?? 0) >= 0);
-
-      systemStability = {
-        windowDays: 30,
-        dataAvailable: true,
-        totalRequests,
-        errorRequests,
-        errorRatePercent: totalRequests > 0 ? Number((((errorRequests / totalRequests) * 100)).toFixed(2)) : 0,
-        p50LatencyMs: percentile(latencies, 0.5),
-        p95LatencyMs: percentile(latencies, 0.95),
-      };
+    // ── VetMind ──
+    const vetmindDayCounts = new Map<string, number>();
+    const vetmindUserSet = new Set<string>();
+    for (const s of vetmindSessions) {
+      const created = safeDate(s.created_at);
+      if (!created) continue;
+      vetmindDayCounts.set(dayKey(created), (vetmindDayCounts.get(dayKey(created)) || 0) + 1);
+      if (s.user_id) vetmindUserSet.add(s.user_id);
     }
 
-    const caseTotal = casesTotalRes.count ?? 0;
+    // ── Trend ──
+    const currentCount = cases.length;
+    const prevCount = casesPrevRes.count ?? 0;
+    const trend = trendPercent(currentCount, prevCount);
 
-    const payload: AdminStatsPayload = {
+    // ── Gesparte Zeit ──
+    const gespartMinuten = (currentCount * 15) + (patientenbriefe * 10) + (vetmindSessions.length * 5);
+    const gespartStunden = Math.floor(gespartMinuten / 60);
+    const gespartRest = gespartMinuten % 60;
+
+    // ── Templates ──
+    const totalWithTemplate = [...templateCounts.values()].reduce((s, c) => s + c, 0);
+    const totalCases = cases.length || 1;
+    const nutzungsrate = Math.round((totalWithTemplate / totalCases) * 100);
+    const top5 = [...templateCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
+
+    // ── Team ──
+    const proMitarbeiter = [...userStats.entries()]
+      .map(([userId, s]) => ({
+        userId,
+        name: userNameMap.get(userId) || userId.slice(0, 8),
+        konsultationen: s.konsultationen,
+        patientenbriefe: s.patientenbriefe,
+        durchschnittMinuten: s.konsultationen > 0 ? Math.round(s.totalMinutes / s.konsultationen) : 0,
+      }))
+      .sort((a, b) => b.konsultationen - a.konsultationen)
+      .slice(0, 15);
+
+    // ── Datenqualität Score ──
+    const totalForScore = cases.length || 1;
+    const score = Math.round((vollstaendig / totalForScore) * 100);
+
+    // ── Average processing ──
+    const avgMinutes = processingMinutes.length
+      ? Math.round(processingMinutes.reduce((s, v) => s + v, 0) / processingMinutes.length)
+      : 0;
+
+    const payload: StatsPayload = {
       practiceId,
-      updatedAt: nowIso,
-      cases: {
-        total: caseTotal,
-        last7Days: cases7Res.count ?? 0,
-        last30Days: cases30Res.count ?? 0,
-        missingTitle: casesMissingTitleRes.count ?? 0,
-        missingRequiredFields: casesMissingRequiredRes.error ? (casesMissingTitleRes.count ?? 0) : (casesMissingRequiredRes.count ?? 0),
-        estimatedTimeSavedMinutes: caseTotal * 15,
-        averageProcessingMinutes: avgProcessingMinutes,
-        perWeek,
-        perMonth,
-        byPractice: [
-          {
-            practiceId,
-            label: practiceName || 'Aktive Praxis',
-            total: caseTotal,
-            last30Days: cases30Res.count ?? 0,
-          },
+      updatedAt: now.toISOString(),
+      days,
+
+      konsultationen: {
+        heute: casesTodayRes.count ?? 0,
+        zeitraum: currentCount,
+        trend,
+        proTag: fillDays(periodStart, now, caseDayCounts),
+      },
+
+      team: { proMitarbeiter },
+
+      vorlagen: {
+        nutzungsrate,
+        top5,
+        ohneVorlage,
+      },
+
+      zeit: {
+        durchschnittMinutenProFall: avgMinutes,
+        gespaarteStunden: gespartStunden,
+        gespaarteMinuten: gespartRest,
+        patientenbriefeErstellt: patientenbriefe,
+        verteilungNachDauer: [
+          { bucket: '< 5 min', count: bucketUnder5 },
+          { bucket: '5–15 min', count: bucket5to15 },
+          { bucket: '> 15 min', count: bucketOver15 },
         ],
       },
-      templates: {
-        total: templatesTotalRes.count ?? 0,
-        usage: topTemplateUsage,
+
+      vetmind: {
+        chatsGesamt: vetmindTotalRes.count ?? 0,
+        chatsZeitraum: vetmindSessions.length,
+        proTag: fillDays(periodStart, now, vetmindDayCounts),
+        aktivNutzer: vetmindUserSet.size,
       },
-      invitations: {
-        total: invitations.length,
-        open: invitationOpen,
-        accepted: invitationAccepted,
-        expired: invitationExpired,
+
+      qualitaet: {
+        vollstaendig,
+        fehlendePflichtfelder,
+        ohnePatientenbrief,
+        score,
       },
-      joinRequests: {
-        total: joinRequests.length,
-        pending,
-        approved,
-        rejected,
-      },
-      memberships: {
-        total: memberships.length,
-        owners,
-        admins,
-        members,
-      },
-      activityByRole: {
-        owner: roleOwnerActivity,
-        admin: roleAdminActivity,
-        member: roleMemberActivity,
-        unknown: roleUnknownActivity,
-      },
-      systemStability,
     };
 
     return NextResponse.json(payload);
