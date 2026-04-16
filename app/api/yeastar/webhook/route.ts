@@ -15,12 +15,16 @@ const extractSecret = (req: Request, body: any, url: URL) => {
 const normalizePayload = (input: unknown) => {
   if (!input || typeof input !== 'object') return {};
   const raw = input as Record<string, unknown>;
-  // Yeastar P-Series wraps call data in a `msg` JSON string — merge it into top level
+  // Yeastar P-Series wraps call data in a `msg` JSON string — merge it into top level.
+  // Preserve the outer `type` (e.g. 30012) as `_outerType` since msg may also have a `type` field.
   if (typeof raw.msg === 'string') {
     try {
       const parsed = JSON.parse(raw.msg);
       if (parsed && typeof parsed === 'object') {
-        return { ...raw, ...parsed };
+        const outerType = raw.type;
+        const merged = { ...raw, ...parsed };
+        if (outerType !== undefined) merged._outerType = outerType;
+        return merged;
       }
     } catch { /* keep raw */ }
   }
@@ -115,7 +119,7 @@ export async function POST(req: Request) {
     }
 
     const payload = normalizePayload(body);
-    const eventType = String(payload.event || payload.event_type || payload.type || payload.msgType || 'unknown');
+    const eventType = String(payload._outerType || payload.event || payload.event_type || payload.type || payload.msgType || 'unknown');
     const number = String(payload.number || payload.caller || payload.from || payload.callee || 'unknown');
 
     // Store event in file-based log (backward compat)
