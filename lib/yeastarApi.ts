@@ -100,14 +100,35 @@ export async function yeastarRequest(
   return data;
 }
 
-/** Download a recording file and return the blob */
-export async function downloadRecording(id: string): Promise<{ url: string } | null> {
+/** Download a recording: find by filename → get numeric id → get download URL */
+export async function downloadRecording(filenameOrId: string): Promise<{ url: string } | null> {
   try {
-    const data = await yeastarRequest('GET', `recording/download?id=${encodeURIComponent(id)}`);
-    if (data?.download_url || data?.url) {
-      return { url: data.download_url || data.url };
+    // Step 1: Find numeric recording ID by matching filename
+    const listData = await yeastarRequest('GET', 'recording/list');
+    const recordings = Array.isArray(listData?.data) ? listData.data : [];
+    const match = recordings.find((r: any) =>
+      r.file === filenameOrId ||
+      r.file === filenameOrId.replace(/\.wav$/, '') ||
+      filenameOrId.startsWith(String(r.file || '').replace(/\.wav$/, ''))
+    );
+
+    if (!match?.id) {
+      console.error(`[Yeastar] Recording nicht gefunden in Liste: ${filenameOrId}`);
+      return null;
     }
-    return null;
+
+    // Step 2: Get download resource URL via numeric id
+    const dlData = await yeastarRequest('GET', `recording/download?id=${match.id}`);
+    const resourcePath = dlData?.download_resource_url;
+    if (!resourcePath) {
+      console.error(`[Yeastar] Kein download_resource_url für id=${match.id}`);
+      return null;
+    }
+
+    // Step 3: Build full download URL with auth token
+    const token = await getYeastarToken();
+    const url = `${YEASTAR_BASE}${resourcePath}?access_token=${encodeURIComponent(token)}`;
+    return { url };
   } catch (err) {
     console.error('[Yeastar] Recording download fehlgeschlagen:', err);
     return null;
