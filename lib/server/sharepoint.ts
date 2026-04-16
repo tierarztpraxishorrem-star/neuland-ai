@@ -1,27 +1,22 @@
 // Microsoft Graph API Client für SharePoint
-// Auth: Client Credentials Flow (kein User-Login)
-// Docs: https://learn.microsoft.com/en-us/graph/
+// Auth + Fetch via shared lib/server/msGraph.ts
 
-const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
-const TOKEN_TTL_MS = 55 * 60 * 1000; // 55 min (Token läuft nach 60 min ab)
+import {
+  graphFetch,
+  graphJson,
+  getAccessToken,
+  encodeGraphPath as encodeSharePointPath,
+  isMsGraphConfigured,
+  MsGraphError as SharePointError,
+} from './msGraph';
 
 const TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'csv', 'json', 'xml', 'html', 'htm',
   'log', 'yml', 'yaml', 'tsv', 'ini', 'conf',
 ]);
 
-let tokenCache: { token: string; expiresAt: number } | null = null;
-
-export class SharePointError extends Error {
-  status?: number;
-  details?: unknown;
-  constructor(message: string, status?: number, details?: unknown) {
-    super(message);
-    this.name = 'SharePointError';
-    this.status = status;
-    this.details = details;
-  }
-}
+// SharePointError bleibt als Alias erhalten für Abwärtskompatibilität
+export { SharePointError };
 
 export type SearchResult = {
   id: string;
@@ -54,130 +49,7 @@ export type SiteInfo = {
 };
 
 export function isSharePointConfigured(): boolean {
-  return Boolean(
-    process.env.MICROSOFT_TENANT_ID &&
-    process.env.MICROSOFT_CLIENT_ID &&
-    process.env.MICROSOFT_CLIENT_SECRET
-  );
-}
-
-function requireConfig() {
-  const tenant = process.env.MICROSOFT_TENANT_ID;
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const secret = process.env.MICROSOFT_CLIENT_SECRET;
-  if (!tenant || !clientId || !secret) {
-    throw new SharePointError(
-      'Microsoft Graph ist nicht konfiguriert (MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET).'
-    );
-  }
-  return { tenant, clientId, secret };
-}
-
-async function getAccessToken(forceRefresh = false): Promise<string> {
-  if (!forceRefresh && tokenCache && Date.now() < tokenCache.expiresAt) {
-    return tokenCache.token;
-  }
-
-  const { tenant, clientId, secret } = requireConfig();
-
-  const res = await fetch(
-    `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: secret,
-        scope: 'https://graph.microsoft.com/.default',
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new SharePointError(
-      `Microsoft-Login fehlgeschlagen (${res.status}).`,
-      res.status,
-      text
-    );
-  }
-
-  const data = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!data.access_token) {
-    throw new SharePointError('Microsoft-Login lieferte kein Token zurück.');
-  }
-
-  const ttl = typeof data.expires_in === 'number'
-    ? Math.min(data.expires_in * 1000 - 60_000, TOKEN_TTL_MS)
-    : TOKEN_TTL_MS;
-
-  tokenCache = {
-    token: data.access_token,
-    expiresAt: Date.now() + ttl,
-  };
-  return tokenCache.token;
-}
-
-type GraphFetchOptions = RequestInit & {
-  retries?: number;
-  raw?: boolean; // skip JSON content-type default
-};
-
-async function graphFetch(path: string, init?: GraphFetchOptions): Promise<Response> {
-  const retries = init?.retries ?? 2;
-  const token = await getAccessToken();
-  const url = path.startsWith('http') ? path : `${GRAPH_BASE}${path}`;
-
-  const headers = new Headers(init?.headers || {});
-  headers.set('Authorization', `Bearer ${token}`);
-  if (!init?.raw && init?.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const res = await fetch(url, { ...init, headers });
-
-  if (res.status === 429 && retries > 0) {
-    const retryAfter = Number(res.headers.get('Retry-After')) || 5;
-    await new Promise((r) => setTimeout(r, Math.min(retryAfter, 30) * 1000));
-    return graphFetch(path, { ...init, retries: retries - 1 });
-  }
-
-  if (res.status === 401 && retries > 0) {
-    tokenCache = null;
-    await getAccessToken(true);
-    return graphFetch(path, { ...init, retries: retries - 1 });
-  }
-
-  return res;
-}
-
-async function graphJson<T = unknown>(path: string, init?: GraphFetchOptions): Promise<T> {
-  const res = await graphFetch(path, init);
-  if (!res.ok) {
-    let message = `Microsoft Graph Fehler (${res.status}).`;
-    let details: unknown = undefined;
-    try {
-      const body = await res.json();
-      details = body;
-      if (body?.error?.message) message = `Graph: ${body.error.message}`;
-    } catch {
-      try {
-        details = await res.text();
-      } catch {}
-    }
-    throw new SharePointError(message, res.status, details);
-  }
-  return (await res.json()) as T;
-}
-
-// Encodes each path segment but keeps slashes as separators
-function encodeSharePointPath(path: string): string {
-  return path
-    .split('/')
-    .filter(Boolean)
-    .map(encodeURIComponent)
-    .join('/');
+  return isMsGraphConfigured();
 }
 
 // ============================================================
@@ -340,7 +212,7 @@ export async function getFileText(driveId: string, itemId: string): Promise<{
   text: string;
   name: string;
   extension: string;
-  extracted: 'raw' | 'docx' | 'pdf';
+  extracted: 'raw' | 'docx' | 'pdf' | 'xlsx';
 }> {
   const info = await getDriveItem(driveId, itemId);
   const name = info.name || 'Unbenannt';
@@ -385,6 +257,30 @@ export async function getFileText(driveId: string, itemId: string): Promise<{
       pages.push(pageText);
     }
     return { text: pages.join('\n\n'), name, extension: ext, extracted: 'pdf' };
+  }
+
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'xlsm' || ext === 'ods') {
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheets: string[] = [];
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+        header: 1,
+        raw: false,
+        blankrows: false,
+      });
+      const lines = rows
+        .map((row) =>
+          Array.isArray(row)
+            ? row.map((cell) => (cell == null ? '' : String(cell))).join('\t')
+            : ''
+        )
+        .filter((line) => line.trim().length > 0);
+      sheets.push(`# ${sheetName}\n${lines.join('\n')}`);
+    }
+    return { text: sheets.join('\n\n'), name, extension: ext, extracted: 'xlsx' };
   }
 
   throw new SharePointError(
