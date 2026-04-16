@@ -171,6 +171,8 @@ export default function ResultPage() {
   const [finalizingHandoff, setFinalizingHandoff] = useState(false);
 
   const autosavePrefix = `case_${caseId}_autosave_`;
+  const supabaseSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialLoadDoneRef = useRef(false);
   const checks = useMemo(() => (templateStructure?.untersuchung || []), [templateStructure]);
   const selectedPatient = useMemo(
     () => patients.find((patient) => patient.id === selectedPatientId) || null,
@@ -586,6 +588,26 @@ export default function ResultPage() {
         }));
       }
 
+      // Supabase-Draft laden (überschreibt localStorage-Cache für geräteübergreifende Persistenz)
+      const { data: supabaseDraft } = await supabase
+        .from('case_drafts')
+        .select('draft_data')
+        .eq('case_id', caseId)
+        .maybeSingle();
+      if (supabaseDraft?.draft_data) {
+        const d = supabaseDraft.draft_data as Record<string, unknown>;
+        if (typeof d.transcript === 'string') setTranscript(d.transcript);
+        if (typeof d.result === 'string') setResult(d.result);
+        if (typeof d.template === 'string') setSelectedTemplate(d.template);
+        if (typeof d.category === 'string') setCategory(normalizeCategory(d.category));
+        if (d.visibility_scope) setVisibilityScope(normalizeVisibilityScope(String(d.visibility_scope)));
+        if (d.context && typeof d.context === 'object') setContextData(d.context as Record<string, string>);
+        if (Array.isArray(d.attachments)) setAttachments(d.attachments as string[]);
+        if (typeof d.notes === 'string') setCaseNotes(d.notes);
+        if (typeof d.patient_id === 'string') setSelectedPatientId(d.patient_id);
+      }
+      initialLoadDoneRef.current = true;
+
       if (!storedTranscript) {
         const legacyTranscript = localStorage.getItem('consultation_result') || '';
         if (legacyTranscript) setTranscript(legacyTranscript);
@@ -837,6 +859,31 @@ export default function ResultPage() {
   useEffect(() => {
     localStorage.setItem(`${autosavePrefix}notes`, caseNotes || '');
   }, [autosavePrefix, caseNotes]);
+
+  // Debounced Supabase-Autosave (geräteübergreifend, nach 3 Sek. Inaktivität)
+  useEffect(() => {
+    if (!caseId || !initialLoadDoneRef.current) return;
+    if (supabaseSaveTimerRef.current) clearTimeout(supabaseSaveTimerRef.current);
+    supabaseSaveTimerRef.current = setTimeout(async () => {
+      const draft_data = {
+        transcript,
+        result,
+        template: selectedTemplate,
+        category,
+        visibility_scope: visibilityScope,
+        context: contextData,
+        attachments,
+        notes: caseNotes,
+        patient_id: selectedPatientId,
+      };
+      await supabase
+        .from('case_drafts')
+        .upsert({ case_id: caseId, draft_data, updated_at: new Date().toISOString() }, { onConflict: 'case_id' });
+    }, 3000);
+    return () => {
+      if (supabaseSaveTimerRef.current) clearTimeout(supabaseSaveTimerRef.current);
+    };
+  }, [caseId, transcript, result, selectedTemplate, category, visibilityScope, contextData, attachments, caseNotes, selectedPatientId]);
 
   useEffect(() => {
     if (!caseId) return;

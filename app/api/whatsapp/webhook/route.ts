@@ -16,50 +16,59 @@ import { uploadWhatsAppMedia } from "@/lib/server/r2Upload";
  */
 
 export async function GET(req: NextRequest) {
-  const verification = verifyWebhook(req.nextUrl.searchParams);
-  if (verification) return verification;
-  return NextResponse.json({ error: "Verification failed" }, { status: 403 });
+  try {
+    const verification = verifyWebhook(req.nextUrl.searchParams);
+    if (verification) return verification;
+    return NextResponse.json({ error: "Verification failed" }, { status: 403 });
+  } catch (error) {
+    console.error("[api/whatsapp/webhook GET] Fehler:", error);
+    return NextResponse.json(
+      { error: "Verifizierung fehlgeschlagen" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const rawBody = await req.text();
+  try {
+    const rawBody = await req.text();
 
-  // Validate signature
-  const signature = req.headers.get("x-hub-signature-256");
-  const valid = await validateSignature(rawBody, signature);
-  if (!valid) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
-  }
+    // Validate signature
+    const signature = req.headers.get("x-hub-signature-256");
+    const valid = await validateSignature(rawBody, signature);
+    if (!valid) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+    }
 
-  const payload = JSON.parse(rawBody);
-  const incoming = extractMessages(payload);
+    const payload = JSON.parse(rawBody);
+    const incoming = extractMessages(payload);
 
-  if (incoming.length === 0) {
-    // Status updates etc. – acknowledge
-    return NextResponse.json({ ok: true });
-  }
+    if (incoming.length === 0) {
+      // Status updates etc. – acknowledge
+      return NextResponse.json({ ok: true });
+    }
 
-  const supabase = getServiceSupabaseClient();
-  if (!supabase) {
-    return NextResponse.json({ error: "Server config error" }, { status: 500 });
-  }
+    const supabase = getServiceSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json({ error: "Server config error" }, { status: 500 });
+    }
 
-  // Determine which practice owns this WhatsApp number.
-  // For single-practice setups we pick the first practice. For multi-practice,
-  // a mapping table would be needed – keeping it simple for now.
-  const { data: practice } = await supabase
-    .from("practices")
-    .select("id")
-    .limit(1)
-    .maybeSingle();
+    // Determine which practice owns this WhatsApp number.
+    // For single-practice setups we pick the first practice. For multi-practice,
+    // a mapping table would be needed – keeping it simple for now.
+    const { data: practice } = await supabase
+      .from("practices")
+      .select("id")
+      .limit(1)
+      .maybeSingle();
 
-  if (!practice) {
-    return NextResponse.json({ error: "No practice" }, { status: 500 });
-  }
+    if (!practice) {
+      return NextResponse.json({ error: "No practice" }, { status: 500 });
+    }
 
-  const practiceId = practice.id;
+    const practiceId = practice.id;
 
-  for (const msg of incoming) {
+    for (const msg of incoming) {
     // 1️⃣ Upsert contact
     const { data: contact } = await supabase
       .from("whatsapp_contacts")
@@ -146,9 +155,16 @@ export async function POST(req: NextRequest) {
 
     // 5️⃣ Mark as read on WhatsApp side
     markAsRead(msg.messageId).catch(() => {});
-  }
+    }
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[api/whatsapp/webhook POST] Fehler:", error);
+    return NextResponse.json(
+      { error: "Webhook-Verarbeitung fehlgeschlagen" },
+      { status: 500 }
+    );
+  }
 }
 
 // ─── Media processing (runs async) ──────────────────────────
