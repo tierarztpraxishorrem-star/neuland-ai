@@ -32,9 +32,16 @@ type MotivationResponse = {
 };
 
 const FALLBACK_MOTIVATION_MESSAGES = [
-  'Ein ruhiger Start bringt Struktur in den ganzen Tag.',
-  'Bleib bei einem klaren Ablauf, dann bleibt auch im Stress der Fokus.',
-  'Heute zaehlt Schritt fuer Schritt sauber zu arbeiten.',
+  'Kaffee steht, Kittel sitzt — das Wartezimmer faellt nicht von allein leer.',
+  'Ein ruhiger Start zahlt sich aus — spaetestens bei der ersten Katze, die partout nicht auf den Tisch will.',
+  'Heute wieder: Pfoten statt Powerpoint.',
+  'Fellnasen warten schon. Du auch gleich nicht mehr.',
+  'Plan, Kaffee, los — mehr braucht ein Praxistag selten.',
+  'Noch ist alles ruhig. Geniess die Sekunde.',
+  'Halbwegs ausgeschlafen? Dann kann der Tag ja kommen.',
+  'Mal sehen, welches Fellknaeuel heute als erstes versucht, unter den Stuhl zu fluechten.',
+  'Kleiner Tipp: erst Kaffee, dann die Akten.',
+  'Tuer auf, Patienten rein, Chaos willkommen.',
 ];
 
 const getDaytimeGreeting = () => {

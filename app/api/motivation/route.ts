@@ -25,17 +25,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "OPENAI_API_KEY fehlt." }, { status: 500 });
     }
 
-    const prompt = `Erstelle einen kurzen, realistischen Motivationssatz fuer eine Tierarztpraxis.
-Kein Kitsch, kein Marketing, kein LinkedIn-Stil.
-Ton: ruhig, professionell, leicht unterstuetzend.
+    const prompt = `Schreibe EINEN kurzen, lockeren Satz fuer das Dashboard einer Tierarztpraxis.
+
+Ton: warm, trocken, mit dezentem Augenzwinkern. Wie ein netter Kollege am Kaffeeautomat. Darf witzig, ironisch oder einfach beilaeufig sein.
+
+Thematisch: gerne mal Tiermedizin-nah (Wartezimmer, Fellnasen, Pfoten, die erste Katze des Tages, bellende Patienten), muss aber nicht -- ganz normale Arbeits-Realitaet (Kaffee, Akten, Kollegen, Feierabend) funktioniert genauso gut. Abwechslung ist gut.
+
+STRIKT VERMEIDEN:
+- Wir-Pathos ("Gemeinsam sorgen wir fuer das Wohl...")
+- Marketing-Sprech ("Mit Ruhe und Praezision...", "Heute zaehlt...")
+- "tierisch gute"-Wortspiele, "auf-den-Hund-gekommen", "pfoetchengesund"
+- LinkedIn-Ton, Karrierecoach-Vibes, Morgenandacht
+- belehrende Saetze ("Denk dran...", "Achte auf...")
+- Kitsch und Emoji-Parade
+
 Kontext: ${context}
+(start = Arbeitstag beginnt, running = mittendrin, end = Feierabend naht)
 
-Beispiele:
-- ruhig bleiben im Stress
-- strukturierter Ablauf
-- Fokus behalten
+Gute Beispiele fuer den Ton:
+- "Kaffee steht, Kittel sitzt -- das Wartezimmer faellt nicht von allein leer."
+- "Mal sehen, welches Fellknaeuel heute als erstes versucht, unter den Stuhl zu fluechten."
+- "Heute wieder: Pfoten statt Powerpoint."
+- "Halbwegs ausgeschlafen? Dann kann der Tag ja kommen."
+- "Noch drei Patienten, dann Feierabend. Oder vier. Mal schauen."
 
-Nur 1 Satz zurueckgeben.`;
+Nur 1 Satz. Keine Anfuehrungszeichen. Kein Emoji am Anfang.`;
 
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -46,8 +60,8 @@ Nur 1 Satz zurueckgeben.`;
       body: JSON.stringify({
         model: MODEL,
         store: false,
-        temperature: 0.6,
-        max_output_tokens: 60,
+        temperature: 0.9,
+        max_output_tokens: 80,
         input: [
           {
             role: "system",
