@@ -10,6 +10,7 @@ type Props = {
   onCopy: () => void;
   onExtractLetter: () => void;
   onPrintLetter: () => void;
+  onMailLetter?: () => void;
   onShare: () => void;
   onDownload: () => void;
   buttonStyle: (bg: string, color: string, disabled: boolean, bordered?: boolean) => React.CSSProperties;
@@ -23,6 +24,7 @@ export default function ReportActions({
   onCopy,
   onExtractLetter,
   onPrintLetter,
+  onMailLetter,
   onShare,
   onDownload,
   buttonStyle,
@@ -50,6 +52,12 @@ export default function ReportActions({
       {patientLetter && (
         <button onClick={onPrintLetter} style={{ ...buttonStyle('#0F6B74', 'white', false), width: isMobile ? '100%' : 'auto' }}>
           Patientenbrief drucken
+        </button>
+      )}
+
+      {patientLetter && onMailLetter && (
+        <button onClick={onMailLetter} style={{ ...buttonStyle('#0F6B74', 'white', false), width: isMobile ? '100%' : 'auto' }}>
+          ✉️ Patientenbrief per Mail
         </button>
       )}
 

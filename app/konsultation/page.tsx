@@ -16,6 +16,7 @@ import CaseList from './_components/CaseList';
 import CaseDetailPanel from './_components/CaseDetailPanel';
 import PatientLetterEditor from './_components/PatientLetterEditor';
 import ReportActions from './_components/ReportActions';
+import PatientInfoMailDialog from '../../components/PatientInfoMailDialog';
 
 
 export default function Home() {
@@ -329,6 +330,7 @@ const downloadReport = () => {
   const [patientLetter, setPatientLetter] = useState('');
   const [medication, setMedication] = useState('');
   const [followUp, setFollowUp] = useState('');
+  const [mailDialogOpen, setMailDialogOpen] = useState(false);
 const [imageAnalysis, setImageAnalysis] = useState("");
 
   const currentPractice = practices[practice];

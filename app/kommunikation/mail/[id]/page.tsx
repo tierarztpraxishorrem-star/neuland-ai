@@ -99,6 +99,18 @@ export default function MailDetailPage() {
 
   const [categorySaving, setCategorySaving] = useState(false);
 
+  // Case-Verknüpfung
+  type CaseLink = { id: string; case_id: string; message_id: string; subject: string | null; linked_at: string };
+  type CaseInfo = { id: string; title?: string | null; patient_id?: string | null };
+  type CaseSearchResult = { id: string; title?: string | null; created_at: string; patient?: { id?: string; name?: string | null; tierart?: string | null; owner_name?: string | null } };
+  const [caseLinks, setCaseLinks] = useState<CaseLink[]>([]);
+  const [caseInfoMap, setCaseInfoMap] = useState<Record<string, CaseInfo>>({});
+  const [showCaseLink, setShowCaseLink] = useState(false);
+  const [caseQuery, setCaseQuery] = useState("");
+  const [caseResults, setCaseResults] = useState<CaseSearchResult[]>([]);
+  const [caseSearchLoading, setCaseSearchLoading] = useState(false);
+  const [caseLinkPending, setCaseLinkPending] = useState(false);
+
   const load = useCallback(async () => {
     if (!messageId) return;
     try {
@@ -174,6 +186,76 @@ export default function MailDetailPage() {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
       setReplySending(false);
+    }
+  }
+
+  const loadCaseLinks = useCallback(async () => {
+    if (!messageId) return;
+    try {
+      const res = await fetchWithAuth(`/api/mail/messages/${encodeURIComponent(messageId)}/link`);
+      const data = await res.json();
+      if (!res.ok) return;
+      setCaseLinks(data.links || []);
+      const map: Record<string, CaseInfo> = {};
+      for (const c of (data.cases || []) as CaseInfo[]) map[c.id] = c;
+      setCaseInfoMap(map);
+    } catch {
+      // silently ignore
+    }
+  }, [messageId]);
+
+  useEffect(() => {
+    loadCaseLinks();
+  }, [loadCaseLinks]);
+
+  async function handleCaseSearch(q: string) {
+    setCaseQuery(q);
+    setCaseSearchLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/cases/search?q=${encodeURIComponent(q)}&limit=20`);
+      const data = await res.json();
+      if (res.ok) setCaseResults(data.cases || []);
+    } finally {
+      setCaseSearchLoading(false);
+    }
+  }
+
+  async function linkToCase(caseId: string) {
+    setCaseLinkPending(true);
+    setError(null);
+    try {
+      const res = await fetchWithAuth(`/api/mail/messages/${encodeURIComponent(messageId)}/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ case_id: caseId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Verknüpfung fehlgeschlagen.");
+      await loadCaseLinks();
+      setShowCaseLink(false);
+      setCaseQuery("");
+      setCaseResults([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setCaseLinkPending(false);
+    }
+  }
+
+  async function unlinkFromCase(linkId: string) {
+    setError(null);
+    try {
+      const res = await fetchWithAuth(
+        `/api/mail/messages/${encodeURIComponent(messageId)}/link/${encodeURIComponent(linkId)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Löschen fehlgeschlagen.");
+      }
+      await loadCaseLinks();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     }
   }
 
@@ -327,6 +409,105 @@ export default function MailDetailPage() {
             <div style={{ fontSize: 11, color: uiTokens.textSecondary, marginTop: 6 }}>
               Kategorien werden in Outlook und Neuland AI synchron angezeigt.
             </div>
+          </div>
+
+          <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#f8fafc", border: uiTokens.cardBorder }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: uiTokens.textSecondary }}>
+                🔗 Verknüpfte Fälle {caseLinks.length > 0 && <span style={{ color: uiTokens.brand }}>({caseLinks.length})</span>}
+              </div>
+              <Button variant="secondary" size="sm" onClick={() => setShowCaseLink((v) => !v)}>
+                {showCaseLink ? "Abbrechen" : "+ Mit Fall verknüpfen"}
+              </Button>
+            </div>
+            {caseLinks.length === 0 && !showCaseLink && (
+              <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>Noch nicht mit einem Fall verknüpft.</div>
+            )}
+            {caseLinks.length > 0 && (
+              <div style={{ display: "grid", gap: 6 }}>
+                {caseLinks.map((l) => {
+                  const c = caseInfoMap[l.case_id];
+                  const label = c?.title || `Fall ${l.case_id.slice(0, 8)}`;
+                  return (
+                    <div key={l.id} style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      background: "#fff",
+                      border: uiTokens.cardBorder,
+                      fontSize: 12,
+                    }}>
+                      <Link href={`/konsultation/${l.case_id}/result`} style={{ color: uiTokens.brand, textDecoration: "none", fontWeight: 600 }}>
+                        {label}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => unlinkFromCase(l.id)}
+                        style={{ background: "transparent", border: "none", color: "#b91c1c", cursor: "pointer", fontSize: 11 }}
+                      >
+                        Trennen
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {showCaseLink && (
+              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                <input
+                  type="text"
+                  value={caseQuery}
+                  onChange={(e) => handleCaseSearch(e.target.value)}
+                  placeholder="🔍 Fall suchen (Patientenname oder Titel)…"
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: uiTokens.cardBorder,
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+                {caseSearchLoading ? (
+                  <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>Suche…</div>
+                ) : caseResults.length === 0 && caseQuery ? (
+                  <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>Keine Treffer.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 4, maxHeight: 250, overflowY: "auto" }}>
+                    {caseResults
+                      .filter((c) => !caseLinks.some((l) => l.case_id === c.id))
+                      .map((c) => {
+                        const patient = c.patient;
+                        const caseLabel = c.title || `Fall ${c.id.slice(0, 8)}`;
+                        const patientLabel = patient?.name ? `${patient.name}${patient.tierart ? ` (${patient.tierart})` : ""}` : "—";
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => linkToCase(c.id)}
+                            disabled={caseLinkPending}
+                            style={{
+                              textAlign: "left",
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              background: "#fff",
+                              border: uiTokens.cardBorder,
+                              cursor: caseLinkPending ? "wait" : "pointer",
+                              fontSize: 12,
+                            }}
+                          >
+                            <div style={{ fontWeight: 600, color: uiTokens.textPrimary }}>{patientLabel}</div>
+                            <div style={{ color: uiTokens.textSecondary, fontSize: 11 }}>
+                              {caseLabel}{patient?.owner_name ? ` · Halter: ${patient.owner_name}` : ""}
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {attachments.length > 0 && (
