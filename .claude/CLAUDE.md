@@ -57,6 +57,8 @@ Alle Tabellen haben RLS aktiviert und UUID-Primary-Keys.
 | call_recordings | 20260415200000 | Yeastar Anruf-Aufnahmen |
 | vetmind_sessions, vetmind_messages | 20260415210000 | VetMind Chat-Persistenz |
 | public_holidays, shifts, hr_documents, onboarding_tasks | 20260415120001 | HR Kern-Tabellen |
+| yeastar_webhook_events | 20260416000001 | Yeastar Webhook-Events (war: Datei-basiert, jetzt Supabase) |
+| case_drafts | 20260416000002 | Konsultations-Autosave (geräteübergreifend, ergänzt localStorage) |
 
 ## Auth-Regel (IMMER einhalten)
 fetchWithAuth() aus lib/supabase.ts für alle API-Calls verwenden.
