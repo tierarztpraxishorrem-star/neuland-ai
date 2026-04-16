@@ -210,6 +210,45 @@ export default function VetMind() {
     }
   };
 
+  const handleSpBrowseRoot = async () => {
+    setSpError(null);
+    setSpLoading(true);
+    try {
+      const res = await spFetch("/api/sharepoint/files");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Dateien konnten nicht geladen werden.");
+      type DriveItemLike = {
+        id?: string;
+        name?: string;
+        size?: number;
+        webUrl?: string;
+        lastModifiedDateTime?: string;
+        folder?: { childCount?: number };
+        parentReference?: { driveId?: string };
+      };
+      const items = (data.items || []) as DriveItemLike[];
+      const mapped: SpResult[] = items.map((item) => {
+        const name = item.name || "Unbenannt";
+        const isFolder = Boolean(item.folder);
+        return {
+          id: item.id || name,
+          driveId: item.parentReference?.driveId,
+          itemId: item.id,
+          name,
+          url: item.webUrl || "",
+          fileType: isFolder ? "folder" : (name.split(".").pop() || "").toLowerCase(),
+          lastModified: item.lastModifiedDateTime,
+          summary: isFolder ? "📁 Ordner" : undefined,
+        };
+      });
+      setSpResults(mapped);
+    } catch (err) {
+      setSpError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setSpLoading(false);
+    }
+  };
+
   const handleSpInsert = async (result: SpResult) => {
     if (!result.driveId || !result.itemId) {
       setSpError("driveId/itemId fehlt – diese Datei kann nicht geladen werden.");
@@ -2756,6 +2795,15 @@ const filteredSessions = sortedSessions.filter((s: any) => {
               >
                 {spLoading ? "Sucht..." : "Suchen"}
               </button>
+              <button
+                type="button"
+                onClick={handleSpBrowseRoot}
+                disabled={spLoading}
+                className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:border-[#0f6b74] hover:text-[#0f6b74] transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                title="Alle Dateien im Root-Ordner anzeigen"
+              >
+                📁 Durchsuchen
+              </button>
             </form>
 
             {spError && (
@@ -2765,7 +2813,12 @@ const filteredSessions = sortedSessions.filter((s: any) => {
             )}
 
             {!spLoading && spResults.length === 0 && !spError && spQuery && (
-              <div className="text-xs text-gray-500">Keine Treffer.</div>
+              <div className="text-xs text-gray-500">
+                {`Keine Treffer für „${spQuery}“.`}
+                <span className="block mt-1 text-gray-400">
+                  Tipp: Versuche einzelne Schlüsselwörter statt des ganzen Dateinamens, oder nutze die Schaltfläche „📁 Durchsuchen“ für alle Dateien.
+                </span>
+              </div>
             )}
 
             {spResults.length > 0 && (

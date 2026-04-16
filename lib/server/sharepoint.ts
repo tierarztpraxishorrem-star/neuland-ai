@@ -202,7 +202,39 @@ export async function listSites(searchQuery = '*'): Promise<SiteInfo[]> {
   return data.value || [];
 }
 
-export async function searchSharePoint(query: string): Promise<SearchResult[]> {
+// Zerlegt lange Suchbegriffe in mehrere sinnvolle Teil-Queries.
+function buildSearchQueries(query: string): string[] {
+  const queries: string[] = [];
+  const trimmed = query.trim();
+
+  // Original-Query (falls nicht zu lang)
+  if (trimmed.length > 0 && trimmed.length <= 50) {
+    queries.push(trimmed);
+  }
+
+  // Wörter mit >=4 Buchstaben als Einzel-Queries
+  const words = trimmed
+    .split(/[\s\-_,./]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 4);
+
+  // Erste 3 signifikanten Wörter kombiniert
+  if (words.length >= 2) {
+    queries.push(words.slice(0, 3).join(' '));
+  }
+
+  // Jedes signifikante Wort einzeln (max. 5)
+  for (const word of words.slice(0, 5)) {
+    if (!queries.includes(word)) queries.push(word);
+  }
+
+  // Fallback: wenn bisher nichts drin (z.B. nur Kurzwörter), Original verwenden
+  if (queries.length === 0 && trimmed) queries.push(trimmed);
+
+  return [...new Set(queries)].slice(0, 4);
+}
+
+async function searchSharePointSingle(query: string): Promise<SearchResult[]> {
   if (!query.trim()) return [];
 
   const data = await graphJson<{
@@ -257,6 +289,38 @@ export async function searchSharePoint(query: string): Promise<SearchResult[]> {
       size: r.size,
     } satisfies SearchResult;
   });
+}
+
+export async function searchSharePoint(query: string): Promise<SearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const queries = buildSearchQueries(trimmed);
+  const results = await Promise.allSettled(queries.map((q) => searchSharePointSingle(q)));
+
+  const seenIds = new Set<string>();
+  const merged: SearchResult[] = [];
+  for (const res of results) {
+    if (res.status !== 'fulfilled') continue;
+    for (const item of res.value) {
+      if (!item.id || seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      merged.push(item);
+    }
+  }
+
+  // Ranking: mehr Query-Wörter im Dateinamen → weiter oben
+  const queryWords = trimmed
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length >= 3);
+  merged.sort((a, b) => {
+    const scoreA = queryWords.filter((w) => a.name.toLowerCase().includes(w)).length;
+    const scoreB = queryWords.filter((w) => b.name.toLowerCase().includes(w)).length;
+    return scoreB - scoreA;
+  });
+
+  return merged.slice(0, 20);
 }
 
 export async function listFolderContents(siteId: string, path?: string): Promise<DriveItem[]> {

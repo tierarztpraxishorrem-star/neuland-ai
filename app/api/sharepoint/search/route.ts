@@ -25,8 +25,8 @@ export async function POST(req: Request) {
     if (!query) {
       return NextResponse.json({ error: 'Suchbegriff fehlt.' }, { status: 400 });
     }
-    if (query.length > 200) {
-      return NextResponse.json({ error: 'Suchbegriff ist zu lang (max. 200 Zeichen).' }, { status: 400 });
+    if (query.length > 500) {
+      return NextResponse.json({ error: 'Suchbegriff ist zu lang (max. 500 Zeichen).' }, { status: 400 });
     }
 
     const results = await searchSharePoint(query);
