@@ -14,7 +14,17 @@ const extractSecret = (req: Request, body: any, url: URL) => {
 
 const normalizePayload = (input: unknown) => {
   if (!input || typeof input !== 'object') return {};
-  return input as Record<string, unknown>;
+  const raw = input as Record<string, unknown>;
+  // Yeastar P-Series wraps call data in a `msg` JSON string — merge it into top level
+  if (typeof raw.msg === 'string') {
+    try {
+      const parsed = JSON.parse(raw.msg);
+      if (parsed && typeof parsed === 'object') {
+        return { ...raw, ...parsed };
+      }
+    } catch { /* keep raw */ }
+  }
+  return raw;
 };
 
 function getServiceClient() {
@@ -42,16 +52,16 @@ async function handleCallEnd(payload: Record<string, unknown>) {
     return;
   }
 
-  // Yeastar 30012 payload structure
+  // Yeastar 30012 payload — fields come from parsed `msg` (merged by normalizePayload)
   const sn = String(payload.sn || '');
-  const callId = String(payload.callid || payload.call_id || sn || '');
-  const caller = String(payload.callfrom || payload.caller || payload.from || '');
-  const callee = String(payload.callto || payload.callee || payload.to || '');
-  const duration = Number(payload.callduraction || payload.duration || 0);
-  const timeStart = String(payload.timestart || payload.start_time || '');
-  const timeEnd = String(payload.timeend || payload.end_time || '');
+  const callId = String(payload.call_id || payload.callid || sn || '');
+  const caller = String(payload.call_from || payload.callfrom || payload.caller || payload.from || '');
+  const callee = String(payload.call_to || payload.callto || payload.callee || payload.to || '');
+  const duration = Number(payload.talk_duration || payload.call_duration || payload.callduraction || payload.duration || 0);
+  const timeStart = String(payload.time_start || payload.timestart || payload.start_time || '');
+  const timeEnd = String(payload.time_end || payload.timeend || payload.end_time || '');
   const recording = String(payload.recording || payload.recording_file || '');
-  const callDir = String(payload.calldirection || payload.direction || '');
+  const callDir = String(payload.type || payload.calldirection || payload.direction || '');
   const direction = callDir.toLowerCase().includes('inbound')
     ? 'inbound'
     : callDir.toLowerCase().includes('outbound')
