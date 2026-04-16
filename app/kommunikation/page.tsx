@@ -321,9 +321,11 @@ export default function KommunikationPage() {
     }
   };
 
-  const loadCallRecordings = async () => {
-    setRecordingsLoading(true);
-    setRecordingsStatus('');
+  const loadCallRecordings = async (silent = false) => {
+    if (!silent) {
+      setRecordingsLoading(true);
+      setRecordingsStatus('');
+    }
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
@@ -359,10 +361,12 @@ export default function KommunikationPage() {
       }
     } catch (error) {
       console.error('loadCallRecordings failed', error);
-      setCallRecordings([]);
-      setRecordingsStatus('Anruf-Protokolle konnten nicht geladen werden.');
+      if (!silent) {
+        setCallRecordings([]);
+        setRecordingsStatus('Anruf-Protokolle konnten nicht geladen werden.');
+      }
     } finally {
-      setRecordingsLoading(false);
+      if (!silent) setRecordingsLoading(false);
     }
   };
 
@@ -392,6 +396,11 @@ export default function KommunikationPage() {
     if (typeof window !== 'undefined') {
       setWebhookUrl(`${window.location.origin}/api/yeastar/webhook`);
     }
+
+    const interval = setInterval(() => {
+      loadCallRecordings(true);
+    }, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -602,7 +611,7 @@ export default function KommunikationPage() {
           </div>
           <button
             className="p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer"
-            onClick={loadCallRecordings}
+            onClick={() => loadCallRecordings()}
           >
             🔄 Aktualisieren
           </button>
