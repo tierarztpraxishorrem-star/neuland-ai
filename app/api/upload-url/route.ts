@@ -21,7 +21,8 @@ export async function GET() {
     });
 
     const signedUrl = await getSignedUrl(client, command, { expiresIn: 60 * 5 });
-    const publicUrl = `https://pub-14794881d3f446c2b026b4c2d9715c0a.r2.dev/${fileName}`;
+    const r2PublicUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://pub-14794881d3f446c2b026b4c2d9715c0a.r2.dev';
+    const publicUrl = `${r2PublicUrl}/${fileName}`;
 
     return Response.json({ uploadUrl: signedUrl, fileUrl: publicUrl });
   } catch (error) {
