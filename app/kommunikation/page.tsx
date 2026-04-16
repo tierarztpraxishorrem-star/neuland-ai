@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
-import { uiTokens, Card, Button, Section } from '../../components/ui/System';
 
 type FonioCallItem = {
   id: string;
@@ -97,9 +96,7 @@ export default function KommunikationPage() {
       const timeout = setTimeout(() => controller.abort(), 12000);
       const response = await safeFetchJson('/api/fonio', {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
         cache: 'no-store',
         signal: controller.signal,
       });
@@ -251,9 +248,7 @@ export default function KommunikationPage() {
 
       const response = await safeFetchJson('/api/yeastar', {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
         cache: 'no-store',
       });
 
@@ -297,9 +292,7 @@ export default function KommunikationPage() {
 
       const response = await safeFetchJson('/api/yeastar/events', {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
         cache: 'no-store',
       });
 
@@ -383,12 +376,12 @@ export default function KommunikationPage() {
 
   const statusLabel = (status: string) => {
     const map: Record<string, { label: string; color: string; bg: string }> = {
-      pending: { label: 'Wartend', color: '#92400e', bg: '#fef3c7' },
-      downloading: { label: 'Download…', color: '#1e40af', bg: '#dbeafe' },
-      transcribing: { label: 'Transkription…', color: '#6d28d9', bg: '#ede9fe' },
-      summarizing: { label: 'KI-Zusammenfassung…', color: '#0e7490', bg: '#cffafe' },
-      done: { label: 'Fertig', color: '#065f46', bg: '#d1fae5' },
-      failed: { label: 'Fehlgeschlagen', color: '#991b1b', bg: '#fee2e2' },
+      pending:      { label: 'Wartend',               color: '#92400e', bg: '#fef3c7' },
+      downloading:  { label: 'Download…',             color: '#1e40af', bg: '#dbeafe' },
+      transcribing: { label: 'Transkription…',        color: '#6d28d9', bg: '#ede9fe' },
+      summarizing:  { label: 'KI-Zusammenfassung…',   color: '#0e7490', bg: '#cffafe' },
+      done:         { label: 'Fertig',                color: '#065f46', bg: '#d1fae5' },
+      failed:       { label: 'Fehlgeschlagen',        color: '#991b1b', bg: '#fee2e2' },
     };
     return map[status] || { label: status, color: '#6b7280', bg: '#f3f4f6' };
   };
@@ -404,108 +397,79 @@ export default function KommunikationPage() {
   }, []);
 
   return (
-    <main style={{
-      padding: uiTokens.pagePadding,
-      background: uiTokens.pageBackground,
-      minHeight: "100vh"
-    }}>
+    <main className="p-8 bg-[#f4f7f8] min-h-screen">
 
       {/* HEADER */}
-      <div style={{ marginBottom: "24px" }}>
-        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700, color: uiTokens.brand }}>
+      <div className="mb-6">
+        <h1 className="m-0 text-[32px] font-bold text-[#0f6b74]">
           Kommunikation
         </h1>
-        <p style={{ color: uiTokens.textSecondary, marginTop: "6px", fontSize: 15 }}>
+        <p className="text-slate-500 mt-1.5 text-[15px]">
           Zentrale für Patienten- & Teamkommunikation
         </p>
       </div>
 
       {/* GRID */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-        gap: "20px"
-      }}>
+      <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
 
         {/* 📧 EMAIL */}
-        <div style={card}>
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5">
           <h3>📧 E-Mail</h3>
-
           <input
             placeholder="Empfänger"
             onChange={(e) => setEmail(e.target.value)}
-            style={input}
+            className="p-3 rounded-2xl border border-gray-200 w-full"
           />
-
           <textarea
             placeholder="Nachricht"
             onChange={(e) => setMessage(e.target.value)}
-            style={textarea}
+            className="p-3 rounded-2xl border border-gray-200 min-h-20 w-full"
           />
-
-          <button style={primaryBtn}>
+          <button className="p-3 rounded-2xl bg-[#0f6b74] text-white font-semibold cursor-pointer border-0">
             Senden
           </button>
         </div>
 
         {/* 📱 WHATSAPP */}
-        <Link href="/kommunikation/whatsapp" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div style={{ ...card, cursor: 'pointer', transition: 'border-color 0.15s ease', position: 'relative' }}
-               onMouseEnter={e => (e.currentTarget.style.borderColor = uiTokens.brand)}
-               onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}>
+        <Link href="/kommunikation/whatsapp" className="no-underline text-inherit">
+          <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5 cursor-pointer transition-colors hover:border-[#0f6b74] relative">
             <h3>📱 WhatsApp Inbox</h3>
-            <div style={{ fontSize: '14px', color: uiTokens.textSecondary }}>
+            <div className="text-sm text-slate-500">
               Eingehende WhatsApp-Nachrichten anzeigen, beantworten und KI-Antwortvorschläge erhalten.
             </div>
-            <div style={{ ...primaryBtn, textAlign: 'center', marginTop: '4px' }}>
+            <div className="p-3 rounded-2xl bg-[#0f6b74] text-white font-semibold text-center mt-1">
               Zum WhatsApp-Posteingang →
             </div>
           </div>
         </Link>
 
         {/* ☎️ TELEFON (FONIO) */}
-        <div style={card}>
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5">
           <h3>☎️ Telefon (Fonio)</h3>
 
           {checkingFonioAccess ? (
-            <div style={{ fontSize: '14px', color: '#6b7280' }}>
-              Prüfe Praxisfreigabe...
-            </div>
+            <div className="text-sm text-gray-500">Prüfe Praxisfreigabe...</div>
           ) : fonioEnabled ? (
             <>
-              <div style={{ fontSize: '14px', color: '#0F6B74', fontWeight: 600 }}>
+              <div className="text-sm text-[#0F6B74] font-semibold">
                 Fonio ist für diese Praxis freigeschaltet.
               </div>
-              <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                Praxis-ID: {activePracticeId}
-              </div>
+              <div className="text-xs text-gray-500">Praxis-ID: {activePracticeId}</div>
 
-              <div style={{ fontSize: "14px", color: "#6b7280" }}>
-                Verpasste Anrufe
-              </div>
+              <div className="text-sm text-gray-500">Verpasste Anrufe</div>
 
-              <div style={{ display: 'grid', gap: '8px' }}>
+              <div className="grid gap-2">
                 {fonioCalls.length === 0 ? (
-                  <div style={{ fontSize: '13px', color: '#6b7280' }}>
-                    Keine verpassten Anrufe gefunden.
-                  </div>
+                  <div className="text-[13px] text-gray-500">Keine verpassten Anrufe gefunden.</div>
                 ) : (
                   fonioCalls.map((call) => (
-                    <div
-                      key={call.id}
-                      style={{
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '10px',
-                        padding: '10px',
-                        background: '#f8fafc'
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>{call.phoneNumber}</div>
-                      <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                    <div key={call.id} className="border border-gray-200 rounded-xl p-2.5 bg-slate-50">
+                      <div className="font-semibold">{call.phoneNumber}</div>
+                      <div className="text-xs text-gray-500">
                         {call.status} · {new Date(call.at).toLocaleString('de-DE')}
                       </div>
                       <button
-                        style={{ ...secondaryBtn, marginTop: '8px' }}
+                        className="mt-2 p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer text-sm"
                         onClick={() => createCallback(call.phoneNumber)}
                         disabled={creatingCallback}
                       >
@@ -520,133 +484,113 @@ export default function KommunikationPage() {
                 placeholder="Telefonnummer für Rückruf"
                 value={callbackNumber}
                 onChange={(e) => setCallbackNumber(e.target.value)}
-                style={input}
+                className="p-3 rounded-2xl border border-gray-200 w-full"
               />
 
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <div className="flex gap-2 flex-wrap">
                 <button
-                  style={secondaryBtn}
+                  className="p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer"
                   onClick={() => createCallback(callbackNumber)}
                   disabled={creatingCallback}
                 >
                   {creatingCallback ? 'Sende...' : '↩ Rückruf für Nummer erstellen'}
                 </button>
-
-                <button style={secondaryBtn} onClick={loadFonioData}>
+                <button
+                  className="p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer"
+                  onClick={loadFonioData}
+                >
                   🔄 Anrufe aktualisieren
                 </button>
               </div>
 
               {fonioMessage && (
-                <div style={{ fontSize: '12px', color: '#0f172a' }}>{fonioMessage}</div>
+                <div className="text-xs text-slate-900">{fonioMessage}</div>
               )}
             </>
           ) : (
-            <div
-              style={{
-                fontSize: '13px',
-                color: '#6b7280',
-                background: '#f8fafc',
-                border: '1px solid #e5e7eb',
-                borderRadius: '10px',
-                padding: '10px 12px'
-              }}
-            >
+            <div className="text-[13px] text-gray-500 bg-slate-50 border border-gray-200 rounded-xl px-3 py-2.5">
               {fonioMessage || 'Fonio ist für diese Praxis nicht freigeschaltet.'}
             </div>
           )}
         </div>
 
         {/* 💬 SLACK */}
-        <div style={card}>
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5">
           <h3>💬 Team (Slack)</h3>
-          <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
+          <div className="text-[13px] text-slate-500 mb-2">
             Slack-Channels direkt in Neuland AI lesen und schreiben.
           </div>
           <Link
             href="/kommunikation/slack"
-            style={{
-              display: 'inline-block',
-              padding: '8px 16px',
-              background: '#7c3aed',
-              color: '#fff',
-              borderRadius: '8px',
-              fontSize: '13px',
-              fontWeight: 600,
-              textDecoration: 'none',
-            }}
+            className="inline-block px-4 py-2 bg-violet-700 text-white rounded-lg text-[13px] font-semibold no-underline"
           >
             💬 Slack öffnen →
           </Link>
         </div>
 
         {/* ☎️ YEASTAR */}
-        <div style={card}>
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 flex flex-col gap-2.5">
           <h3>☎️ Telefon (Yeastar API)</h3>
 
-          <div style={{ fontSize: '13px', color: '#64748b' }}>
+          <div className="text-[13px] text-slate-500">
             API-basiertes Laden von Anrufdaten für die freigeschaltete Praxis.
           </div>
 
           {yeastarLoading ? (
-            <div style={{ fontSize: '13px', color: '#6b7280' }}>Lade Yeastar-Daten...</div>
+            <div className="text-[13px] text-gray-500">Lade Yeastar-Daten...</div>
           ) : (
             <>
-              <div style={{ display: 'grid', gap: '8px' }}>
+              <div className="grid gap-2">
                 {yeastarCalls.map((call) => (
-                  <div
-                    key={call.id}
-                    style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '10px',
-                      padding: '10px',
-                      background: '#f8fafc'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{call.number}</div>
-                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                  <div key={call.id} className="border border-gray-200 rounded-xl p-2.5 bg-slate-50">
+                    <div className="font-semibold">{call.number}</div>
+                    <div className="text-xs text-gray-500">
                       {call.status} · {new Date(call.at).toLocaleString('de-DE')}
                     </div>
                   </div>
                 ))}
               </div>
-
-              <button style={secondaryBtn} onClick={loadYeastarData}>
+              <button
+                className="p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer"
+                onClick={loadYeastarData}
+              >
                 🔄 Yeastar aktualisieren
               </button>
-
               {yeastarStatus && (
-                <div style={{ fontSize: '12px', color: '#475569' }}>{yeastarStatus}</div>
+                <div className="text-xs text-slate-600">{yeastarStatus}</div>
               )}
             </>
           )}
 
-          <div style={{ borderTop: '1px solid #e5e7eb', marginTop: '8px', paddingTop: '10px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Webhook Setup</div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>
+          <div className="border-t border-gray-200 mt-2 pt-2.5">
+            <div className="text-[13px] font-bold text-slate-900">Webhook Setup</div>
+            <div className="text-xs text-slate-500">
               URL in Yeastar eintragen: {webhookUrl || '/api/yeastar/webhook'}
             </div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>
+            <div className="text-xs text-slate-500">
               Methode: POST · Secret: Wert aus YEASTAR_WEBHOOK_SECRET (falls gesetzt)
             </div>
 
-            <button style={{ ...secondaryBtn, marginTop: '8px' }} onClick={loadWebhookEvents}>
+            <button
+              className="mt-2 p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer"
+              onClick={loadWebhookEvents}
+            >
               🔄 Webhook-Events aktualisieren
             </button>
 
             {webhookLoading ? (
-              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>Lade Webhook-Events...</div>
+              <div className="text-xs text-slate-500 mt-2">Lade Webhook-Events...</div>
             ) : (
-              <div style={{ display: 'grid', gap: '6px', marginTop: '8px' }}>
+              <div className="grid gap-1.5 mt-2">
                 {webhookEvents.map((event) => (
-                  <div key={event.id} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px', background: '#fff' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600 }}>{event.eventType}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>
+                  <div key={event.id} className="border border-gray-200 rounded-lg p-2 bg-white">
+                    <div className="text-xs font-semibold">{event.eventType}</div>
+                    <div className="text-xs text-slate-500">
                       {event.number} · {new Date(event.receivedAt).toLocaleString('de-DE')}
                     </div>
                   </div>
                 ))}
-                {webhookStatus && <div style={{ fontSize: '12px', color: '#64748b' }}>{webhookStatus}</div>}
+                {webhookStatus && <div className="text-xs text-slate-500">{webhookStatus}</div>}
               </div>
             )}
           </div>
@@ -655,141 +599,94 @@ export default function KommunikationPage() {
       </div>
 
       {/* 📞 ANRUF-PROTOKOLLE */}
-      <div style={{
-        marginTop: '24px',
-        padding: '24px',
-        borderRadius: '16px',
-        background: '#fff',
-        border: '1px solid #e5e7eb',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      <div className="mt-6 p-6 rounded-2xl bg-white border border-gray-200">
+        <div className="flex justify-between items-center mb-4">
           <div>
-            <h3 style={{ margin: 0, color: uiTokens.brand }}>📞 Anruf-Protokolle & KI-Zusammenfassungen</h3>
-            <p style={{ margin: '4px 0 0', fontSize: '13px', color: uiTokens.textSecondary }}>
+            <h3 className="m-0 text-[#0f6b74]">📞 Anruf-Protokolle & KI-Zusammenfassungen</h3>
+            <p className="mt-1 text-[13px] text-slate-500">
               Automatische Transkription und Zusammenfassung aller Telefonate über Yeastar PBX
             </p>
           </div>
-          <button style={secondaryBtn} onClick={loadCallRecordings}>
+          <button
+            className="p-3 rounded-2xl border border-gray-200 bg-white font-semibold cursor-pointer"
+            onClick={loadCallRecordings}
+          >
             🔄 Aktualisieren
           </button>
         </div>
 
         {recordingsLoading ? (
-          <div style={{ fontSize: '13px', color: '#6b7280', padding: '12px 0' }}>Lade Anruf-Protokolle…</div>
+          <div className="text-[13px] text-gray-500 py-3">Lade Anruf-Protokolle…</div>
         ) : callRecordings.length === 0 ? (
-          <div style={{
-            fontSize: '13px',
-            color: '#6b7280',
-            background: '#f8fafc',
-            border: '1px solid #e5e7eb',
-            borderRadius: '10px',
-            padding: '16px',
-          }}>
+          <div className="text-[13px] text-gray-500 bg-slate-50 border border-gray-200 rounded-xl p-4">
             {recordingsStatus}
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: '12px' }}>
+          <div className="grid gap-3">
             {callRecordings.map((rec) => {
               const st = statusLabel(rec.status);
               const isExpanded = expandedRecording === rec.id;
               return (
-                <div
-                  key={rec.id}
-                  style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '12px',
-                    background: '#fafbfc',
-                    overflow: 'hidden',
-                  }}
-                >
+                <div key={rec.id} className="border border-gray-200 rounded-xl bg-slate-50 overflow-hidden">
                   {/* Header row */}
                   <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '14px 16px',
-                      cursor: rec.status === 'done' ? 'pointer' : 'default',
-                    }}
+                    className={`flex items-center gap-3 px-4 py-3.5 ${rec.status === 'done' ? 'cursor-pointer' : ''}`}
                     onClick={() => rec.status === 'done' && setExpandedRecording(isExpanded ? null : rec.id)}
                   >
-                    <div style={{
-                      fontSize: '20px',
-                      flexShrink: 0,
-                    }}>
+                    <div className="text-xl shrink-0">
                       {rec.direction === 'inbound' ? '📥' : rec.direction === 'outbound' ? '📤' : '🔄'}
                     </div>
 
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm">
                         {rec.caller} → {rec.callee}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
-                        {rec.started_at ? new Date(rec.started_at).toLocaleString('de-DE') : rec.created_at ? new Date(rec.created_at).toLocaleString('de-DE') : '–'}
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {rec.started_at
+                          ? new Date(rec.started_at).toLocaleString('de-DE')
+                          : rec.created_at
+                            ? new Date(rec.created_at).toLocaleString('de-DE')
+                            : '–'}
                         {rec.duration_seconds > 0 && ` · ${formatDuration(rec.duration_seconds)}`}
                       </div>
                     </div>
 
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '3px 10px',
-                      borderRadius: '99px',
-                      background: st.bg,
-                      color: st.color,
-                      flexShrink: 0,
-                    }}>
+                    {/* Status badge – dynamic colors kept as inline style */}
+                    <span
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0"
+                      style={{ background: st.bg, color: st.color }}
+                    >
                       {st.label}
                     </span>
 
                     {rec.status === 'done' && (
-                      <span style={{ fontSize: '14px', color: '#9ca3af', flexShrink: 0 }}>
-                        {isExpanded ? '▲' : '▼'}
-                      </span>
+                      <span className="text-sm text-gray-400 shrink-0">{isExpanded ? '▲' : '▼'}</span>
                     )}
                   </div>
 
-                  {/* Summary preview (always visible for done) */}
+                  {/* Summary preview */}
                   {rec.status === 'done' && rec.summary && !isExpanded && (
-                    <div style={{
-                      padding: '0 16px 12px',
-                      fontSize: '13px',
-                      color: '#374151',
-                      lineHeight: '1.5',
-                    }}>
+                    <div className="px-4 pb-3 text-[13px] text-gray-700 leading-relaxed">
                       {rec.summary.length > 180 ? rec.summary.slice(0, 180) + '…' : rec.summary}
                     </div>
                   )}
 
                   {/* Error message */}
                   {rec.status === 'failed' && rec.error_message && (
-                    <div style={{
-                      padding: '0 16px 12px',
-                      fontSize: '12px',
-                      color: '#991b1b',
-                    }}>
+                    <div className="px-4 pb-3 text-xs text-red-800">
                       Fehler: {rec.error_message}
                     </div>
                   )}
 
                   {/* Expanded detail */}
                   {isExpanded && rec.status === 'done' && (
-                    <div style={{ borderTop: '1px solid #e5e7eb', padding: '16px' }}>
+                    <div className="border-t border-gray-200 p-4">
                       {rec.summary && (
-                        <div style={{ marginBottom: '16px' }}>
-                          <div style={{ fontWeight: 700, fontSize: '13px', color: '#0F6B74', marginBottom: '6px' }}>
+                        <div className="mb-4">
+                          <div className="font-bold text-[13px] text-[#0F6B74] mb-1.5">
                             🤖 KI-Zusammenfassung
                           </div>
-                          <div style={{
-                            fontSize: '13px',
-                            color: '#1f2937',
-                            lineHeight: '1.6',
-                            background: '#f0fdf4',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: '10px',
-                            padding: '12px',
-                            whiteSpace: 'pre-wrap',
-                          }}>
+                          <div className="text-[13px] text-gray-800 leading-relaxed bg-green-50 border border-green-200 rounded-xl p-3 whitespace-pre-wrap">
                             {rec.summary}
                           </div>
                         </div>
@@ -797,21 +694,10 @@ export default function KommunikationPage() {
 
                       {rec.transcript && (
                         <div>
-                          <div style={{ fontWeight: 700, fontSize: '13px', color: '#374151', marginBottom: '6px' }}>
+                          <div className="font-bold text-[13px] text-gray-700 mb-1.5">
                             📝 Vollständiges Transkript
                           </div>
-                          <div style={{
-                            fontSize: '12px',
-                            color: '#4b5563',
-                            lineHeight: '1.6',
-                            background: '#f8fafc',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: '10px',
-                            padding: '12px',
-                            maxHeight: '300px',
-                            overflowY: 'auto',
-                            whiteSpace: 'pre-wrap',
-                          }}>
+                          <div className="text-xs text-gray-600 leading-relaxed bg-slate-50 border border-gray-200 rounded-xl p-3 max-h-72 overflow-y-auto whitespace-pre-wrap">
                             {rec.transcript}
                           </div>
                         </div>
@@ -825,20 +711,14 @@ export default function KommunikationPage() {
         )}
 
         {recordingsStatus && callRecordings.length > 0 && (
-          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>{recordingsStatus}</div>
+          <div className="text-xs text-gray-500 mt-2">{recordingsStatus}</div>
         )}
       </div>
 
       {/* FUTURE SECTION */}
-      <div style={{
-        marginTop: "40px",
-        padding: "20px",
-        borderRadius: "16px",
-        background: "#fff",
-        border: "1px solid #e5e7eb"
-      }}>
+      <div className="mt-10 p-5 rounded-2xl bg-white border border-gray-200">
         <h3>🚀 Nächste Ausbaustufe</h3>
-        <ul style={{ color: "#6b7280", lineHeight: "1.8" }}>
+        <ul className="text-gray-500 leading-loose">
           <li>Follow-up Erinnerungen für Patienten</li>
           <li>Direkte Übergabe von Fällen ins Team</li>
         </ul>
@@ -847,48 +727,3 @@ export default function KommunikationPage() {
     </main>
   );
 }
-
-
-// 🎨 STYLES
-
-const card = {
-  background: "#fff",
-  padding: "20px",
-  borderRadius: "16px",
-  border: "1px solid #e5e7eb",
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: "10px"
-};
-
-const input = {
-  padding: "12px",
-  borderRadius: "16px",
-  border: "1px solid #e5e7eb"
-};
-
-const textarea = {
-  padding: "12px",
-  borderRadius: "16px",
-  border: "1px solid #e5e7eb",
-  minHeight: "80px"
-};
-
-const primaryBtn = {
-  padding: "12px",
-  borderRadius: "16px",
-  border: "none",
-  background: "#0f6b74",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: "pointer"
-};
-
-const secondaryBtn = {
-  padding: "12px",
-  borderRadius: "16px",
-  border: "1px solid #e5e7eb",
-  background: "#fff",
-  fontWeight: 600,
-  cursor: "pointer"
-};
