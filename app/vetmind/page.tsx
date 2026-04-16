@@ -2822,8 +2822,8 @@ const filteredSessions = sortedSessions.filter((s: any) => {
             )}
 
             {spResults.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs text-gray-500">Ergebnisse: {spResults.length}</div>
+              <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                <div className="text-xs text-gray-500 sticky top-0 bg-white pb-1">Ergebnisse: {spResults.length}</div>
                 {spResults.map((r) => (
                   <div key={r.id} className="rounded-xl border border-gray-200 p-3">
                     <div className="flex items-start justify-between gap-3">
