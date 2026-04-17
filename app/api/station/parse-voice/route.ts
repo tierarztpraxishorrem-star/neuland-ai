@@ -19,7 +19,7 @@ export async function POST(req: Request) {
       input: [
         {
           role: 'system',
-          content: `Du extrahierst strukturierte Patientendaten aus einem gesprochenen Text eines Tierarztes.
+          content: `Du extrahierst strukturierte Patientendaten UND Medikamente aus einem gesprochenen Text eines Tierarztes.
 Antworte NUR mit einem JSON-Objekt. Kein Text davor oder danach.
 
 Format:
@@ -37,7 +37,19 @@ Format:
   "responsible_tfa": "TFA oder null",
   "cave_details": "CAVE-Hinweis oder null",
   "iv_catheter_location": "Braunüle-Ort oder null",
-  "diet_type": "Diät oder null"
+  "diet_type": "Diät oder null",
+  "medications": [
+    {
+      "name": "Medikamentenname",
+      "dose": "Dosierung als Text (z.B. '3,1 ml' oder '25mg/kg')",
+      "route": "i.v.|p.o.|s.c.|i.m.|rektal|topisch oder null",
+      "frequency_label": "1x täglich|2x täglich|3x täglich|4x täglich|bei Bedarf oder null",
+      "scheduled_hours": [8, 16, 0],
+      "is_prn": false,
+      "is_dti": false,
+      "dti_rate_ml_h": null
+    }
+  ]
 }
 
 Regeln:
@@ -46,6 +58,12 @@ Regeln:
 - "kastriert" / "kastrierte Hündin" entsprechend zuordnen
 - Gewicht als reine Zahl (z.B. "32" nicht "32 kg")
 - Wenn etwas unklar ist: null setzen
+- medications: leeres Array [] wenn keine Medikamente genannt werden
+- Medikamente: Erkenne typische Angaben wie "Metamizol 50mg/kg 3x täglich i.v." oder "Ringerlaktat Dauertropf 60ml pro Stunde"
+- Bei "Dauertropf" / "DTI" / "Dauerinfusion": is_dti = true, dti_rate_ml_h = Rate
+- Bei "bei Bedarf" / "PRN" / "wenn nötig": is_prn = true
+- scheduled_hours berechnen: 1x = [8], 2x = [8,20], 3x = [8,16,0], 4x = [8,14,20,2]
+- Applikationsweg aus Kontext erkennen: "intravenös"/"i.v.", "oral"/"per os"/"p.o.", "subkutan"/"s.c." etc.
 - Deutsche Eingabe, deutsche Ausgabe`
         },
         { role: 'user', content: transcript }
@@ -54,22 +72,26 @@ Regeln:
     });
 
     const outputText = response.output_text || '{}';
-    let fields: Record<string, unknown>;
+    let parsed: Record<string, unknown>;
     try {
-      fields = JSON.parse(outputText);
+      parsed = JSON.parse(outputText);
     } catch {
       console.error('[api/station/parse-voice] JSON-Parse Fehler:', outputText);
       return NextResponse.json({ error: 'Konnte Text nicht auswerten.' }, { status: 500 });
     }
 
-    // Clean null values
-    for (const key of Object.keys(fields)) {
-      if (fields[key] === null || fields[key] === 'null' || fields[key] === '') {
-        delete fields[key];
+    // Separate medications from fields
+    const medications = Array.isArray(parsed.medications) ? parsed.medications : [];
+    delete parsed.medications;
+
+    // Clean null values from fields
+    for (const key of Object.keys(parsed)) {
+      if (parsed[key] === null || parsed[key] === 'null' || parsed[key] === '') {
+        delete parsed[key];
       }
     }
 
-    return NextResponse.json({ ok: true, fields });
+    return NextResponse.json({ ok: true, fields: parsed, medications });
   } catch (error) {
     console.error('[api/station/parse-voice] POST Fehler:', error);
     return NextResponse.json({ error: 'Fehler beim Auswerten.' }, { status: 500 });

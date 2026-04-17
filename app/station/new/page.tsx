@@ -65,6 +65,7 @@ export default function NewStationPatientPage() {
   const [transcript, setTranscript] = useState('');
   const [parsing, setParsing] = useState(false);
   const [lastParsedFields, setLastParsedFields] = useState<string[]>([]);
+  const [voiceMeds, setVoiceMeds] = useState<Array<{ name: string; dose: string; route: string | null; frequency_label: string | null; scheduled_hours: number[]; is_prn: boolean; is_dti: boolean; dti_rate_ml_h: number | null }>>([]);
   const recognitionRef = useRef<any>(null);
   const parseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,6 +96,9 @@ export default function NewStationPatientPage() {
         }
         setForm(prev => ({ ...prev, ...updates }));
         setLastParsedFields(filled);
+      }
+      if (data.medications && data.medications.length > 0) {
+        setVoiceMeds(data.medications);
       }
     } catch { /* ignore */ } finally { setParsing(false); }
   }, []);
@@ -207,7 +211,18 @@ export default function NewStationPatientPage() {
       const data = await res.json();
       if (!res.ok) { showToast({ message: data.error || 'Fehler beim Anlegen.', type: 'error' }); return; }
 
-      showToast({ message: 'Patient auf Station aufgenommen!', type: 'success' });
+      // Create medications if any were dictated
+      if (voiceMeds.length > 0) {
+        await Promise.all(voiceMeds.map(med =>
+          fetchWithAuth(`/api/station/patients/${data.patient.id}/medications`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(med),
+          }).catch(() => {})
+        ));
+      }
+
+      showToast({ message: `Patient aufgenommen${voiceMeds.length > 0 ? ` + ${voiceMeds.length} Medikamente` : ''}!`, type: 'success' });
       fetchWithAuth(`/api/station/patients/${data.patient.id}/ai-check`, { method: 'POST' }).catch(() => {});
       router.push(`/station/${data.patient.id}`);
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setSubmitting(false); }
@@ -342,6 +357,32 @@ export default function NewStationPatientPage() {
                 })}
               </div>
             </Card>
+
+            {/* Medications preview */}
+            {voiceMeds.length > 0 && (
+              <Card style={{ padding: '16px' }}>
+                <div style={{ fontSize: '12px', color: uiTokens.textMuted, marginBottom: '10px', fontWeight: 600 }}>
+                  ERKANNTE MEDIKAMENTE ({voiceMeds.length})
+                </div>
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  {voiceMeds.map((med, i) => (
+                    <div key={i} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '10px 12px', borderRadius: '8px', background: '#f0fdf4',
+                      border: '1px solid #bbf7d0',
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', color: uiTokens.textPrimary }}>{med.name}</div>
+                        <div style={{ fontSize: '12px', color: uiTokens.textSecondary }}>
+                          {med.dose}{med.route ? ` ${med.route}` : ''}{med.frequency_label ? ` · ${med.frequency_label}` : ''}{med.is_dti ? ` · DTI ${med.dti_rate_ml_h} ml/h` : ''}{med.is_prn ? ' · bei Bedarf' : ''}
+                        </div>
+                      </div>
+                      <button onClick={() => setVoiceMeds(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '16px', padding: '4px' }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
 
             {/* Actions */}
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between' }}>

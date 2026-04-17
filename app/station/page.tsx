@@ -19,6 +19,7 @@ type StationPatient = {
   status: string;
   station_day: number;
   admission_date: string;
+  discharge_date: string | null;
 };
 
 type MedStatus = {
@@ -42,16 +43,31 @@ export default function StationPage() {
   const router = useRouter();
   const isTv = searchParams.get('tv') === '1';
   const [patients, setPatients] = useState<StationPatient[]>([]);
+  const [dischargedPatients, setDischargedPatients] = useState<StationPatient[]>([]);
+  const [showDischarged, setShowDischarged] = useState(false);
   const [medStatuses, setMedStatuses] = useState<Record<string, MedStatus>>({});
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
 
   const loadData = useCallback(async () => {
     try {
-      const res = await fetchWithAuth('/api/station/patients?status=active');
+      const [res, disRes] = await Promise.all([
+        fetchWithAuth('/api/station/patients?status=active'),
+        fetchWithAuth('/api/station/patients?status=discharged'),
+      ]);
       if (!res.ok) return;
       const data = await res.json();
       setPatients(data.patients || []);
+      if (disRes.ok) {
+        const disData = await disRes.json();
+        // Only show discharged patients from last 14 days
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        const recent = (disData.patients || []).filter((p: StationPatient) =>
+          p.discharge_date && new Date(p.discharge_date) >= twoWeeksAgo
+        );
+        setDischargedPatients(recent);
+      }
 
       // Load medication status for each patient
       const statuses: Record<string, MedStatus> = {};
@@ -283,6 +299,65 @@ export default function StationPage() {
                 </Link>
               );
             })}
+          </div>
+        )}
+
+        {/* Entlassene Patienten (letzte 14 Tage) */}
+        {dischargedPatients.length > 0 && (
+          <div style={{ marginTop: isTv ? 20 : 32 }}>
+            <button
+              onClick={() => setShowDischarged((v) => !v)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 14,
+                fontWeight: 600,
+                color: uiTokens.textSecondary,
+                padding: '8px 0',
+              }}
+            >
+              <span style={{ transition: 'transform 150ms', transform: showDischarged ? 'rotate(90deg)' : 'rotate(0deg)' }}>▸</span>
+              Entlassen ({dischargedPatients.length}) · letzte 14 Tage
+            </button>
+            {showDischarged && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isTv ? 'repeat(auto-fill, minmax(280px, 1fr))' : 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: 10,
+                marginTop: 8,
+              }}>
+                {dischargedPatients.map((p) => (
+                  <Link key={p.id} href={`/station/${p.id}`} style={{ textDecoration: 'none' }}>
+                    <Card style={{
+                      padding: isTv ? '14px' : '16px',
+                      cursor: 'pointer',
+                      opacity: 0.65,
+                      background: '#f8fafc',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: uiTokens.textMuted, fontWeight: 600, letterSpacing: '0.5px' }}>
+                            BOX {p.box_number || '–'} · {p.station_day} Tage
+                          </div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: uiTokens.textSecondary, marginTop: '2px' }}>{p.patient_name}</div>
+                        </div>
+                        <span style={{ background: '#e2e8f0', color: '#475569', fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '6px' }}>
+                          Entlassen
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: uiTokens.textMuted, marginTop: 4 }}>
+                        {[p.species, p.breed].filter(Boolean).join(' · ')}
+                        {p.discharge_date && ` · ${new Date(p.discharge_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}`}
+                      </div>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
