@@ -36,6 +36,7 @@ const SECTIONS: Section[] = [
     id: "personal",
     label: "Meine Unterlagen",
     items: [
+      { href: "/hr/profile", label: "Mein Profil" },
       { href: "/hr/documents", label: "Dokumente" },
       { href: "/hr/payslips", label: "Lohnunterlagen" },
       { href: "/hr/time-corrections", label: "Zeitkorrekturen" },
