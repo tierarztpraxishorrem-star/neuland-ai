@@ -181,25 +181,57 @@ export default function StationPage() {
           </div>
         </div>
 
-        {/* Patient boxes */}
+        {/* Overdue banner */}
+        {patients.some((p) => medStatuses[p.id]?.overdue) && (
+          <div style={{
+            background: '#7f1d1d',
+            border: '2px solid #ef4444',
+            borderRadius: '12px',
+            padding: '16px 24px',
+            marginBottom: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            animation: 'pulse 2s infinite',
+          }}>
+            <span style={{ fontSize: '28px' }}>⚠️</span>
+            <div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: '#fca5a5' }}>ÜBERFÄLLIGE MEDIKAMENTE</div>
+              <div style={{ fontSize: '15px', color: '#fecaca', marginTop: '4px' }}>
+                {patients.filter((p) => medStatuses[p.id]?.overdue).map((p) => {
+                  const s = medStatuses[p.id];
+                  return `${p.patient_name} (Box ${p.box_number || '–'}): ${s?.overdue} fällig`;
+                }).join(' · ')}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Patient boxes — klickbar zum Stationsblatt */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '20px', marginBottom: '40px' }}>
           {patients.map((p) => {
             const s = medStatuses[p.id];
             const borderColor = p.cave ? '#ef4444' : s?.overdue ? '#ef4444' : (s && s.next_hour !== null && s.next_hour - now.getHours() <= 1) ? '#eab308' : '#22c55e';
             return (
-              <div key={p.id} style={{
-                background: '#1e293b', borderRadius: '16px', padding: '24px',
-                border: `3px solid ${borderColor}`, minHeight: '180px',
-              }}>
-                <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>BOX {p.box_number || '–'}</div>
-                <div style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px' }}>{p.patient_name}</div>
-                <div style={{ fontSize: '15px', color: '#94a3b8', marginBottom: '4px' }}>{p.species || ''}</div>
-                <div style={{ fontSize: '15px', color: '#cbd5e1', marginBottom: '12px' }}>{p.diagnosis || ''}</div>
-                {p.cave && <div style={{ color: '#ef4444', fontWeight: 700, fontSize: '16px', marginBottom: '4px' }}>CAVE</div>}
-                <div style={{ marginTop: 'auto', fontSize: '14px', color: s?.overdue ? '#fca5a5' : '#86efac' }}>
-                  {s?.overdue ? `${s.overdue} Med. fällig` : s?.total_scheduled ? 'alles OK' : '–'}
+              <Link key={p.id} href={`/station/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                <div style={{
+                  background: '#1e293b', borderRadius: '16px', padding: '24px',
+                  border: `3px solid ${borderColor}`, minHeight: '180px',
+                  cursor: 'pointer', transition: 'transform 0.1s, box-shadow 0.1s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = `0 0 20px ${borderColor}40`; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}
+                >
+                  <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>BOX {p.box_number || '–'}</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px', color: '#f1f5f9' }}>{p.patient_name}</div>
+                  <div style={{ fontSize: '15px', color: '#94a3b8', marginBottom: '4px' }}>{p.species || ''}</div>
+                  <div style={{ fontSize: '15px', color: '#cbd5e1', marginBottom: '12px' }}>{p.diagnosis || ''}</div>
+                  {p.cave && <div style={{ color: '#ef4444', fontWeight: 700, fontSize: '16px', marginBottom: '4px' }}>CAVE</div>}
+                  <div style={{ marginTop: 'auto', fontSize: '14px', color: s?.overdue ? '#fca5a5' : '#86efac' }}>
+                    {s?.overdue ? `${s.overdue} Med. fällig` : s?.total_scheduled ? 'alles OK' : '–'}
+                  </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
           {/* Empty box placeholder */}

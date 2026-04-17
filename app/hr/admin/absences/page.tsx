@@ -68,6 +68,7 @@ export default function AdminAbsencesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [counterProposal, setCounterProposal] = useState<{ id: string; start: string; end: string; note: string } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -145,6 +146,31 @@ export default function AdminAbsencesPage() {
     }
   }
 
+  async function handleCounterProposal(absenceId: string) {
+    if (!counterProposal || counterProposal.id !== absenceId) return;
+    setUpdating(absenceId);
+    setError(null);
+    try {
+      const res = await fetchWithAuth(`/api/hr/absences/${absenceId}/counter-proposal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          alternative_starts_on: counterProposal.start,
+          alternative_ends_on: counterProposal.end,
+          note: counterProposal.note || "Alternativvorschlag",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fehler beim Senden.");
+      setCounterProposal(null);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler");
+    } finally {
+      setUpdating(null);
+    }
+  }
+
   function getEmployeeLabel(employeeId: string) {
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return employeeId.slice(0, 8) + "…";
@@ -214,8 +240,51 @@ export default function AdminAbsencesPage() {
                           >
                             Ablehnen
                           </Button>
+                          {a.type === "vacation" && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setCounterProposal(counterProposal?.id === a.id ? null : { id: a.id, start: a.starts_on, end: a.ends_on, note: "" })}
+                              disabled={updating === a.id}
+                            >
+                              Alternativ
+                            </Button>
+                          )}
                         </div>
                       </div>
+                      {counterProposal?.id === a.id && (
+                        <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: "#f0f9ff", border: "1px solid #bae6fd" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "#0369a1" }}>Alternativdaten vorschlagen</div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                            <div>
+                              <label style={{ fontSize: 11, color: uiTokens.textMuted }}>Von</label>
+                              <input type="date" value={counterProposal.start}
+                                onChange={(e) => setCounterProposal({ ...counterProposal, start: e.target.value })}
+                                style={{ width: "100%", padding: "4px 6px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, boxSizing: "border-box" }} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 11, color: uiTokens.textMuted }}>Bis</label>
+                              <input type="date" value={counterProposal.end}
+                                onChange={(e) => setCounterProposal({ ...counterProposal, end: e.target.value })}
+                                style={{ width: "100%", padding: "4px 6px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, boxSizing: "border-box" }} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 11, color: uiTokens.textMuted }}>Notiz</label>
+                              <input value={counterProposal.note}
+                                onChange={(e) => setCounterProposal({ ...counterProposal, note: e.target.value })}
+                                placeholder="Begründung..."
+                                style={{ width: "100%", padding: "4px 6px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, boxSizing: "border-box" }} />
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+                            <button onClick={() => setCounterProposal(null)} style={{ padding: "4px 12px", borderRadius: 6, fontSize: 12, background: "#fff", border: "1px solid #e5e7eb", cursor: "pointer" }}>Abbrechen</button>
+                            <button onClick={() => handleCounterProposal(a.id)} disabled={updating === a.id}
+                              style={{ padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#0369a1", color: "#fff", border: "none", cursor: "pointer" }}>
+                              Vorschlag senden
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </Card>
                   ))}
                 </div>

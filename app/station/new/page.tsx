@@ -60,13 +60,16 @@ export default function NewStationPatientPage() {
   const [searchResults, setSearchResults] = useState<PatientSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
-  // Voice state
+  // Voice state (Server-Transkription statt Browser-SpeechRecognition)
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [parsing, setParsing] = useState(false);
   const [lastParsedFields, setLastParsedFields] = useState<string[]>([]);
   const [voiceMeds, setVoiceMeds] = useState<Array<{ name: string; dose: string; route: string | null; frequency_label: string | null; scheduled_hours: number[]; is_prn: boolean; is_dti: boolean; dti_rate_ml_h: number | null }>>([]);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const parseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = (field: string, value: unknown) => setForm(prev => ({ ...prev, [field]: value }));
@@ -103,65 +106,87 @@ export default function NewStationPatientPage() {
     } catch { /* ignore */ } finally { setParsing(false); }
   }, []);
 
-  // Auto-parse when user pauses speaking (1.5s debounce)
-  useEffect(() => {
-    if (!transcript.trim() || transcript.trim().length < 10) return;
-    if (parseTimeoutRef.current) clearTimeout(parseTimeoutRef.current);
-    parseTimeoutRef.current = setTimeout(() => {
-      parseTranscript(transcript);
-    }, 1500);
-    return () => { if (parseTimeoutRef.current) clearTimeout(parseTimeoutRef.current); };
-  }, [transcript, parseTranscript]);
+  // Auto-parse entfällt: Server-Transkription + Parse passiert in stopListening().
 
-  const startListening = useCallback(() => {
-    const W = window as any;
-    const SpeechRecognition = W.SpeechRecognition || W.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      showToast({ message: 'Spracherkennung wird von diesem Browser nicht unterstützt.', type: 'error' });
+  // Server-basierte Spracherkennung (MediaRecorder → /api/transcribe → parse-voice)
+  const startListening = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(1000); // 1s chunks
+      setIsListening(true);
+      setTranscript('');
+      setLastParsedFields([]);
+      setVoiceMeds([]);
+    } catch (err) {
+      showToast({ message: 'Mikrofon-Zugriff fehlgeschlagen. Bitte Berechtigung erteilen.', type: 'error' });
+    }
+  }, []);
+
+  const stopListening = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== 'recording') {
+      setIsListening(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'de-DE';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event: any) => {
-      let fullText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        fullText += event.results[i][0].transcript;
-      }
-      setTranscript(fullText);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognition.onerror = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-    setTranscript('');
-    setLastParsedFields([]);
-  }, []);
-
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    // Stop recording and wait for final data
     setIsListening(false);
-    // Parse final transcript
-    if (transcript.trim().length >= 5) {
-      if (parseTimeoutRef.current) clearTimeout(parseTimeoutRef.current);
-      parseTranscript(transcript);
+    setIsTranscribing(true);
+
+    await new Promise<void>((resolve) => {
+      recorder.onstop = () => {
+        recorder.stream?.getTracks().forEach((t) => t.stop());
+        resolve();
+      };
+      recorder.stop();
+    });
+
+    const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+    if (blob.size < 1000) {
+      setIsTranscribing(false);
+      showToast({ message: 'Aufnahme zu kurz.', type: 'error' });
+      return;
     }
-  }, [transcript, parseTranscript]);
+
+    try {
+      // Schritt 1: Audio → Text via Server-Transkription (OpenAI/AssemblyAI)
+      const formData = new FormData();
+      formData.append('file', blob, 'station-voice.webm');
+      const transcribeRes = await fetchWithAuth('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+      const transcribeData = await transcribeRes.json();
+      if (!transcribeRes.ok || !transcribeData.text) {
+        throw new Error(transcribeData.error || 'Transkription fehlgeschlagen.');
+      }
+      const text = transcribeData.text as string;
+      setTranscript(text);
+
+      // Schritt 2: Text → strukturierte Daten via parse-voice
+      await parseTranscript(text);
+    } catch (err) {
+      showToast({ message: err instanceof Error ? err.message : 'Fehler bei der Spracherkennung.', type: 'error' });
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, [parseTranscript]);
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.stop();
+      mediaRecorderRef.current?.stop();
       if (parseTimeoutRef.current) clearTimeout(parseTimeoutRef.current);
     };
   }, []);
@@ -280,24 +305,28 @@ export default function NewStationPatientPage() {
             <Card style={{ padding: '24px' }}>
               <div style={{ textAlign: 'center', marginBottom: '16px' }}>
                 <div style={{ fontSize: '15px', color: uiTokens.textSecondary, marginBottom: '16px' }}>
-                  {isListening
-                    ? 'Sprich frei – z.B. "Hund Bello, Labrador, männlich, 32 Kilo, Besitzer Müller, Box 3, Diagnose Durchfall..."'
-                    : 'Tippe auf das Mikrofon und beschreibe den Patienten'}
+                  {isTranscribing
+                    ? '⏳ Wird transkribiert (Server-Erkennung mit med. Fachbegriffe-Boost)...'
+                    : isListening
+                      ? '🔴 Aufnahme läuft – sprich frei, z.B. "Hund Bello, Labrador, Tierarzt Dr. Meier, 32 Kilo, Metamizol 50mg/kg 3x täglich i.v., Diagnose Durchfall..."'
+                      : 'Tippe auf das Mikrofon und beschreibe den Patienten inkl. Medikamente'}
                 </div>
 
                 <button
                   onClick={isListening ? stopListening : startListening}
+                  disabled={isTranscribing || parsing}
                   style={{
                     width: '80px', height: '80px', borderRadius: '50%',
-                    background: isListening ? '#ef4444' : uiTokens.brand,
-                    border: 'none', cursor: 'pointer',
+                    background: isTranscribing ? '#eab308' : isListening ? '#ef4444' : uiTokens.brand,
+                    border: 'none', cursor: isTranscribing ? 'wait' : 'pointer',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: isListening ? '0 0 0 8px rgba(239,68,68,0.15)' : '0 4px 14px rgba(15,107,116,0.3)',
+                    boxShadow: isListening ? '0 0 0 8px rgba(239,68,68,0.15)' : isTranscribing ? '0 0 0 8px rgba(234,179,8,0.15)' : '0 4px 14px rgba(15,107,116,0.3)',
                     transition: 'all 0.2s',
-                    animation: isListening ? 'pulse 1.5s infinite' : 'none',
+                    animation: isListening ? 'pulse 1.5s infinite' : isTranscribing ? 'pulse 2s infinite' : 'none',
+                    opacity: (isTranscribing || parsing) ? 0.7 : 1,
                   }}
                 >
-                  {isListening ? <MicOff size={32} color="#fff" /> : <Mic size={32} color="#fff" />}
+                  {isTranscribing ? <Loader size={32} color="#fff" style={{ animation: 'spin 1s linear infinite' }} /> : isListening ? <MicOff size={32} color="#fff" /> : <Mic size={32} color="#fff" />}
                 </button>
               </div>
 

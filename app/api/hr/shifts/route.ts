@@ -14,6 +14,8 @@ type ShiftRow = {
   starts_at: string;
   ends_at: string;
   note: string | null;
+  location_id: string | null;
+  shift_type: string | null;
   created_at: string;
 };
 
@@ -23,7 +25,11 @@ type CreateShiftBody = {
   starts_at?: string;
   ends_at?: string;
   note?: string;
+  location_id?: string;
+  shift_type?: string;
 };
+
+const SHIFT_COLUMNS = 'id, employee_id, date, starts_at, ends_at, note, location_id, shift_type, created_at';
 
 export async function GET(req: Request) {
   try {
@@ -46,7 +52,7 @@ export async function GET(req: Request) {
 
     let query = supabase
       .from('shifts')
-      .select('id, employee_id, date, starts_at, ends_at, note, created_at')
+      .select(SHIFT_COLUMNS)
       .eq('practice_id', practiceId)
       .order('date', { ascending: true })
       .order('starts_at', { ascending: true });
@@ -121,8 +127,10 @@ export async function POST(req: Request) {
         starts_at: body.starts_at,
         ends_at: body.ends_at,
         note,
+        location_id: body.location_id || null,
+        shift_type: body.shift_type || null,
       })
-      .select('id, employee_id, date, starts_at, ends_at, note, created_at')
+      .select(SHIFT_COLUMNS)
       .single();
 
     if (error || !data) {

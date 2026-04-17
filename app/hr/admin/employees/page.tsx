@@ -58,6 +58,8 @@ export default function EmployeeListPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [deptFilter, setDeptFilter] = useState("");
+  const [departments, setDepartments] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,19 +67,24 @@ export default function EmployeeListPage() {
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.set("status", statusFilter);
+      if (deptFilter) params.set("department", deptFilter);
       if (search.trim()) params.set("q", search.trim());
 
       const res = await fetchWithAuth(`/api/hr/employees?${params}`);
       if (!res) { setError("Nicht angemeldet."); return; }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Fehler beim Laden.");
-      setEmployees(data.employees || []);
+      const emps = data.employees || [];
+      setEmployees(emps);
+      // Extract unique departments for filter
+      const depts = [...new Set(emps.map((e: Employee) => e.department).filter(Boolean))] as string[];
+      setDepartments(depts.sort());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, search]);
+  }, [statusFilter, deptFilter, search]);
 
   useEffect(() => {
     const timeout = setTimeout(load, search ? 300 : 0);
@@ -133,6 +140,19 @@ export default function EmployeeListPage() {
             <option value="inactive">Inaktiv</option>
             <option value="terminated">Ausgeschieden</option>
           </select>
+          {departments.length > 0 && (
+            <select
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+              style={{
+                padding: "8px 12px", borderRadius: 8, border: "1px solid #e5e7eb",
+                fontSize: 14, background: "#fff",
+              }}
+            >
+              <option value="">Alle Abteilungen</option>
+              {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          )}
         </Card>
 
         {loading && <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Lade...</div>}
