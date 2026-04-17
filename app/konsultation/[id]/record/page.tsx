@@ -94,6 +94,136 @@ async function idbClearChunks(caseId: string): Promise<void> {
   } catch { /* best effort */ }
 }
 
+const TRANSCRIPTION_QUOTES = [
+  'Die KI hoert sich das gerade an... hoffentlich war es kein Katzengejammer 🐱',
+  'Whisper transkribiert... das dauert laenger als eine Katze die entscheidet ob sie rein oder raus will 🚪',
+  'Noch ein bisschen Geduld – schneller als ein aufgeregter Labrador, aber langsamer als eine Katze die Hunger hat 🐕',
+  'Transkription laeuft... der Tierarzt hat auch nicht immer sofort alle Antworten 🩺',
+  'Fast fertig... oder wie der Hamster im Rad sagen wuerde: gleich gleich 🐹',
+  'Audiodatei wird analysiert... selbst ein Papagei braucht Zeit zum Nachplappern 🦜',
+  'Einen Moment noch – die KI lernt gerade Tieraerztisch 📚',
+  'Das Transkript entsteht... Geduld ist eine Tugend, sagt auch jeder Golden Retriever 🐾',
+  'Die Bits und Bytes arbeiten... nicht so elegant wie eine Katze, aber genauso gruendlich 🐈',
+  'Spracherkennung aktiv... zum Glueck muss die KI nicht Hundeschrift entziffern 📝',
+  'Noch einen Augenblick – auch Rom wurde nicht an einem Tag erbaut. Und kein Hund an einem Tag erzogen 🏛️',
+  'Transkription im Gange... die KI ist aufmerksamer als ein Dackel der ein Leckerli riecht 🦴',
+  'Audioverarbeitung... schneller als ein Tierarztbesuch, versprochen! ⏱️',
+  'Die kuenstliche Intelligenz gibt ihr Bestes – nicht jeder Patient ist kooperativ 😅',
+];
+
+function TranscriptionOverlay({ totalDurationSeconds }: { totalDurationSeconds: number }) {
+  const [quoteIndex, setQuoteIndex] = useState(() => Math.floor(Math.random() * TRANSCRIPTION_QUOTES.length));
+  const [progress, setProgress] = useState(0);
+  const [fadeIn, setFadeIn] = useState(true);
+  const startTimeRef = useRef(Date.now());
+
+  // ~3 sec transcription per 1 min audio, minimum 15s
+  const estimatedSeconds = Math.max(15, Math.ceil(totalDurationSeconds * 0.05));
+  const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+
+  // Rotate quotes every 4 seconds with fade
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFadeIn(false);
+      setTimeout(() => {
+        setQuoteIndex((prev) => (prev + 1) % TRANSCRIPTION_QUOTES.length);
+        setFadeIn(true);
+      }, 400);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Animate progress bar – ease out, max 95%
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - startTimeRef.current) / 1000;
+      const ratio = Math.min(elapsed / estimatedSeconds, 1);
+      // ease-out curve: fast start, slow end, caps at 95%
+      const eased = 1 - Math.pow(1 - ratio, 2.5);
+      setProgress(Math.min(eased * 95, 95));
+    }, 200);
+    return () => clearInterval(interval);
+  }, [estimatedSeconds]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 9999,
+      background: 'rgba(0, 0, 0, 0.85)',
+      backdropFilter: 'blur(8px)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+    }}>
+      {/* Pulsating icon */}
+      <div style={{
+        fontSize: '48px',
+        marginBottom: '24px',
+        animation: 'pulse 2s ease-in-out infinite',
+      }}>
+        🎙️
+      </div>
+
+      {/* Quote */}
+      <div style={{
+        fontSize: '16px',
+        fontWeight: 500,
+        color: '#fff',
+        textAlign: 'center',
+        maxWidth: '480px',
+        minHeight: '48px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: fadeIn ? 1 : 0,
+        transition: 'opacity 0.4s ease',
+        marginBottom: '32px',
+        lineHeight: 1.5,
+      }}>
+        {TRANSCRIPTION_QUOTES[quoteIndex]}
+      </div>
+
+      {/* Progress bar */}
+      <div style={{
+        width: '100%',
+        maxWidth: '400px',
+        height: '8px',
+        background: 'rgba(255, 255, 255, 0.15)',
+        borderRadius: '4px',
+        overflow: 'hidden',
+        marginBottom: '16px',
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${progress}%`,
+          background: 'linear-gradient(90deg, #10b981, #34d399)',
+          borderRadius: '4px',
+          transition: 'width 0.3s ease-out',
+        }} />
+      </div>
+
+      {/* Time estimate */}
+      <div style={{
+        fontSize: '13px',
+        color: 'rgba(255, 255, 255, 0.7)',
+        textAlign: 'center',
+      }}>
+        ca. {estimatedMinutes} {estimatedMinutes === 1 ? 'Minute' : 'Minuten'} geschaetzt
+      </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.85; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function RecordPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -107,6 +237,7 @@ export default function RecordPage() {
   const [currentSegmentStartedAtMs, setCurrentSegmentStartedAtMs] = useState<number | null>(null);
   const [status, setStatus] = useState('Bereit fuer eine neue Session');
   const [dragActive, setDragActive] = useState(false);
+  const [transcriptionDuration, setTranscriptionDuration] = useState(0);
 
   const MAX_SEGMENT_SECONDS = 25 * 60; // Auto-Pause nach 25 Min pro Segment
 
@@ -581,6 +712,8 @@ export default function RecordPage() {
       return;
     }
 
+    const totalAudioDuration = activeSegments.reduce((sum, s) => sum + s.durationSeconds, 0);
+    setTranscriptionDuration(totalAudioDuration);
     setProcessing(true);
     setStatus('Segmente werden verarbeitet ...');
 
@@ -713,6 +846,10 @@ export default function RecordPage() {
   }, []);
 
   return (
+    <>
+    {processing && transcriptionDuration > 0 && (
+      <TranscriptionOverlay totalDurationSeconds={transcriptionDuration} />
+    )}
     <main style={{
       minHeight: '100vh',
       display: "flex",
@@ -1000,5 +1137,6 @@ export default function RecordPage() {
       </div>
 
     </main>
+    </>
   );
 }
