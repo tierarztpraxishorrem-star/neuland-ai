@@ -31,11 +31,11 @@ type MedStatus = {
   next_hour: number | null;
 };
 
-async function fetchWithAuth(path: string) {
+async function fetchWithAuth(path: string, init?: RequestInit) {
   const { data: { session } } = await supabase.auth.getSession();
-  return fetch(path, {
-    headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
-  });
+  const headers = new Headers(init?.headers);
+  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  return fetch(path, { ...init, headers });
 }
 
 export default function StationPage() {
@@ -45,6 +45,7 @@ export default function StationPage() {
   const [patients, setPatients] = useState<StationPatient[]>([]);
   const [dischargedPatients, setDischargedPatients] = useState<StationPatient[]>([]);
   const [showDischarged, setShowDischarged] = useState(false);
+  const [readmitting, setReadmitting] = useState<string | null>(null);
   const [medStatuses, setMedStatuses] = useState<Record<string, MedStatus>>({});
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
@@ -121,6 +122,27 @@ export default function StationPage() {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [loadData]);
+
+  const handleReadmit = async (patientId: string) => {
+    if (!confirm('Patient erneut aufnehmen?')) return;
+    setReadmitting(patientId);
+    try {
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'active',
+          discharge_date: null,
+          admission_date: new Date().toISOString(),
+          station_day: 1,
+        }),
+      });
+      if (res.ok) {
+        loadData();
+      }
+    } catch { /* ignore */ }
+    finally { setReadmitting(null); }
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -363,13 +385,12 @@ export default function StationPage() {
                 marginTop: 8,
               }}>
                 {dischargedPatients.map((p) => (
-                  <Link key={p.id} href={`/station/${p.id}`} style={{ textDecoration: 'none' }}>
-                    <Card style={{
-                      padding: isTv ? '14px' : '16px',
-                      cursor: 'pointer',
-                      opacity: 0.65,
-                      background: '#f8fafc',
-                    }}>
+                  <Card key={p.id} style={{
+                    padding: isTv ? '14px' : '16px',
+                    opacity: 0.65,
+                    background: '#f8fafc',
+                  }}>
+                    <Link href={`/station/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
                           <div style={{ fontSize: '11px', color: uiTokens.textMuted, fontWeight: 600, letterSpacing: '0.5px' }}>
@@ -385,8 +406,21 @@ export default function StationPage() {
                         {[p.species, p.breed].filter(Boolean).join(' · ')}
                         {p.discharge_date && ` · ${new Date(p.discharge_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}`}
                       </div>
-                    </Card>
-                  </Link>
+                    </Link>
+                    <button
+                      onClick={() => handleReadmit(p.id)}
+                      disabled={readmitting === p.id}
+                      style={{
+                        marginTop: '8px', width: '100%', padding: '8px',
+                        borderRadius: '8px', border: `1px solid ${uiTokens.brand}`,
+                        background: readmitting === p.id ? '#e5e7eb' : 'white',
+                        color: uiTokens.brand, fontWeight: 600, fontSize: '12px',
+                        cursor: readmitting === p.id ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {readmitting === p.id ? 'Wird aufgenommen...' : '↩ Wieder aufnehmen'}
+                    </button>
+                  </Card>
                 ))}
               </div>
             )}

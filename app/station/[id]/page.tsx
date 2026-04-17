@@ -919,7 +919,7 @@ export default function StationSheetPage() {
                                 }
                               }}
                             />
-                            <div style={{ fontSize: '9px', color: uiTokens.textMuted, marginTop: '2px' }}>Enter = speichern</div>
+                            <button type="button" onClick={() => { const hrs = scheduleHoursInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23); handleSetVitalSchedule(scheduleEditing!, hrs); setScheduleEditing(null); }} style={{ marginTop: '3px', fontSize: '9px', background: uiTokens.brand, color: '#fff', border: 'none', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>OK</button>
                           </div>
                         )}
                       </td>
@@ -928,6 +928,21 @@ export default function StationSheetPage() {
                         const val = v ? (v as Record<string, unknown>)[row.key] : null;
                         const isScheduled = scheduledHours.includes(h);
                         const isOverdue = isScheduled && val == null && h < currentHour;
+                        const quickEntry = () => {
+                          const input = prompt(`${row.label} um ${String(h).padStart(2, '0')}:00:`);
+                          if (input && input.trim()) {
+                            const initials = prompt('Kürzel (2-4 Buchstaben):') || '';
+                            const body: Record<string, unknown> = { measured_hour: h, recorded_by: initials || null };
+                            if (row.key === 'heart_rate') body.heart_rate = parseInt(input);
+                            else if (row.key === 'resp_rate') body.resp_rate = parseInt(input);
+                            else if (row.key === 'temperature_c') body.temperature_c = parseFloat(input);
+                            else if (row.key === 'pain_score') body.pain_score = parseInt(input);
+                            fetchWithAuth(`/api/station/patients/${patientId}/vitals`, {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(body),
+                            }).then(() => loadData()).catch(() => {});
+                          }
+                        };
                         return (
                           <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '12px' }}>
                             {val != null ? (
@@ -939,15 +954,16 @@ export default function StationSheetPage() {
                                 width: '26px', height: '26px', fontWeight: isScheduled ? 700 : 400,
                               }}>{String(val)}</span>
                             ) : isScheduled ? (
-                              <span style={{
+                              <button onClick={quickEntry} style={{
                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                 width: '22px', height: '22px', borderRadius: '50%',
                                 border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`,
                                 background: isOverdue ? '#fef2f2' : 'transparent',
                                 fontSize: '9px', color: isOverdue ? '#ef4444' : '#0f6b74',
-                              }}>{isOverdue ? '!' : ''}</span>
+                                cursor: 'pointer', padding: 0,
+                              }}>{isOverdue ? '!' : ''}</button>
                             ) : (
-                              <span style={{ color: '#e5e7eb' }}>–</span>
+                              <button onClick={quickEntry} style={{ color: '#d1d5db', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: '2px' }}>–</button>
                             )}
                           </td>
                         );
