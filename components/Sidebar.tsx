@@ -22,6 +22,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Briefcase,
+  BedDouble,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -171,6 +172,7 @@ export default function Sidebar() {
         { name: "Konsultation", href: "/konsultation/start", icon: Stethoscope },
         { name: "Letzte Konsultation", href: "/konsultation/last", icon: History },
         { name: "Kommunikation", href: "/kommunikation", icon: MessageCircle, badge: unreadCounts.total },
+        { name: "Station", href: "/station", icon: BedDouble },
         { name: "Patienten", href: "/patienten", icon: PawPrint },
         { name: "Vorlagen", href: "/vorlagen", icon: FileText },
         { name: "HR", href: "/hr", icon: Briefcase },
