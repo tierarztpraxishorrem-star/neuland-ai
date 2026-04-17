@@ -122,7 +122,7 @@ export default function StationSheetPage() {
 
   // Add vitals modal
   const [showVitalsModal, setShowVitalsModal] = useState(false);
-  const [vitalsForm, setVitalsForm] = useState({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', recorded_by: '', notes: '' });
+  const [vitalsForm, setVitalsForm] = useState({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', feces_amount: '', feces_consistency: '', food_eaten: '', recorded_by: '', notes: '' });
   const [vitalsSubmitting, setVitalsSubmitting] = useState(false);
 
   // Edit medication modal
@@ -259,6 +259,9 @@ export default function StationSheetPage() {
       if (vitalsForm.temperature_c) body.temperature_c = parseFloat(vitalsForm.temperature_c);
       if (vitalsForm.pain_score) body.pain_score = parseInt(vitalsForm.pain_score);
       if (vitalsForm.urine) body.urine = vitalsForm.urine;
+      if (vitalsForm.feces_amount) body.feces_amount = vitalsForm.feces_amount;
+      if (vitalsForm.feces_consistency) body.feces_consistency = vitalsForm.feces_consistency;
+      if (vitalsForm.food_eaten) body.food_eaten = vitalsForm.food_eaten === 'ja';
       const res = await fetchWithAuth(`/api/station/patients/${patientId}/vitals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -268,7 +271,7 @@ export default function StationSheetPage() {
       if (!res.ok) { showToast({ message: data.error || 'Fehler', type: 'error' }); return; }
       showToast({ message: 'Messung gespeichert!', type: 'success' });
       setShowVitalsModal(false);
-      setVitalsForm({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', recorded_by: '', notes: '' });
+      setVitalsForm({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', feces_amount: '', feces_consistency: '', food_eaten: '', recorded_by: '', notes: '' });
       loadData();
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setVitalsSubmitting(false); }
   };
@@ -528,6 +531,23 @@ export default function StationSheetPage() {
                     return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', color: val ? uiTokens.textPrimary : '#e5e7eb', fontSize: '10px' }}>{val || '–'}</td>;
                   })}
                 </tr>
+                {/* Notes row */}
+                <tr style={{ borderTop: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '8px 6px', fontWeight: 600, color: uiTokens.textPrimary, fontSize: '12px' }}>Notiz</td>
+                  {HOURS.map(h => {
+                    const v = vitals.find(vt => vt.measured_hour === h);
+                    const val = v?.notes || null;
+                    return (
+                      <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '10px' }}>
+                        {val ? (
+                          <span title={val} style={{ color: uiTokens.brand, cursor: 'help', maxWidth: '28px', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', whiteSpace: 'nowrap' }}>*</span>
+                        ) : (
+                          <span style={{ color: '#e5e7eb' }}>–</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -659,9 +679,16 @@ export default function StationSheetPage() {
                 <Input label="Temperatur (°C)" type="number" step="0.1" value={vitalsForm.temperature_c} onChange={(e) => setVitalsForm({ ...vitalsForm, temperature_c: e.target.value })} placeholder="38.5" />
                 <Input label="Schmerzscore (0-10)" type="number" min="0" max="10" value={vitalsForm.pain_score} onChange={(e) => setVitalsForm({ ...vitalsForm, pain_score: e.target.value })} />
               </div>
-              <Input label="Urin" value={vitalsForm.urine} onChange={(e) => setVitalsForm({ ...vitalsForm, urine: e.target.value })} placeholder="z.B. normal, konzentriert, Blut" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Input label="Urin" value={vitalsForm.urine} onChange={(e) => setVitalsForm({ ...vitalsForm, urine: e.target.value })} placeholder="normal, konzentriert, Blut" />
+                <Input label="Futter gefressen" value={vitalsForm.food_eaten} onChange={(e) => setVitalsForm({ ...vitalsForm, food_eaten: e.target.value })} placeholder="ja / nein / wenig" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Input label="Kot Menge" value={vitalsForm.feces_amount} onChange={(e) => setVitalsForm({ ...vitalsForm, feces_amount: e.target.value })} placeholder="wenig, normal, viel" />
+                <Input label="Kot Konsistenz" value={vitalsForm.feces_consistency} onChange={(e) => setVitalsForm({ ...vitalsForm, feces_consistency: e.target.value })} placeholder="fest, breiig, flüssig" />
+              </div>
               <Input label="Kürzel" value={vitalsForm.recorded_by} onChange={(e) => setVitalsForm({ ...vitalsForm, recorded_by: e.target.value })} placeholder="LH" />
-              <Input label="Notizen" value={vitalsForm.notes} onChange={(e) => setVitalsForm({ ...vitalsForm, notes: e.target.value })} />
+              <Input label="Freitext / Notizen" value={vitalsForm.notes} onChange={(e) => setVitalsForm({ ...vitalsForm, notes: e.target.value })} placeholder="Individuelle Beobachtungen..." />
               <Button variant="primary" onClick={handleAddVitals} disabled={vitalsSubmitting} style={{ minHeight: '44px' }}>
                 {vitalsSubmitting ? 'Speichern...' : 'Messung speichern'}
               </Button>
