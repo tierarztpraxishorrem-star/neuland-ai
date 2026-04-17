@@ -51,7 +51,7 @@ export default function StationPage() {
   const [now, setNow] = useState(new Date());
 
   // Daily tasks per patient (für TV-Modus Abholzeiten + offene Checks)
-  type DailyTaskInfo = { label: string; checked: boolean; notes: string | null };
+  type DailyTaskInfo = { id: string; label: string; checked: boolean; notes: string | null };
   const [dailyTasksMap, setDailyTasksMap] = useState<Record<string, DailyTaskInfo[]>>({});
 
   // Offene Verlaufsmessungen pro Patient
@@ -129,8 +129,8 @@ export default function StationPage() {
             const dtRes = await fetchWithAuth(`/api/station/patients/${p.id}/daily-tasks`);
             if (dtRes.ok) {
               const dtData = await dtRes.json();
-              tasksMap[p.id] = (dtData.tasks || []).map((t: { label: string; checked: boolean; notes: string | null }) => ({
-                label: t.label, checked: t.checked, notes: t.notes,
+              tasksMap[p.id] = (dtData.tasks || []).map((t: { id: string; label: string; checked: boolean; notes: string | null }) => ({
+                id: t.id, label: t.label, checked: t.checked, notes: t.notes,
               }));
             }
           } catch { /* ignore */ }
@@ -361,37 +361,71 @@ export default function StationPage() {
 
         {/* Offene Aufgaben & Messungen – Gesamtübersicht */}
         {(() => {
-          const allOpen: Array<{ patient: string; box: string; type: 'task' | 'vital'; label: string; detail?: string }> = [];
+          const allOpen: Array<{ patientId: string; patient: string; box: string; type: 'task' | 'vital'; taskId?: string; label: string; detail?: string }> = [];
           patients.forEach((p) => {
             const tasks = dailyTasksMap[p.id] || [];
             tasks.filter(t => !t.checked).forEach(t => {
-              allOpen.push({ patient: p.patient_name, box: p.box_number || '–', type: 'task', label: t.label });
+              allOpen.push({ patientId: p.id, patient: p.patient_name, box: p.box_number || '–', type: 'task', taskId: t.id, label: t.label });
             });
             const vitals = openVitalsMap[p.id] || [];
             vitals.forEach(v => {
-              allOpen.push({ patient: p.patient_name, box: p.box_number || '–', type: 'vital', label: v.param, detail: `${v.hour}:00` });
+              allOpen.push({ patientId: p.id, patient: p.patient_name, box: p.box_number || '–', type: 'vital', label: v.param, detail: `${v.hour}:00` });
             });
           });
           if (allOpen.length === 0) return null;
+
+          const checkTask = async (patientId: string, taskId: string) => {
+            try {
+              const res = await fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId, checked_by: 'TV' }),
+              });
+              if (res.ok) {
+                // Task sofort aus dem State entfernen für direktes Feedback
+                setDailyTasksMap((prev) => {
+                  const updated = { ...prev };
+                  if (updated[patientId]) {
+                    updated[patientId] = updated[patientId].map(t =>
+                      t.id === taskId ? { ...t, checked: true } : t
+                    );
+                  }
+                  return updated;
+                });
+              }
+            } catch { /* ignore */ }
+          };
+
           return (
             <div style={{ marginBottom: '40px' }}>
               <div style={{ fontSize: '16px', fontWeight: 700, color: '#94a3b8', marginBottom: '12px', letterSpacing: '1px' }}>OFFENE AUFGABEN & MESSUNGEN</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '8px' }}>
                 {allOpen.map((item, i) => (
-                  <div key={i} style={{
-                    fontSize: '14px', padding: '8px 12px', borderRadius: '8px',
-                    background: item.type === 'vital' ? '#431407' : '#1c1917',
-                    border: `1px solid ${item.type === 'vital' ? '#9a3412' : '#334155'}`,
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}>
+                  <div
+                    key={`${item.patientId}-${item.taskId || item.label}-${i}`}
+                    onClick={item.type === 'task' && item.taskId ? () => checkTask(item.patientId, item.taskId!) : undefined}
+                    style={{
+                      fontSize: '14px', padding: '8px 12px', borderRadius: '8px',
+                      background: item.type === 'vital' ? '#431407' : '#1c1917',
+                      border: `1px solid ${item.type === 'vital' ? '#9a3412' : '#334155'}`,
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      cursor: item.type === 'task' ? 'pointer' : 'default',
+                      transition: 'background 0.15s, transform 0.1s',
+                    }}
+                    onMouseEnter={item.type === 'task' ? (e) => { e.currentTarget.style.background = '#22c55e20'; e.currentTarget.style.borderColor = '#22c55e'; } : undefined}
+                    onMouseLeave={item.type === 'task' ? (e) => { e.currentTarget.style.background = '#1c1917'; e.currentTarget.style.borderColor = '#334155'; } : undefined}
+                  >
                     <span>
                       <span style={{ color: item.type === 'vital' ? '#fb923c' : '#fbbf24', marginRight: '8px' }}>
-                        {item.type === 'vital' ? '📊' : '○'}
+                        {item.type === 'vital' ? '📊' : '☐'}
                       </span>
                       <span style={{ color: '#e2e8f0' }}>{item.label}</span>
                       {item.detail && <span style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.detail})</span>}
                     </span>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>Box {item.box} · {item.patient}</span>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>
+                      {item.type === 'task' && <span style={{ color: '#4ade80', marginRight: '6px' }}>klick = erledigt</span>}
+                      Box {item.box} · {item.patient}
+                    </span>
                   </div>
                 ))}
               </div>
