@@ -91,6 +91,7 @@ export async function getHrFeatureEnabled(supabase: SupabaseClient, practiceId: 
 }
 
 export async function getOrCreateEmployee(supabase: SupabaseClient, practiceId: string, userId: string) {
+  // 1. Prüfe ob User bereits mit einem MA verknüpft ist
   const existingRes = await supabase
     .from('employees')
     .select(EMPLOYEE_BASE_COLUMNS)
@@ -112,6 +113,33 @@ export async function getOrCreateEmployee(supabase: SupabaseClient, practiceId: 
     } as const;
   }
 
+  // 2. Versuche per E-Mail einen bestehenden MA-Datensatz zu verknüpfen
+  //    (Admin hat MA angelegt + E-Mail hinterlegt, User registriert sich mit dieser E-Mail)
+  const userRes = await supabase.auth.getUser();
+  const userEmail = userRes.data.user?.email;
+
+  if (userEmail) {
+    const { data: linkedId } = await supabase.rpc('link_employee_by_email', {
+      p_practice_id: practiceId,
+      p_user_id: userId,
+      p_email: userEmail,
+    });
+
+    if (linkedId) {
+      // Erfolgreich verknüpft – MA-Datensatz laden
+      const { data: linked } = await supabase
+        .from('employees')
+        .select(EMPLOYEE_BASE_COLUMNS)
+        .eq('id', linkedId)
+        .single();
+
+      if (linked) {
+        return { ok: true, employee: linked as EmployeeRow } as const;
+      }
+    }
+  }
+
+  // 3. Kein bestehender Datensatz – neuen anlegen
   const insertRes = await supabase
     .from('employees')
     .insert({

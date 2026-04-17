@@ -4,7 +4,7 @@ import { useState } from "react";
 import { supabase } from "../../../../lib/supabase";
 import { uiTokens, Card, Section } from "../../../../components/ui/System";
 
-type ImportResult = { row: number; status: string; name: string; error?: string };
+type ImportResult = { row: number; status: string; name: string; email?: string; invite_token?: string; error?: string };
 
 async function fetchWithAuth(url: string, init?: RequestInit) {
   const { data: { session } } = await supabase.auth.getSession();
@@ -20,6 +20,7 @@ export default function ImportExportPage() {
   const [importResults, setImportResults] = useState<ImportResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDryRun, setIsDryRun] = useState(true);
+  const [generateInvites, setGenerateInvites] = useState(true);
 
   const handleExport = async (type: string) => {
     setError(null);
@@ -48,7 +49,7 @@ export default function ImportExportPage() {
     try {
       const res = await fetchWithAuth("/api/hr/import", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: csvText, dry_run: isDryRun }),
+        body: JSON.stringify({ csv: csvText, dry_run: isDryRun, generate_invites: generateInvites }),
       });
       if (!res) throw new Error("Nicht angemeldet.");
       const data = await res.json();
@@ -99,11 +100,14 @@ export default function ImportExportPage() {
         {/* Import Section */}
         <Section title="Massen-Import">
           <Card>
-            <div style={{ fontSize: 14, color: uiTokens.textSecondary, marginBottom: 12 }}>
-              CSV-Datei mit Spalten: Personalnummer, Vorname, Nachname, Geburtsdatum, Geschlecht,
-              Straße, Hausnummer, PLZ, Ort, Telefon, E-Mail privat, Vertragsart, Vertragsbeginn,
-              Vertragsende, Wochenstunden, Arbeitstage/Woche, Urlaubstage/Jahr, Abteilung, Position.
-              Trennzeichen: Semikolon.
+            <div style={{ fontSize: 14, color: uiTokens.textSecondary, marginBottom: 12, lineHeight: 1.6 }}>
+              CSV-Datei mit Spalten (Trennzeichen: Semikolon):
+              <strong> Vorname, Nachname</strong> (Pflicht), E-Mail, Personalnummer, Geburtsdatum,
+              Geschlecht, Straße, Hausnummer, PLZ, Ort, Telefon, Vertragsart, Vertragsbeginn,
+              Vertragsende, Wochenstunden, Abteilung, Position, IBAN, BIC, Steuer-ID, SV-Nummer, Krankenkasse.
+              <br />
+              <span style={{ fontSize: 13 }}>Die <strong>E-Mail</strong>-Spalte wird zur automatischen Zuordnung verwendet:
+              Wenn sich ein MA mit dieser E-Mail registriert, wird er automatisch verknüpft.</span>
             </div>
 
             <div style={{ marginBottom: 12 }}>
@@ -119,10 +123,14 @@ export default function ImportExportPage() {
               style={{ width: "100%", padding: "8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "monospace", boxSizing: "border-box", resize: "vertical" }}
             />
 
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
                 <input type="checkbox" checked={isDryRun} onChange={(e) => setIsDryRun(e.target.checked)} />
                 Testlauf (keine Änderungen)
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={generateInvites} onChange={(e) => setGenerateInvites(e.target.checked)} />
+                Einladungslinks generieren
               </label>
               <button onClick={handleImport} disabled={importing}
                 style={{

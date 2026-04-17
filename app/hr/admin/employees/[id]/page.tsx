@@ -7,12 +7,34 @@ import { uiTokens, Card, Section } from "../../../../../components/ui/System";
 
 type Employee = Record<string, string | number | boolean | null | undefined>;
 
-type Tab = "personal" | "contract" | "finance";
+type Tab = "personal" | "contract" | "finance" | "documents" | "invite";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "personal", label: "Persönlich" },
   { key: "contract", label: "Vertrag" },
   { key: "finance", label: "Finanzen" },
+  { key: "documents", label: "Dokumente" },
+  { key: "invite", label: "Einladung" },
+];
+
+type EmployeeDoc = {
+  id: string;
+  title: string;
+  category: string;
+  uploaded_at: string;
+  download_url: string | null;
+};
+
+const DOC_CATEGORIES = [
+  { value: "contract", label: "Vertrag" },
+  { value: "certificate", label: "Bescheinigung" },
+  { value: "training", label: "Fortbildung" },
+  { value: "warning", label: "Abmahnung" },
+  { value: "evaluation", label: "Mitarbeitergespräch" },
+  { value: "health_certificate", label: "Gesundheitszeugnis" },
+  { value: "insurance", label: "Versicherung" },
+  { value: "onboarding", label: "Onboarding" },
+  { value: "other", label: "Sonstiges" },
 ];
 
 const FIELD_LABELS: Record<string, string> = {
@@ -69,6 +91,8 @@ const TAB_FIELDS: Record<Tab, string[]> = {
     "iban", "bic", "tax_id", "tax_class", "social_security_number",
     "health_insurance", "confession",
   ],
+  documents: [],
+  invite: [],
 };
 
 const SELECT_OPTIONS: Record<string, { value: string; label: string }[]> = {
@@ -135,6 +159,16 @@ export default function EmployeeDetailPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("personal");
   const [editMode, setEditMode] = useState(false);
+  // Documents tab
+  const [docs, setDocs] = useState<EmployeeDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [uploadForm, setUploadForm] = useState({ title: "", category: "contract" });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  // Invite tab
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteLoading, setInviteLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,6 +188,60 @@ export default function EmployeeDetailPage() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load documents when tab switches
+  const loadDocs = useCallback(async () => {
+    setDocsLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/hr/documents?employee_id=${id}`);
+      if (res?.ok) {
+        const data = await res.json();
+        setDocs(data.documents || []);
+      }
+    } finally { setDocsLoading(false); }
+  }, [id]);
+
+  useEffect(() => {
+    if (tab === "documents") loadDocs();
+  }, [tab, loadDocs]);
+
+  const handleUpload = async () => {
+    if (!uploadFile || !uploadForm.title.trim()) { setError("Titel und Datei sind erforderlich."); return; }
+    setUploading(true); setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("employee_id", id);
+      formData.append("title", uploadForm.title);
+      formData.append("category", uploadForm.category);
+      formData.append("file", uploadFile);
+      const res = await fetchWithAuth("/api/hr/documents", { method: "POST", body: formData });
+      if (!res) throw new Error("Nicht angemeldet.");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setUploadForm({ title: "", category: "contract" });
+      setUploadFile(null);
+      setSuccess("Dokument hochgeladen.");
+      loadDocs();
+    } catch (err) { setError(err instanceof Error ? err.message : "Upload-Fehler"); }
+    finally { setUploading(false); }
+  };
+
+  const handleGenerateInvite = async () => {
+    setInviteLoading(true); setError(null);
+    try {
+      const res = await fetchWithAuth(`/api/hr/employees/${id}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inviteEmail || undefined }),
+      });
+      if (!res) throw new Error("Nicht angemeldet.");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setInviteUrl(data.invite_url);
+      setSuccess("Einladungslink erstellt.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Fehler"); }
+    finally { setInviteLoading(false); }
+  };
 
   const handleChange = (field: string, value: string) => {
     setEditData((prev) => ({ ...prev, [field]: value }));
@@ -286,7 +374,114 @@ export default function EmployeeDetailPage() {
           ))}
         </div>
 
-        {/* Fields */}
+        {/* Documents tab */}
+        {tab === "documents" && (
+          <Section title="Dokumente">
+            {/* Upload form */}
+            <Card style={{ padding: 16, border: `1px solid ${uiTokens.brand}20`, marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Dokument hochladen</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Titel *</label>
+                  <input value={uploadForm.title} onChange={(e) => setUploadForm((p) => ({ ...p, title: e.target.value }))}
+                    placeholder="z.B. Arbeitsvertrag 2026"
+                    style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Kategorie</label>
+                  <select value={uploadForm.category} onChange={(e) => setUploadForm((p) => ({ ...p, category: e.target.value }))}
+                    style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14, background: "#fff" }}>
+                    {DOC_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} style={{ fontSize: 13 }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                <button onClick={handleUpload} disabled={uploading || !uploadFile || !uploadForm.title.trim()}
+                  style={{ padding: "6px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, background: uiTokens.brand, color: "#fff", border: "none", cursor: "pointer", opacity: uploading ? 0.6 : 1 }}>
+                  {uploading ? "Wird hochgeladen..." : "Hochladen"}
+                </button>
+              </div>
+            </Card>
+            {/* Document list */}
+            {docsLoading && <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Lade Dokumente...</div>}
+            {!docsLoading && docs.map((doc) => (
+              <Card key={doc.id} style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{doc.title}</div>
+                  <div style={{ fontSize: 12, color: uiTokens.textSecondary, marginTop: 2 }}>
+                    {DOC_CATEGORIES.find((c) => c.value === doc.category)?.label || doc.category} — {new Date(doc.uploaded_at).toLocaleDateString("de-DE")}
+                  </div>
+                </div>
+                {doc.download_url && (
+                  <a href={doc.download_url} target="_blank" rel="noopener noreferrer"
+                    style={{ padding: "4px 12px", borderRadius: 6, fontSize: 12, background: uiTokens.brand, color: "#fff", textDecoration: "none" }}>
+                    Download
+                  </a>
+                )}
+              </Card>
+            ))}
+            {!docsLoading && docs.length === 0 && <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Keine Dokumente vorhanden.</div>}
+          </Section>
+        )}
+
+        {/* Invite tab */}
+        {tab === "invite" && (
+          <Section title="Einladung & Verknüpfung">
+            {employee?.user_id ? (
+              <Card style={{ padding: 16, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#16a34a" }}>Account verknüpft</div>
+                <div style={{ fontSize: 13, color: uiTokens.textSecondary, marginTop: 4 }}>
+                  Dieser Mitarbeiter hat bereits einen aktiven Account.
+                </div>
+              </Card>
+            ) : (
+              <>
+                <Card style={{ padding: 16 }}>
+                  <div style={{ fontSize: 14, marginBottom: 12, color: uiTokens.textSecondary, lineHeight: 1.6 }}>
+                    Generieren Sie einen Einladungslink. Der Mitarbeiter registriert sich damit
+                    und wird automatisch mit diesem Datensatz verknüpft.
+                    Alternativ: Wenn die E-Mail-Adresse hinterlegt ist, wird der Account bei
+                    Registrierung mit derselben E-Mail automatisch zugeordnet.
+                  </div>
+                  <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>E-Mail des Mitarbeiters (optional)</label>
+                      <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="name@example.de"
+                        style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14, boxSizing: "border-box" }} />
+                    </div>
+                    <button onClick={handleGenerateInvite} disabled={inviteLoading}
+                      style={{ padding: "8px 16px", borderRadius: 6, fontSize: 14, fontWeight: 600, background: uiTokens.brand, color: "#fff", border: "none", cursor: "pointer", whiteSpace: "nowrap", opacity: inviteLoading ? 0.6 : 1 }}>
+                      {inviteLoading ? "Wird erstellt..." : "Link generieren"}
+                    </button>
+                  </div>
+                </Card>
+                {inviteUrl && (
+                  <Card style={{ padding: 16, border: `2px solid ${uiTokens.brand}`, marginTop: 14 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Einladungslink</div>
+                    <div style={{
+                      padding: "8px 12px", borderRadius: 6, background: "#f3f4f6", fontSize: 13,
+                      fontFamily: "monospace", wordBreak: "break-all", marginBottom: 12,
+                    }}>
+                      {inviteUrl}
+                    </div>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(inviteUrl); setSuccess("Link in Zwischenablage kopiert."); }}
+                      style={{ padding: "6px 14px", borderRadius: 6, fontSize: 13, fontWeight: 600, background: uiTokens.brand, color: "#fff", border: "none", cursor: "pointer" }}>
+                      Link kopieren
+                    </button>
+                  </Card>
+                )}
+              </>
+            )}
+          </Section>
+        )}
+
+        {/* Stammdaten Fields (personal/contract/finance tabs) */}
+        {(tab === "personal" || tab === "contract" || tab === "finance") && (
         <Section title={TABS.find((t) => t.key === tab)?.label || ""}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
             {TAB_FIELDS[tab].map((field) => {
@@ -361,6 +556,7 @@ export default function EmployeeDetailPage() {
             })}
           </div>
         </Section>
+        )}
       </div>
     </main>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { uiTokens, Card } from '../../components/ui/System';
 
@@ -141,10 +141,46 @@ export default function OnboardingPage() {
     });
   };
 
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     loadMemberships();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-accept HR employee invitation from URL parameter ?invite=HR-xxx
+  useEffect(() => {
+    const inviteToken = searchParams.get('invite');
+    if (!inviteToken || !inviteToken.startsWith('HR-') || loading || hasMembership) return;
+
+    const acceptHrInvite = async () => {
+      setSaving(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+
+        const res = await fetch('/api/hr/employees/accept-invite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ invite_token: inviteToken }),
+        });
+
+        if (res.ok) {
+          await loadMemberships();
+        }
+      } catch {
+        // Silent – fallback to manual onboarding
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    acceptHrInvite();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, loading, hasMembership]);
 
   useEffect(() => {
     const requestDomainJoin = async () => {
