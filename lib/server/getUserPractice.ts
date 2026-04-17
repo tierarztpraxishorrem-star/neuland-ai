@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-type MembershipRole = 'owner' | 'admin' | 'member';
+type MembershipRole = 'owner' | 'admin' | 'groupleader' | 'member';
 
 type PracticeMembershipRow = {
   practice_id: string;
@@ -32,7 +32,8 @@ type GetUserPracticeResult =
 const rankRole = (role: MembershipRole) => {
   if (role === 'owner') return 0;
   if (role === 'admin') return 1;
-  return 2;
+  if (role === 'groupleader') return 2;
+  return 3;
 };
 
 export const getBearerToken = (req: Request) => {

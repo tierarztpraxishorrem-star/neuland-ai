@@ -21,17 +21,30 @@ const STATIC_NAV: NavItem[] = [
   { href: "/hr", label: "Zeiterfassung", section: "Allgemein" },
   { href: "/hr/absences", label: "Abwesenheiten", section: "Allgemein" },
   { href: "/hr/schedule", label: "Dienstplan", section: "Allgemein" },
+  { href: "/hr/overtime", label: "Überstunden", section: "Allgemein" },
+  { href: "/hr/time-corrections", label: "Zeitkorrekturen", section: "Allgemein" },
   { href: "/hr/documents", label: "Dokumente", section: "Allgemein" },
   { href: "/hr/payslips", label: "Lohnunterlagen", section: "Allgemein" },
   { href: "/hr/onboarding", label: "Onboarding", section: "Allgemein" },
+  { href: "/hr/notifications", label: "Benachrichtigungen", section: "Persönlich" },
   { href: "/hr/diamant", label: "Persönlicher Diamant", section: "Persönlich" },
   { href: "/hr/vacation", label: "Mein Urlaub", section: "Urlaubsplaner" },
   { href: "/hr/admin", label: "Admin Dashboard", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/employees", label: "Mitarbeiter", adminOnly: true, section: "Admin" },
   { href: "/hr/admin/absences", label: "Abwesenheiten", adminOnly: true, section: "Admin" },
   { href: "/hr/admin/schedule", label: "Dienstplanung", adminOnly: true, section: "Admin" },
   { href: "/hr/admin/payslips", label: "Lohnunterlagen", adminOnly: true, section: "Admin" },
   { href: "/hr/admin/vacation", label: "Urlaubsverwaltung", adminOnly: true, section: "Admin" },
   { href: "/hr/admin/vacation/groups", label: "Gruppen", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/overtime", label: "Überstunden", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/time-corrections", label: "Zeitkorrekturen", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/locations", label: "Standorte", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/work-models", label: "Arbeitszeitmodelle", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/reports", label: "Reports", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/offboarding", label: "Offboarding", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/qualifications", label: "Qualifikationen", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/import-export", label: "Import/Export", adminOnly: true, section: "Admin" },
+  { href: "/hr/admin/audit-log", label: "Audit-Log", adminOnly: true, section: "Admin" },
 ];
 
 async function fetchWithAuth(url: string) {
@@ -97,7 +110,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
           .limit(1)
           .maybeSingle();
 
-        if (data && (data.role === "owner" || data.role === "admin")) {
+        if (data && (data.role === "owner" || data.role === "admin" || data.role === "groupleader")) {
           setIsAdmin(true);
         }
       } catch {

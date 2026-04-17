@@ -7,8 +7,22 @@ type EmployeeRow = {
   role: string;
   employment_status: string;
   weekly_hours: number | null;
+  display_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  personnel_number: string | null;
+  department: string | null;
+  position_title: string | null;
+  location_id: string | null;
+  contract_type: string | null;
   created_at: string;
 };
+
+// Base columns selected in all employee queries
+const EMPLOYEE_BASE_COLUMNS = 'id, practice_id, user_id, role, employment_status, weekly_hours, display_name, first_name, last_name, personnel_number, department, position_title, location_id, contract_type, created_at';
+
+// All columns including sensitive fields (admin only)
+const EMPLOYEE_ALL_COLUMNS = `${EMPLOYEE_BASE_COLUMNS}, birth_name, date_of_birth, birth_place, birth_country, gender, nationality, marital_status, phone, email_private, address_street, address_number, address_zip, address_city, contract_start, contract_end, probation_end, weekly_hours_target, work_days_per_week, vacation_days_per_year, iban, bic, tax_id, tax_class, social_security_number, health_insurance, confession, supervisor_id`;
 
 type PracticeFeatureRow = {
   features: Record<string, unknown> | null;
@@ -79,7 +93,7 @@ export async function getHrFeatureEnabled(supabase: SupabaseClient, practiceId: 
 export async function getOrCreateEmployee(supabase: SupabaseClient, practiceId: string, userId: string) {
   const existingRes = await supabase
     .from('employees')
-    .select('id, practice_id, user_id, role, employment_status, weekly_hours, created_at')
+    .select(EMPLOYEE_BASE_COLUMNS)
     .eq('practice_id', practiceId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -106,7 +120,7 @@ export async function getOrCreateEmployee(supabase: SupabaseClient, practiceId: 
       role: 'member',
       employment_status: 'active',
     })
-    .select('id, practice_id, user_id, role, employment_status, weekly_hours, created_at')
+    .select(EMPLOYEE_BASE_COLUMNS)
     .single();
 
   if (!insertRes.error && insertRes.data) {
@@ -118,7 +132,7 @@ export async function getOrCreateEmployee(supabase: SupabaseClient, practiceId: 
 
   const retryRes = await supabase
     .from('employees')
-    .select('id, practice_id, user_id, role, employment_status, weekly_hours, created_at')
+    .select(EMPLOYEE_BASE_COLUMNS)
     .eq('practice_id', practiceId)
     .eq('user_id', userId)
     .maybeSingle();

@@ -99,16 +99,92 @@ Analytics-Fehler dürfen nie den Chat-Response blockieren.
 - Pfad: /app/diamant/, /lib/diamond/
 - Migration: 20260413120000_personal_diamond_profiles.sql
 
-### HR Modul (vollständig)
-- Zeiterfassung:   /app/hr/ + /app/hr/admin/
-- Urlaubsplaner:   /app/hr/vacation/ (Gruppen, Entitlements, Kalender)
-- Abwesenheiten:   /app/hr/absences/
-- Dienstplan:      /app/hr/schedule/
-- Dokumente:       /app/hr/documents/
-- Onboarding:      /app/hr/onboarding/
-- API-Routen:      /app/api/hr/ (start, stop, absences, shifts, documents, onboarding, vacation, vacation/groups)
-- Permissions:     /lib/hr/permissions.ts (Rollen: employee, group_admin, admin)
-- Migrations:      20260415_hr_module.sql, 20260415120001_hr_absences_shifts_docs_onboarding.sql, 20260415120002_vacation_planner.sql
+### HR Modul (vollständig – Phase 0-8)
+- Zeiterfassung:        /app/hr/ + /app/hr/admin/
+- Urlaubsplaner:        /app/hr/vacation/ (Gruppen, Entitlements, Heatmap-Kalender)
+- Abwesenheiten:        /app/hr/absences/ + /app/hr/admin/absences/
+- Dienstplan:           /app/hr/schedule/ + /app/hr/admin/schedule/
+- Dokumente:            /app/hr/documents/ (Versionierung, Status-Workflow, Sichtbarkeit)
+- Digitale Signatur:    /app/hr/documents/sign/[id]/ + /api/hr/documents/[id]/sign-request + /api/hr/documents/[id]/sign
+- Onboarding:           /app/hr/onboarding/
+- Lohnunterlagen:       /app/hr/payslips/ + /app/hr/admin/payslips/
+- **Mitarbeiterverwaltung: /app/hr/admin/employees/ (Liste, Detail mit 3 Tabs, Neu anlegen)**
+  - Erweiterte Stammdaten: ~30 Felder (persönlich, Vertrag, Finanzen, HR-Orga)
+  - Feld-Level-Berechtigungen: Sensible Felder (IBAN, Steuer) nur für Admins
+  - API: /app/api/hr/employees/ (GET/POST) + /app/api/hr/employees/[id] (GET/PATCH)
+- **Groupleader-Rolle: Teamleiter sehen/verwalten nur eigene Gruppen-Mitarbeiter**
+  - Erweiterte RLS-Policies mit is_groupleader_for_employee() DB-Function
+  - practice_memberships.role: owner | admin | groupleader | member
+- **Standorte:         /app/hr/admin/locations/ (CRUD, Aktivierung)**
+  - practice_units erweitert um Adresse, Telefon, E-Mail, is_active
+  - Shifts + Work Sessions mit location_id
+- **Arbeitszeitmodelle: /app/hr/admin/work-models/ (Vollzeit/Teilzeit/Minijob/Azubi)**
+  - Tabellen: work_time_models, employee_work_assignments (historisiert)
+  - Break-Rules, Arbeitstage, Nacht-/Wochenend-/Feiertagsarbeit
+  - DB-Function: get_current_work_model()
+- **Überstunden:       /app/hr/overtime/ + /app/hr/admin/overtime/**
+  - Manuelle Erfassung mit Genehmigungsworkflow
+  - Saldo-Tracking (Genehmigt, Freizeitausgleich, Auszahlung, Guthaben)
+  - DB-Function: get_overtime_balance()
+- **Zeitkorrekturen:   /app/hr/time-corrections/ + /app/hr/admin/time-corrections/**
+  - Korrekturanfragen für Work Sessions mit Approval
+  - Bei Genehmigung: automatische Anpassung der Original-Session
+- **Benachrichtigungen: /app/hr/notifications/**
+  - hr_notifications Tabelle mit Typen, Gelesen-Status
+  - DB-Function: notify_hr_event()
+- **Audit-Log:         /app/hr/admin/audit-log/ (Filter, Pagination)**
+  - hr_audit_log Tabelle + Trigger auf employees
+  - Nur Admin-sichtbar
+- **Offboarding:       /app/hr/admin/offboarding/ (Austritts-Checkliste, Auto-Saldo)**
+  - Automatische Berechnung Resturlaub + Überstunden-Saldo
+  - Default-Checkliste (Zugänge, Schlüssel, Zeugnis, etc.)
+  - Status: active → completed (setzt MA auf terminated)
+- **Qualifikationen:   /app/hr/admin/qualifications/**
+  - Zertifikate, Lizenzen, Fortbildungen, Fähigkeiten
+  - Ablauf-Tracking mit Status (active/expired/pending_renewal)
+  - Dienstplan-Relevanz-Flag
+  - employee_qualifications mit Dokument-Referenz
+- **Dienstplan-Konflikte: /api/hr/shifts/conflicts**
+  - DB-Function check_shift_conflicts() prüft: Überlappung, Abwesenheit, Max-Stunden, Qualifikationen
+  - shift_rules Tabelle für konfigurierbare Regeln
+- **Abwesenheits-Workflows:**
+  - /api/hr/absences/[id]/modify – Änderungs-/Storno-Anträge
+  - /api/hr/absences/[id]/counter-proposal – Admin-Gegenvorschläge
+  - absence_modifications Tabelle mit Approval-Flow
+  - Krankmeldung: sick_note_status + sick_note_document_id
+- **Reports:           /app/hr/admin/reports/ (Übersicht, Überstunden, Abwesenheiten)**
+  - DB-Functions: fn_overtime_summary(), fn_absence_statistics()
+  - CSV-Export (deutsches Format: Semikolon, BOM)
+  - Jahresfilter
+- **Stammdaten-Änderungsanträge: /api/hr/change-requests/**
+  - employee_change_requests Tabelle
+  - Bei Genehmigung: automatische Feldänderung auf employees
+- Permissions:     /lib/hr/permissions.ts (Rollen: employee, group_admin, groupleader, admin)
+  - SENSITIVE_FIELDS, SELF_EDITABLE_FIELDS, filterEmployeeFields()
+  - isAdmin(), isGroupleader(), isManager(), isManagerRole(), isAdminRole()
+- **DATEV-Export:      /api/hr/export/datev (Stammdaten CSV im DATEV-Format)**
+- **Mitarbeiter-CSV-Export: /api/hr/export/employees**
+- **Massen-Import:     /api/hr/import (CSV-Import mit Dry-Run-Modus)**
+  - /app/hr/admin/import-export/ (Upload, Testlauf, Live-Import)
+- **Globale HR-Suche:  /api/hr/search (Volltext via PostgreSQL GIN-Index)**
+  - DB-Function hr_search_employees() mit FTS + ILIKE-Fallback
+  - hr_export_log für Export-Tracking
+- Migrations (Phase 0-8):
+  - 20260415120001_hr_absences_shifts_docs_onboarding.sql
+  - 20260415120002_vacation_planner.sql
+  - 20260416000003_payslips.sql
+  - 20260418000001_employee_master_data.sql
+  - 20260418000002_groupleader_role.sql
+  - 20260418100001_locations_activation.sql
+  - 20260418100002_work_time_models.sql
+  - 20260418200001_overtime.sql
+  - 20260418200002_time_corrections.sql
+  - 20260418300001_document_versioning.sql
+  - 20260418400001_notifications.sql
+  - 20260418500001_onboarding_offboarding_qualifications.sql
+  - 20260418600001_shift_conflicts_absence_workflows.sql
+  - 20260418700001_reports_and_change_requests.sql
+  - 20260418800001_integrations.sql
 
 ### Kommunikation Hub
 - Übersicht mit unread-Badge: /app/kommunikation/
@@ -121,11 +197,30 @@ Analytics-Fehler dürfen nie den Chat-Response blockieren.
   - UI: /app/kommunikation/slack/
   - API: /app/api/slack/ (route, channels, send)
   - Lib: /lib/server/slack.ts
-- E-Mail (Microsoft Graph): Posteingang lesen, versenden, antworten, KI-Entwurf
-  - UI: /app/kommunikation/mail/ (Liste + Detail mit Reply & AI-Draft)
-  - API: /app/api/mail/ (messages GET, [id] GET/PATCH, [id]/reply POST, [id]/attachments/[aid] GET, send POST, draft-ai POST)
-  - Lib: /lib/server/mail.ts
-  - Auch in Vetmind: aufklappbare Sektion "E-Mail Posteingang" mit KI-Entwurf im Chat
+- E-Mail (Microsoft Graph): volles Mail-Modul
+  - UI: /app/kommunikation/mail/ (Liste + Detail + /vorlagen-Management)
+    - Rich-Text-Editor (components/RichTextEditor.tsx) für Compose + Reply
+    - Anhänge: multipart/form-data, 3 MB pro Datei / 10 MB gesamt
+    - Kategorien (geteilt mit Outlook via lib/mailCategories.ts)
+    - KI-Entwurf (/api/mail/draft-ai): OpenAI-Vorschlag pro Mail
+    - Mail↔Case-Verknüpfung ("Mit Fall verknüpfen"-Sektion)
+    - Vorlagen + Signatur (auto-angehängt beim Versenden)
+    - Supabase-Realtime Push auf mail_notifications (oder 5min-Polling-Fallback)
+  - API /app/api/mail/:
+    - messages GET (folder/unread/search) + [id] GET/PATCH (isRead, categories)
+    - [id]/reply POST (multipart, Anhänge via createReply+attach+send)
+    - [id]/attachments/[aid] GET (Download mit richtigem Content-Disposition)
+    - [id]/link POST/GET + [id]/link/[linkId] DELETE (Case-Verknüpfung)
+    - send POST (multipart), draft-ai POST
+    - templates GET/POST + templates/[id] PATCH/DELETE
+    - signature GET + PUT (admin-only)
+    - subscriptions GET/POST/PATCH/DELETE (Push-Management, admin-only)
+    - webhook POST+GET (Graph Change-Notifications mit clientState-Verifikation)
+  - API /app/api/cases/search GET + [id]/mail GET (für Case-Seiten)
+  - Lib: /lib/server/mail.ts (Mailbox hart verdrahtet auf empfang@tierarztpraxis-horrem.de)
+  - Vetmind: aufklappbare Sektion "E-Mail Posteingang" mit KI-Entwurf im Chat
+  - Cron: /api/cron/mail-subscriptions (täglich 04:00, erneuert Subs <48h Restlaufzeit)
+  - Migrations: 20260416140000_mail_templates.sql, 20260416150000_mail_subscriptions.sql, 20260416130000_case_mail_links.sql
 
 ### Microsoft Graph Integration
 - Geteilter Client für SharePoint + Mail (Client-Credentials-Flow, Token-Cache 55min)
