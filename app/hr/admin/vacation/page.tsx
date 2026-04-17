@@ -54,12 +54,18 @@ function formatDate(dateStr: string) {
   });
 }
 
+type EntitlementEdit = { employee_id: string; name: string; days_total: number; days_carry: number };
+
 export default function AdminVacationPage() {
-  const [tab, setTab] = useState<"pending" | "all">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "entitlements">("pending");
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [entitlements, setEntitlements] = useState<EntitlementEdit[]>([]);
+  const [entYear, setEntYear] = useState(new Date().getFullYear());
+  const [entLoading, setEntLoading] = useState(false);
+  const [entSaving, setEntSaving] = useState<string | null>(null);
 
   const loadAbsences = useCallback(async () => {
     try {
@@ -102,6 +108,55 @@ export default function AdminVacationPage() {
     }
   }
 
+  const loadEntitlements = useCallback(async () => {
+    setEntLoading(true);
+    try {
+      // Load all employees
+      const empRes = await fetchWithAuth("/api/hr/employees?status=active");
+      if (!empRes.ok) return;
+      const empData = await empRes.json();
+      const emps = empData.employees || [];
+
+      // Load entitlements from supabase directly
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+        global: { headers: { Authorization: `Bearer ${session.access_token}` } }, auth: { persistSession: false },
+      });
+      const { data: ents } = await sb.from("vacation_entitlements").select("employee_id, days_total, days_carry").eq("year", entYear);
+      const entMap = new Map((ents || []).map((e: { employee_id: string; days_total: number; days_carry: number }) => [e.employee_id, e]));
+
+      setEntitlements(emps.map((e: { id: string; first_name?: string; last_name?: string; display_name?: string; vacation_days_per_year?: number }) => ({
+        employee_id: e.id,
+        name: e.first_name && e.last_name ? `${e.first_name} ${e.last_name}` : e.display_name || e.id.slice(0, 8),
+        days_total: (entMap.get(e.id) as { days_total: number } | undefined)?.days_total ?? e.vacation_days_per_year ?? 30,
+        days_carry: (entMap.get(e.id) as { days_carry: number } | undefined)?.days_carry ?? 0,
+      })));
+    } catch { /* silent */ }
+    finally { setEntLoading(false); }
+  }, [entYear]);
+
+  useEffect(() => {
+    if (tab === "entitlements") loadEntitlements();
+  }, [tab, loadEntitlements]);
+
+  const saveEntitlement = async (ent: EntitlementEdit) => {
+    setEntSaving(ent.employee_id);
+    try {
+      const res = await fetchWithAuth("/api/hr/vacation/entitlement", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employee_id: ent.employee_id, year: entYear, days_total: ent.days_total, days_carry: ent.days_carry }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler");
+    } finally {
+      setEntSaving(null);
+    }
+  };
+
   return (
     <main style={{ minHeight: "100vh", background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}>
       <div style={{ width: "min(900px, 100%)", margin: "0 auto", display: "grid", gap: uiTokens.sectionGap }}>
@@ -117,7 +172,7 @@ export default function AdminVacationPage() {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 4, borderRadius: uiTokens.radiusCard, background: "#f3f4f6", padding: 4 }}>
-          {(["pending", "all"] as const).map((t) => (
+          {(["pending", "all", "entitlements"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -133,13 +188,61 @@ export default function AdminVacationPage() {
                 color: tab === t ? uiTokens.textPrimary : uiTokens.textSecondary,
               }}
             >
-              {t === "pending" ? "Offene Anträge" : "Alle Anträge"}
+              {t === "pending" ? "Offene Anträge" : t === "all" ? "Alle Anträge" : "Kontingente"}
             </button>
           ))}
         </div>
 
+        {/* Entitlements tab */}
+        {tab === "entitlements" && (
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Urlaubskontingente {entYear}</div>
+              <select value={entYear} onChange={(e) => setEntYear(Number(e.target.value))}
+                style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, background: "#fff" }}>
+                {[2024, 2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            {entLoading ? <p style={{ fontSize: 14, color: uiTokens.textMuted }}>Lade...</p> : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
+                    <th style={{ textAlign: "left", padding: "8px 12px", color: uiTokens.textMuted }}>Mitarbeiter</th>
+                    <th style={{ textAlign: "center", padding: "8px 12px", color: uiTokens.textMuted, width: 100 }}>Urlaubstage</th>
+                    <th style={{ textAlign: "center", padding: "8px 12px", color: uiTokens.textMuted, width: 100 }}>Übertrag</th>
+                    <th style={{ textAlign: "center", padding: "8px 12px", color: uiTokens.textMuted, width: 80 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entitlements.map((ent) => (
+                    <tr key={ent.employee_id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "6px 12px", fontWeight: 500 }}>{ent.name}</td>
+                      <td style={{ padding: "6px 12px", textAlign: "center" }}>
+                        <input type="number" value={ent.days_total} min={0} max={60}
+                          onChange={(e) => setEntitlements((prev) => prev.map((x) => x.employee_id === ent.employee_id ? { ...x, days_total: Number(e.target.value) } : x))}
+                          style={{ width: 60, padding: "2px 6px", borderRadius: 4, border: "1px solid #e5e7eb", fontSize: 13, textAlign: "center" }} />
+                      </td>
+                      <td style={{ padding: "6px 12px", textAlign: "center" }}>
+                        <input type="number" value={ent.days_carry} min={0} max={30}
+                          onChange={(e) => setEntitlements((prev) => prev.map((x) => x.employee_id === ent.employee_id ? { ...x, days_carry: Number(e.target.value) } : x))}
+                          style={{ width: 60, padding: "2px 6px", borderRadius: 4, border: "1px solid #e5e7eb", fontSize: 13, textAlign: "center" }} />
+                      </td>
+                      <td style={{ padding: "6px 12px", textAlign: "center" }}>
+                        <button onClick={() => saveEntitlement(ent)} disabled={entSaving === ent.employee_id}
+                          style={{ padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: uiTokens.brand, color: "#fff", border: "none", cursor: "pointer", opacity: entSaving === ent.employee_id ? 0.6 : 1 }}>
+                          {entSaving === ent.employee_id ? "..." : "Speichern"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        )}
+
         {/* List */}
-        <Card>
+        {tab !== "entitlements" && <Card>
           {loading ? (
             <p style={{ fontSize: 14, color: uiTokens.textMuted }}>Laden…</p>
           ) : absences.length === 0 ? (
@@ -206,7 +309,7 @@ export default function AdminVacationPage() {
               ))}
             </div>
           )}
-        </Card>
+        </Card>}
       </div>
     </main>
   );

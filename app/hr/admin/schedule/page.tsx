@@ -11,6 +11,8 @@ type Shift = {
   starts_at: string;
   ends_at: string;
   note?: string | null;
+  location_id?: string | null;
+  shift_type?: string | null;
 };
 
 type Employee = {
@@ -18,6 +20,25 @@ type Employee = {
   user_id: string;
   role: string;
   display_name?: string | null;
+};
+
+type Location = { id: string; name: string; is_active: boolean };
+type Conflict = { type: string; message: string };
+
+const SHIFT_TYPES = [
+  { value: "", label: "Kein Typ" },
+  { value: "frueh", label: "Frühdienst" },
+  { value: "spaet", label: "Spätdienst" },
+  { value: "nacht", label: "Nachtdienst" },
+  { value: "bereitschaft", label: "Bereitschaft" },
+  { value: "normal", label: "Normal" },
+];
+
+const SHIFT_TYPE_COLORS: Record<string, string> = {
+  frueh: "#fef3c7", spaet: "#dbeafe", nacht: "#e0e7ff", bereitschaft: "#fce7f3", normal: "#dcfce7",
+};
+const SHIFT_TYPE_TEXT: Record<string, string> = {
+  frueh: "#92400e", spaet: "#1e40af", nacht: "#3730a3", bereitschaft: "#9d174d", normal: "#166534",
 };
 
 const DAY_LABELS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -66,6 +87,7 @@ export default function AdminSchedulePage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [locations, setLocations] = useState<Location[]>([]);
   // Modal state for adding a shift
   const [showModal, setShowModal] = useState(false);
   const [modalDate, setModalDate] = useState("");
@@ -73,6 +95,9 @@ export default function AdminSchedulePage() {
   const [modalStart, setModalStart] = useState("08:00");
   const [modalEnd, setModalEnd] = useState("16:00");
   const [modalNote, setModalNote] = useState("");
+  const [modalLocation, setModalLocation] = useState("");
+  const [modalShiftType, setModalShiftType] = useState("");
+  const [conflicts, setConflicts] = useState<Conflict[]>([]);
 
   const baseDate = new Date();
   baseDate.setDate(baseDate.getDate() + weekOffset * 7);
@@ -85,13 +110,15 @@ export default function AdminSchedulePage() {
       setError(null);
       setLoading(true);
 
-      const [shiftsRes, systemRes] = await Promise.all([
+      const [shiftsRes, systemRes, locRes] = await Promise.all([
         fetchWithAuth(`/api/hr/shifts?from=${from}&to=${to}`),
         fetchWithAuth("/api/debug/system-state"),
+        fetchWithAuth("/api/hr/locations"),
       ]);
 
       const shiftsData = await shiftsRes.json();
       const systemData = await systemRes.json();
+      const locData = locRes.ok ? await locRes.json() : { locations: [] };
 
       if (!shiftsRes.ok)
         throw new Error(shiftsData.error || "Fehler beim Laden der Schichten.");
@@ -100,6 +127,7 @@ export default function AdminSchedulePage() {
 
       setShifts(shiftsData.shifts || []);
       setEmployees(systemData.employees || []);
+      setLocations((locData.locations || []).filter((l: Location) => l.is_active));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
@@ -117,7 +145,22 @@ export default function AdminSchedulePage() {
     setModalStart("08:00");
     setModalEnd("16:00");
     setModalNote("");
+    setModalLocation("");
+    setModalShiftType("");
+    setConflicts([]);
     setShowModal(true);
+  }
+
+  async function checkConflicts(empId: string, date: string, start: string, end: string) {
+    if (!empId || !date || !start || !end) return;
+    try {
+      const params = new URLSearchParams({ employee_id: empId, date, starts_at: start, ends_at: end });
+      const res = await fetchWithAuth(`/api/hr/shifts/conflicts?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setConflicts(data.conflicts || []);
+      }
+    } catch { /* silent */ }
   }
 
   async function handleAddShift(e: React.FormEvent) {
@@ -134,6 +177,8 @@ export default function AdminSchedulePage() {
           starts_at: modalStart,
           ends_at: modalEnd,
           note: modalNote || undefined,
+          location_id: modalLocation || undefined,
+          shift_type: modalShiftType || undefined,
         }),
       });
       const data = await res.json();
@@ -263,18 +308,22 @@ export default function AdminSchedulePage() {
                           {cellShifts.length === 0 ? (
                             <span style={{ fontSize: 12, color: uiTokens.textMuted }}>+</span>
                           ) : (
-                            cellShifts.map((s) => (
+                            cellShifts.map((s) => {
+                              const bg = SHIFT_TYPE_COLORS[s.shift_type || ""] || "#dcfce7";
+                              const fg = SHIFT_TYPE_TEXT[s.shift_type || ""] || "#166534";
+                              return (
                               <div
                                 key={s.id}
                                 style={{
                                   position: "relative",
                                   marginBottom: 2,
                                   borderRadius: 6,
-                                  background: "#dcfce7",
+                                  background: bg,
                                   padding: "2px 4px",
                                   fontSize: 10,
-                                  color: "#166534",
+                                  color: fg,
                                 }}
+                                title={[s.note, s.location_id ? `Standort: ${locations.find((l) => l.id === s.location_id)?.name || "?"}` : ""].filter(Boolean).join(" | ")}
                               >
                                 {s.starts_at}–{s.ends_at}
                                 <button
@@ -305,7 +354,8 @@ export default function AdminSchedulePage() {
                                   ×
                                 </button>
                               </div>
-                            ))
+                              );
+                            })
                           )}
                         </td>
                       );
@@ -386,6 +436,25 @@ export default function AdminSchedulePage() {
                     />
                   </div>
                 </div>
+                {locations.length > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div>
+                      <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>Standort</label>
+                      <select value={modalLocation} onChange={(e) => setModalLocation(e.target.value)}
+                        style={{ width: "100%", padding: "8px 12px", borderRadius: uiTokens.radiusCard, border: uiTokens.cardBorder, fontSize: 14, background: "#fff" }}>
+                        <option value="">Kein Standort</option>
+                        {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>Schichttyp</label>
+                      <select value={modalShiftType} onChange={(e) => setModalShiftType(e.target.value)}
+                        style={{ width: "100%", padding: "8px 12px", borderRadius: uiTokens.radiusCard, border: uiTokens.cardBorder, fontSize: 14, background: "#fff" }}>
+                        {SHIFT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: uiTokens.textSecondary }}>
                     Notiz (optional)
@@ -403,6 +472,20 @@ export default function AdminSchedulePage() {
                     }}
                   />
                 </div>
+                {/* Conflict check button + warnings */}
+                <button type="button" onClick={() => checkConflicts(modalEmployee, modalDate, modalStart, modalEnd)}
+                  style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, background: "#f3f4f6", border: "1px solid #e5e7eb", cursor: "pointer", justifySelf: "start" }}>
+                  Konflikte prüfen
+                </button>
+                {conflicts.length > 0 && (
+                  <div style={{ padding: 10, borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca" }}>
+                    {conflicts.map((c, i) => (
+                      <div key={i} style={{ fontSize: 13, color: "#dc2626", marginBottom: i < conflicts.length - 1 ? 4 : 0 }}>
+                        ⚠ {c.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingTop: 8 }}>
                   <Button variant="secondary" size="sm" onClick={() => setShowModal(false)} type="button">
                     Abbrechen

@@ -59,6 +59,7 @@ const SECTIONS: Section[] = [
       { href: "/hr/admin/vacation", label: "Urlaubsverwaltung" },
       { href: "/hr/admin/vacation/groups", label: "Urlaubsgruppen" },
       { href: "/hr/admin/payslips", label: "Lohnunterlagen hochladen" },
+      { href: "/hr/admin/onboarding", label: "Onboarding-Vorlagen" },
       { href: "/hr/admin/offboarding", label: "Offboarding" },
       { href: "/hr/admin/qualifications", label: "Qualifikationen" },
     ],
