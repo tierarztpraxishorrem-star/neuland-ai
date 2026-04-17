@@ -1,3 +1,5 @@
+export const maxDuration = 300; // long transcripts need time for generation
+
 import { NextResponse } from "next/server";
 import { privacyConfig, PUBLIC_CHAT_CHANNEL } from "../../../lib/privacyConfig";
 
@@ -14,9 +16,9 @@ type ChatRequestBody = {
   mode?: "safe_documentation" | "clinical_support";
 };
 
-const MAX_CONTEXT_CHARS = 4000;
-const MAX_MESSAGE_CHARS = 4000;
-const MAX_MESSAGES = 12;
+const MAX_CONTEXT_CHARS = 60000;
+const MAX_MESSAGE_CHARS = 120000; // long transcripts can be 50k+ chars
+const MAX_MESSAGES = 20;
 const PRIMARY_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
 const FALLBACK_MODEL = process.env.OPENAI_CHAT_FALLBACK_MODEL || "gpt-4.1";
 const UNCERTAINTY_NOTE =
@@ -254,7 +256,7 @@ ${context || "Kein Kontext vorhanden"}
           })),
         ],
         temperature: 0.15,
-        max_output_tokens: 3200,
+        max_output_tokens: 12000,
       }),
     });
 

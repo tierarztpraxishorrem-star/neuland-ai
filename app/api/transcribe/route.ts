@@ -147,13 +147,18 @@ async function maybeCorrectTranscript(rawText: string) {
     };
   }
 
+  // Estimate tokens needed: ~1 token per 4 chars, with headroom
+  const estimatedTokens = Math.ceil(rawText.length / 3.5);
+  const correctionTokens = Math.min(Math.max(estimatedTokens, 2000), 16000);
+
   const correctionPrompt = [
-    "Korrigiere den folgenden medizinischen Transkriptions-Text.",
+    "Korrigiere den folgenden Transkriptions-Text.",
     "Regeln:",
-    "- Nur Schreibfehler, medizinische Begriffe und Satzzeichen korrigieren.",
+    "- Schreibfehler, Fachbegriffe (medizinisch, technisch, organisatorisch) und Satzzeichen korrigieren.",
+    "- Sprecherpausen, Fuellwoerter (aehm, also, quasi) und Wiederholungen behutsam glaetten.",
     "- Keine neuen Inhalte hinzufuegen.",
-    "- Nichts interpretieren.",
-    "- Keine Informationen weglassen.",
+    "- Nichts interpretieren oder weglassen.",
+    "- Den VOLLSTAENDIGEN Text ausgeben, nichts kuerzen.",
     "- Nur den korrigierten Text ausgeben, ohne Erklaerung.",
     "",
     "TEXT:",
@@ -176,7 +181,7 @@ async function maybeCorrectTranscript(rawText: string) {
           }
         ],
         temperature: 0.0,
-        max_output_tokens: 2000
+        max_output_tokens: correctionTokens
       })
     });
 

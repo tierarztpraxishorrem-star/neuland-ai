@@ -419,6 +419,105 @@ export default function ResultPage() {
     };
   }, [contextData]);
 
+  const detectTranscriptType = (text: string): 'clinical' | 'meeting' | 'general' => {
+    const lower = text.toLowerCase();
+    const clinicalTerms = ['anamnese', 'diagnose', 'befund', 'symptom', 'ultraschall', 'roentgen', 'röntgen', 'blutbild', 'laborwert', 'medikament', 'dosierung', 'therapie', 'patient kam', 'vorgestellt wegen', 'klinische untersuchung'];
+    const meetingTerms = ['gehalt', 'vertrag', 'mitarbeiter', 'team', 'abteilung', 'urlaub', 'krankenstand', 'dienstplan', 'feedback', 'ziele', 'leistung', 'verantwortung', 'position', 'befoerderung', 'beförderung', 'kuendigung', 'kündigung', 'einarbeitung', 'onboarding', 'weiterbildung', 'fachtierarzt', 'bonus', 'gehaltsvorstellung', 'mitarbeitergespraech', 'mitarbeitergespräch'];
+    const clinicalHits = clinicalTerms.filter(t => lower.includes(t)).length;
+    const meetingHits = meetingTerms.filter(t => lower.includes(t)).length;
+    if (meetingHits >= 3 || (meetingHits >= 2 && clinicalHits < 3)) return 'meeting';
+    if (clinicalHits >= 3) return 'clinical';
+    return 'general';
+  };
+
+  const buildSmartPrompt = (combinedInput: string): string => {
+    if (selectedTemplate) {
+      return `${selectedTemplate}\n\n${combinedInput}`;
+    }
+
+    const type = detectTranscriptType(combinedInput);
+
+    if (type === 'meeting') {
+      return [
+        'Erstelle aus dem folgenden Gespraechstranskript eine vollstaendige, professionelle Zusammenfassung.',
+        '',
+        'STRUKTUR:',
+        '# Zusammenfassung',
+        'Kurzer Ueberblick (3-5 Saetze): Wer hat mit wem gesprochen, wann, Hauptthemen.',
+        '',
+        '# Besprochene Themen',
+        'Fuer jedes Thema eine eigene Unterueberschrift (##) mit den wichtigsten Punkten als Bulletpoints.',
+        'Alle relevanten Details, Zahlen, Namen und Argumente aus dem Gespraech behalten.',
+        '',
+        '# Entscheidungen & Vereinbarungen',
+        'Konkret was beschlossen oder vereinbart wurde.',
+        '',
+        '# To-dos',
+        'Wer macht was bis wann? Tabellenformat: | Aufgabe | Verantwortlich | Frist |',
+        '',
+        '# Offene Punkte',
+        'Was wurde angesprochen aber nicht abschliessend geklaert?',
+        '',
+        '# Stimmung & Einschaetzung',
+        'Kurze Einschaetzung der Gespraechsatmosphaere und wichtige Zwischentoene.',
+        '',
+        'REGELN:',
+        '- ALLE besprochenen Inhalte erfassen – nichts weglassen, auch wenn es ausfuehrlich wird.',
+        '- Originalaussagen und Argumente moeglichst nah am Wortlaut wiedergeben.',
+        '- Konkrete Zahlen, Namen, Termine immer uebernehmen.',
+        '- Professionell aber nicht steif formulieren.',
+        '- Deutsch.',
+        '',
+        'TRANSKRIPT:',
+        combinedInput
+      ].join('\n');
+    }
+
+    if (type === 'clinical') {
+      return [
+        'Du bist ein Fachtierarzt (Diplomate-Niveau). Erstelle aus dem Transkript eine vollstaendige klinische Dokumentation.',
+        '',
+        'STRUKTUR:',
+        '# Anamnese',
+        '# Klinische Untersuchung (Parameter: Befund)',
+        '# Weiterfuehrende Untersuchungen',
+        '# Diagnose (wenn unklar: Problemliste + Differentialdiagnosen)',
+        '# Therapie',
+        '# Plan / Empfehlung',
+        '# Epikrise',
+        '# Patientenbrief (einfache Sprache, 6-20 Saetze, Fliesstext)',
+        '# To-do (intern, max 2-4 Schritte)',
+        '# Interne Diskussion (Differentialdiagnosen mit Pro/Contra)',
+        '',
+        'REGELN:',
+        '- Medizinisch korrekt und praegnant.',
+        '- Bulletpoints (ausser Patientenbrief).',
+        '- Keine Halluzinationen – Luecken explizit benennen.',
+        '- Keine Tierart/Name/Alter im Text (steht im PMS).',
+        '- Deutsch.',
+        '',
+        'TRANSKRIPT:',
+        combinedInput
+      ].join('\n');
+    }
+
+    // general
+    return [
+      'Erstelle aus dem folgenden Transkript eine vollstaendige, gut strukturierte Zusammenfassung.',
+      '',
+      'REGELN:',
+      '- Erkenne den Kontext automatisch und waehle eine passende Struktur.',
+      '- ALLE besprochenen Inhalte erfassen, nichts weglassen.',
+      '- Konkrete Details, Zahlen, Namen und Vereinbarungen behalten.',
+      '- Professionell und klar formulieren.',
+      '- To-dos mit Verantwortlichen und Fristen extrahieren wenn vorhanden.',
+      '- Deutsch.',
+      '',
+      'TRANSKRIPT:',
+      combinedInput
+    ].join('\n');
+  };
+
   const generate = async () => {
     if (!transcript.trim() && attachments.length === 0 && !caseNotes.trim() && !selectedTemplate.trim()) {
       alert('Keine Eingaben für Generierung vorhanden.');
@@ -439,9 +538,7 @@ export default function ResultPage() {
           .filter(Boolean)
           .join('\n')
       : '';
-    const finalPrompt = selectedTemplate
-      ? `${selectedTemplate}\n\n${combinedInput}`
-      : `Erstelle eine strukturierte Notiz.\n\nINPUT:\n${combinedInput}`;
+    const finalPrompt = buildSmartPrompt(combinedInput);
 
     setLoading(true);
     try {
