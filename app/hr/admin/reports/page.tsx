@@ -34,6 +34,8 @@ export default function ReportsPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [reportData, setReportData] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deptFilter, setDeptFilter] = useState("");
+  const [departments, setDepartments] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,8 +45,15 @@ export default function ReportsPage() {
       if (!res) return;
       const data = await res.json();
       if (res.ok) {
-        if (reportType === "overview") setOverview(data.overview);
-        else setReportData(data.report || []);
+        if (reportType === "overview") {
+          setOverview(data.overview);
+        } else {
+          const rows = data.report || [];
+          setReportData(rows);
+          // Extract unique departments
+          const depts = [...new Set(rows.map((r: ReportRow) => r.department).filter(Boolean))] as string[];
+          setDepartments(depts.sort());
+        }
       }
     } finally {
       setLoading(false);
@@ -53,12 +62,16 @@ export default function ReportsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const filteredData = deptFilter
+    ? reportData.filter((r) => r.department === deptFilter)
+    : reportData;
+
   const exportCSV = () => {
-    if (reportData.length === 0) return;
-    const headers = Object.keys(reportData[0]);
+    if (filteredData.length === 0) return;
+    const headers = Object.keys(filteredData[0]);
     const csv = [
       headers.join(";"),
-      ...reportData.map((r) => headers.map((h) => String(r[h] ?? "")).join(";")),
+      ...filteredData.map((r) => headers.map((h) => String(r[h] ?? "")).join(";")),
     ].join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -89,6 +102,13 @@ export default function ReportsPage() {
             style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, background: "#fff", marginLeft: "auto" }}>
             {[2024, 2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
+          {reportType !== "overview" && departments.length > 0 && (
+            <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 13, background: "#fff" }}>
+              <option value="">Alle Abteilungen</option>
+              {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          )}
           {reportType !== "overview" && reportData.length > 0 && (
             <button onClick={exportCSV} style={{ padding: "6px 14px", borderRadius: 6, fontSize: 13, background: "#f3f4f6", border: "1px solid #e5e7eb", cursor: "pointer" }}>
               CSV Export
@@ -123,7 +143,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {reportData.map((r, i) => (
+                  {filteredData.map((r, i) => (
                     <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
                       <td style={{ padding: "8px 12px", fontWeight: 500 }}>{r.name as string}</td>
                       <td style={{ padding: "8px 12px", color: uiTokens.textSecondary }}>{(r.department as string) || "—"}</td>
@@ -136,7 +156,7 @@ export default function ReportsPage() {
                 </tbody>
               </table>
             </div>
-            {reportData.length === 0 && <div style={{ fontSize: 14, color: uiTokens.textSecondary, marginTop: 8 }}>Keine Daten für diesen Zeitraum.</div>}
+            {filteredData.length === 0 && <div style={{ fontSize: 14, color: uiTokens.textSecondary, marginTop: 8 }}>Keine Daten für diesen Zeitraum{deptFilter ? ` und Abteilung "${deptFilter}"` : ""}.</div>}
           </Section>
         )}
 
@@ -156,7 +176,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {reportData.map((r, i) => (
+                  {filteredData.map((r, i) => (
                     <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
                       <td style={{ padding: "8px 12px", fontWeight: 500 }}>{r.name as string}</td>
                       <td style={{ padding: "8px 12px", color: uiTokens.textSecondary }}>{(r.department as string) || "—"}</td>
@@ -170,7 +190,7 @@ export default function ReportsPage() {
                 </tbody>
               </table>
             </div>
-            {reportData.length === 0 && <div style={{ fontSize: 14, color: uiTokens.textSecondary, marginTop: 8 }}>Keine Daten für diesen Zeitraum.</div>}
+            {filteredData.length === 0 && <div style={{ fontSize: 14, color: uiTokens.textSecondary, marginTop: 8 }}>Keine Daten für diesen Zeitraum{deptFilter ? ` und Abteilung "${deptFilter}"` : ""}.</div>}
           </Section>
         )}
       </div>

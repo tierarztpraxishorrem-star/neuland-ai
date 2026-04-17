@@ -46,7 +46,7 @@ export default function OvertimePage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ date: "", minutes: "", reason: "" });
+  const [form, setForm] = useState({ date: "", hours: "", mins: "", reason: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,9 +66,11 @@ export default function OvertimePage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const totalMinutes = (Number(form.hours) || 0) * 60 + (Number(form.mins) || 0);
+
   const handleSubmit = async () => {
-    if (!form.date || !form.minutes || !form.reason.trim()) {
-      setError("Alle Felder sind erforderlich."); return;
+    if (!form.date || totalMinutes <= 0 || !form.reason.trim()) {
+      setError("Datum, Dauer und Begründung sind erforderlich."); return;
     }
     setSaving(true);
     setError(null);
@@ -76,13 +78,13 @@ export default function OvertimePage() {
       const res = await fetchWithAuth("/api/hr/overtime", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: form.date, minutes: Number(form.minutes), reason: form.reason }),
+        body: JSON.stringify({ date: form.date, minutes: totalMinutes, reason: form.reason }),
       });
       if (!res) throw new Error("Nicht angemeldet.");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setShowForm(false);
-      setForm({ date: "", minutes: "", reason: "" });
+      setForm({ date: "", hours: "", mins: "", reason: "" });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler");
@@ -102,7 +104,7 @@ export default function OvertimePage() {
         </div>
 
         {balance && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
             <Card><div style={{ fontSize: 12, color: uiTokens.textSecondary }}>Genehmigt</div><div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>{formatMinutes(balance.total_approved_minutes)}</div></Card>
             <Card><div style={{ fontSize: 12, color: uiTokens.textSecondary }}>Freizeitausgleich</div><div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>{formatMinutes(balance.used_time_off_minutes)}</div></Card>
             <Card><div style={{ fontSize: 12, color: uiTokens.textSecondary }}>Auszahlung</div><div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>{formatMinutes(balance.used_payout_minutes)}</div></Card>
@@ -115,18 +117,28 @@ export default function OvertimePage() {
         {showForm && (
           <Card style={{ border: `2px solid ${uiTokens.brand}` }}>
             <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Überstunden einreichen</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               <div>
                 <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Datum *</label>
                 <input type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
                   style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14, boxSizing: "border-box" }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Minuten *</label>
-                <input type="number" min="1" value={form.minutes} onChange={(e) => setForm((p) => ({ ...p, minutes: e.target.value }))}
+                <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Stunden</label>
+                <input type="number" min="0" max="23" placeholder="0" value={form.hours} onChange={(e) => setForm((p) => ({ ...p, hours: e.target.value }))}
+                  style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Minuten</label>
+                <input type="number" min="0" max="59" step="5" placeholder="0" value={form.mins} onChange={(e) => setForm((p) => ({ ...p, mins: e.target.value }))}
                   style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", fontSize: 14, boxSizing: "border-box" }} />
               </div>
             </div>
+            {totalMinutes > 0 && (
+              <div style={{ fontSize: 13, color: uiTokens.brand, marginTop: 4, fontWeight: 500 }}>
+                = {formatMinutes(totalMinutes)}
+              </div>
+            )}
             <div style={{ marginTop: 12 }}>
               <label style={{ fontSize: 12, color: uiTokens.textMuted, display: "block", marginBottom: 4 }}>Begründung *</label>
               <textarea value={form.reason} onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))} rows={2}

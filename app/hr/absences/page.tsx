@@ -84,6 +84,25 @@ export default function AbsencesPage() {
     loadAbsences();
   }, [loadAbsences]);
 
+  async function handleModify(absenceId: string, modType: "cancel" | "change_dates") {
+    const reason = modType === "cancel"
+      ? "Stornierung durch Mitarbeiter"
+      : prompt("Begründung für die Änderung:");
+    if (!reason) return;
+    try {
+      const res = await fetchWithAuth(`/api/hr/absences/${absenceId}/modify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modification_type: modType, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fehler.");
+      await loadAbsences();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Stornieren.");
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -161,7 +180,25 @@ export default function AbsencesPage() {
                       {a.note && <span style={{ marginLeft: 8, fontStyle: "italic" }}>{a.note}</span>}
                     </div>
                   </div>
-                  <Badge tone={STATUS_COLORS[a.status]?.tone || 'default'}>{STATUS_LABELS[a.status] || a.status}</Badge>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {a.status === "approved" && (
+                      <button
+                        onClick={() => handleModify(a.id, "cancel")}
+                        style={{ padding: "3px 10px", borderRadius: 6, fontSize: 12, background: "#fff", color: "#dc2626", border: "1px solid #fecaca", cursor: "pointer" }}
+                      >
+                        Stornieren
+                      </button>
+                    )}
+                    {a.status === "pending" && (
+                      <button
+                        onClick={() => handleModify(a.id, "cancel")}
+                        style={{ padding: "3px 10px", borderRadius: 6, fontSize: 12, background: "#fff", color: uiTokens.textSecondary, border: "1px solid #e5e7eb", cursor: "pointer" }}
+                      >
+                        Zurückziehen
+                      </button>
+                    )}
+                    <Badge tone={STATUS_COLORS[a.status]?.tone || 'default'}>{STATUS_LABELS[a.status] || a.status}</Badge>
+                  </div>
                 </div>
               </Card>
             ))

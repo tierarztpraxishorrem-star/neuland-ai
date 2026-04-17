@@ -134,6 +134,7 @@ export default function EmployeeDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("personal");
+  const [editMode, setEditMode] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -175,6 +176,7 @@ export default function EmployeeDetailPage() {
       if (!res.ok) throw new Error(data.error || "Fehler beim Speichern.");
       setEmployee(data.employee);
       setEditData({});
+      setEditMode(false);
       setSuccess("Änderungen gespeichert.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Speichern.");
@@ -223,19 +225,42 @@ export default function EmployeeDetailPage() {
               </p>
             )}
           </div>
-          {hasChanges && (
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={{
-                padding: "8px 20px", borderRadius: 8, fontSize: 14, fontWeight: 600,
-                background: uiTokens.brand, color: "#fff", border: "none", cursor: "pointer",
-                opacity: saving ? 0.6 : 1,
-              }}
-            >
-              {saving ? "Speichere..." : "Speichern"}
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            {!editMode ? (
+              <button
+                onClick={() => setEditMode(true)}
+                style={{
+                  padding: "8px 20px", borderRadius: 8, fontSize: 14, fontWeight: 600,
+                  background: "#f3f4f6", color: uiTokens.textPrimary, border: "1px solid #e5e7eb", cursor: "pointer",
+                }}
+              >
+                Bearbeiten
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setEditMode(false); setEditData({}); }}
+                  style={{
+                    padding: "8px 16px", borderRadius: 8, fontSize: 14,
+                    background: "#fff", color: uiTokens.textSecondary, border: "1px solid #e5e7eb", cursor: "pointer",
+                  }}
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !hasChanges}
+                  style={{
+                    padding: "8px 20px", borderRadius: 8, fontSize: 14, fontWeight: 600,
+                    background: hasChanges ? uiTokens.brand : "#d1d5db", color: "#fff", border: "none", cursor: hasChanges ? "pointer" : "default",
+                    opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {saving ? "Speichere..." : "Speichern"}
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {error && <Card style={{ background: "#fef2f2", border: "1px solid #fecaca" }}><div style={{ color: "#dc2626", fontSize: 14 }}>{error}</div></Card>}
@@ -283,8 +308,26 @@ export default function EmployeeDetailPage() {
                 );
               }
 
+              // Read-only display
+              if (!editMode) {
+                const displayVal = options
+                  ? options.find((o) => o.value === val)?.label || val || "—"
+                  : isDate && val ? new Date(val + "T00:00:00").toLocaleDateString("de-DE") : val || "—";
+                return (
+                  <Card key={field} style={{ padding: 14 }}>
+                    <div style={{ fontSize: 12, color: uiTokens.textMuted, marginBottom: 4 }}>
+                      {FIELD_LABELS[field] || field}
+                    </div>
+                    <div style={{ fontSize: 14, color: val ? uiTokens.textPrimary : uiTokens.textMuted }}>
+                      {displayVal}
+                    </div>
+                  </Card>
+                );
+              }
+
+              // Edit mode
               return (
-                <Card key={field} style={{ padding: 14 }}>
+                <Card key={field} style={{ padding: 14, border: field in editData ? `1px solid ${uiTokens.brand}` : undefined }}>
                   <label style={{ fontSize: 12, color: uiTokens.textMuted, marginBottom: 4, display: "block" }}>
                     {FIELD_LABELS[field] || field}
                   </label>

@@ -40,6 +40,7 @@ export default function OffboardingPage() {
   const [newForm, setNewForm] = useState({ employee_id: "", last_working_day: "", exit_reason: "" });
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("active");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,6 +101,19 @@ export default function OffboardingPage() {
           <button onClick={() => setShowNew(true)} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 14, fontWeight: 600, background: uiTokens.brand, color: "#fff", border: "none", cursor: "pointer" }}>+ Offboarding starten</button>
         </div>
 
+        <Card style={{ display: "flex", gap: 8 }}>
+          {(["active", "completed", "cancelled", ""] as const).map((s) => (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              style={{
+                padding: "6px 14px", borderRadius: 6, fontSize: 13, fontWeight: statusFilter === s ? 600 : 400,
+                background: statusFilter === s ? uiTokens.brand : "#f3f4f6", color: statusFilter === s ? "#fff" : uiTokens.textSecondary,
+                border: "1px solid #e5e7eb", cursor: "pointer",
+              }}>
+              {s ? STATUS_LABELS[s] : "Alle"}
+            </button>
+          ))}
+        </Card>
+
         {error && <Card style={{ background: "#fef2f2", border: "1px solid #fecaca" }}><div style={{ color: "#dc2626", fontSize: 14 }}>{error}</div></Card>}
 
         {showNew && (
@@ -139,8 +153,8 @@ export default function OffboardingPage() {
         {loading && <div style={{ fontSize: 14, color: uiTokens.textSecondary }}>Lade...</div>}
 
         {!loading && (
-          <Section title={`${processes.length} Offboarding-Prozesse`}>
-            {processes.map((p) => {
+          <Section title={`${(statusFilter ? processes.filter((p) => p.status === statusFilter) : processes).length} Offboarding-Prozesse`}>
+            {(statusFilter ? processes.filter((p) => p.status === statusFilter) : processes).map((p) => {
               const tasks = p.offboarding_tasks || [];
               const doneCount = tasks.filter((t) => t.done).length;
               const isExpanded = expandedId === p.id;
