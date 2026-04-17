@@ -11,10 +11,9 @@ import { ArrowLeft, Search, UserPlus } from 'lucide-react';
 type PatientSearchResult = {
   id: string;
   name: string;
-  species: string | null;
-  breed: string | null;
+  tierart: string | null;
+  rasse: string | null;
   owner_name: string | null;
-  chip_number: string | null;
 };
 
 async function fetchWithAuth(path: string, init?: RequestInit) {
@@ -51,11 +50,13 @@ export default function NewStationPatientPage() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const res = await fetchWithAuth(`/api/patienten?q=${encodeURIComponent(searchQuery)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults(data.patients || []);
-      }
+      const term = `%${searchQuery.trim()}%`;
+      const { data } = await supabase
+        .from('patients')
+        .select('id, name, tierart, rasse, owner_name')
+        .or(`name.ilike.${term},owner_name.ilike.${term}`)
+        .limit(20);
+      setSearchResults((data || []) as PatientSearchResult[]);
     } catch { /* ignore */ } finally { setSearching(false); }
   };
 
@@ -64,10 +65,9 @@ export default function NewStationPatientPage() {
       ...EMPTY_FORM,
       patient_id: p.id,
       patient_name: p.name || '',
-      species: p.species || 'Hund',
-      breed: p.breed || '',
+      species: p.tierart || 'Hund',
+      breed: p.rasse || '',
       owner_name: p.owner_name || '',
-      chip_number: p.chip_number || '',
     });
     setMode('manual');
   };
@@ -159,7 +159,7 @@ export default function NewStationPatientPage() {
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
                     <div style={{ fontWeight: 600 }}>{p.name}</div>
-                    <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>{[p.species, p.breed, p.owner_name].filter(Boolean).join(' · ')}</div>
+                    <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>{[p.tierart, p.rasse, p.owner_name].filter(Boolean).join(' · ')}</div>
                   </div>
                 ))}
               </div>
