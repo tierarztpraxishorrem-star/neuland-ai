@@ -55,6 +55,11 @@ const formatPatientLabel = (patient: Patient | null | undefined) => {
   return ext ? `${patient.name} (#${ext})` : patient.name;
 };
 
+const SUPERADMIN_EMAILS = [
+  'info@tierarztpraxis-horrem.de',
+  's.sarter@tierarztpraxis-horrem.de',
+];
+
 const categoryLabels: Record<string, string> = {
   clinical: 'Klinisch',
   communication: 'Kommunikation',
@@ -242,9 +247,11 @@ export default function ResultPage() {
   const [transcript, setTranscript] = useState('');
   const [result, setResult] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [allTemplates, setAllTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [templateStructure, setTemplateStructure] = useState<Template['structure']>(null);
   const [loading, setLoading] = useState(false);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -1039,6 +1046,13 @@ export default function ResultPage() {
   }, [autosavePrefix, caseId, caseTitle, totalDurationSeconds, sessionCreatedAt, recordingAudioUrl]);
 
   useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const email = (data.user?.email || '').toLowerCase();
+      setIsSuperadmin(SUPERADMIN_EMAILS.includes(email));
+    });
+  }, []);
+
+  useEffect(() => {
     const loadTemplates = async () => {
       const enteredClinical = previousCategoryRef.current !== category && category === 'clinical';
 
@@ -1062,6 +1076,15 @@ export default function ResultPage() {
 
       const loaded = (data || []) as Template[];
       setTemplates(loaded);
+
+      // Superadmins: load ALL templates across categories
+      if (isSuperadmin) {
+        const { data: allData } = await supabase
+          .from('templates')
+          .select('*')
+          .order('created_at', { ascending: true });
+        setAllTemplates((allData || []) as Template[]);
+      }
 
       const clinicalDefault = loaded.find((t) => t.name.toLowerCase().includes('allgemeine untersuchung'));
 
@@ -1087,7 +1110,7 @@ export default function ResultPage() {
     };
 
     loadTemplates();
-  }, [category, selectedTemplate]);
+  }, [category, selectedTemplate, isSuperadmin]);
 
   useEffect(() => {
     localStorage.setItem(`${autosavePrefix}transcript`, transcript || '');
@@ -1892,12 +1915,23 @@ export default function ResultPage() {
             setTemplateStructure(selected?.structure || null);
           }}
         >
-          <option value=''>Vorlage wählen</option>
+          <option value=''>Vorlage waehlen</option>
           {templates.map((t) => (
             <option key={t.id} value={t.content}>
               {t.name}
             </option>
           ))}
+          {isSuperadmin && allTemplates.filter((t) => !templates.some((ct) => ct.id === t.id)).length > 0 && (
+            <optgroup label="── Alle Vorlagen ──">
+              {allTemplates
+                .filter((t) => !templates.some((ct) => ct.id === t.id))
+                .map((t) => (
+                  <option key={`all-${t.id}`} value={t.content}>
+                    [{categoryLabels[t.category] || t.category}] {t.name}
+                  </option>
+                ))}
+            </optgroup>
+          )}
         </SelectInput>
       </div>
 
