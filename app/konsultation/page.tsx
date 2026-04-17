@@ -562,15 +562,17 @@ const submitRecording = async () => {
     const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4 MB
 
     if (audioBlob.size > DIRECT_UPLOAD_LIMIT) {
-      // Large file: upload to Supabase Storage first, send URL
+      // Large file: upload to Supabase Storage first, send signed URL
       const path = `recordings/direct/aufnahme-${Date.now()}.webm`;
       const uploadRes = await supabase.storage
         .from('recordings')
         .upload(path, audioBlob, { contentType: 'audio/webm', upsert: true });
       if (uploadRes.error) throw new Error(`Storage-Upload fehlgeschlagen: ${uploadRes.error.message}`);
-      const publicUrl = supabase.storage.from('recordings').getPublicUrl(path)?.data?.publicUrl;
-      if (!publicUrl) throw new Error('Keine öffentliche URL vom Storage erhalten');
-      formData.append('audio_url', publicUrl);
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('recordings')
+        .createSignedUrl(path, 600); // 10 min TTL
+      if (signedError || !signedData?.signedUrl) throw new Error('Keine signierte URL vom Storage erhalten');
+      formData.append('audio_url', signedData.signedUrl);
     } else {
       formData.append("file", audioBlob, "aufnahme.webm");
     }

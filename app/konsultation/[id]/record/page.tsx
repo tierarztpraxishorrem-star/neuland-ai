@@ -477,7 +477,7 @@ export default function RecordPage() {
     formData.append('mode', 'live');
 
     if (segment.blob.size > DIRECT_UPLOAD_LIMIT) {
-      // Large file: upload to Supabase Storage first, then send URL to API
+      // Large file: upload to Supabase Storage first, then send signed URL to API
       const ext = segment.source === 'upload' ? 'upload' : 'webm';
       const path = `recordings/${caseId}/transcribe-${segment.id}.${ext}`;
       const uploadRes = await supabase.storage
@@ -491,13 +491,15 @@ export default function RecordPage() {
         throw new Error(`Storage-Upload fehlgeschlagen: ${uploadRes.error.message}`);
       }
 
-      const publicRes = supabase.storage.from('recordings').getPublicUrl(path);
-      const publicUrl = publicRes?.data?.publicUrl;
-      if (!publicUrl) {
-        throw new Error('Keine öffentliche URL vom Storage erhalten');
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('recordings')
+        .createSignedUrl(path, 600); // 10 min TTL
+
+      if (signedError || !signedData?.signedUrl) {
+        throw new Error('Keine signierte URL vom Storage erhalten');
       }
 
-      formData.append('audio_url', publicUrl);
+      formData.append('audio_url', signedData.signedUrl);
     } else {
       // Small file: send directly in request body
       const extension = segment.source === 'upload' ? 'upload' : 'webm';

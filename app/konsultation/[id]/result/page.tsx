@@ -1019,8 +1019,20 @@ export default function ResultPage() {
         const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4 MB
 
         if (blob.size > DIRECT_UPLOAD_LIMIT && storagePublicUrl) {
-          // Large file already in Storage – send URL instead of body
-          formData.append('audio_url', storagePublicUrl);
+          // Large file already in Storage – create signed URL for AssemblyAI
+          const storagePath = storagePublicUrl.split('/object/public/recordings/')[1];
+          if (storagePath) {
+            const { data: signedData } = await supabase.storage
+              .from('recordings')
+              .createSignedUrl(storagePath, 600);
+            if (signedData?.signedUrl) {
+              formData.append('audio_url', signedData.signedUrl);
+            } else {
+              formData.append('file', blob);
+            }
+          } else {
+            formData.append('audio_url', storagePublicUrl);
+          }
         } else {
           formData.append('file', blob);
         }
