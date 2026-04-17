@@ -605,6 +605,15 @@ export default function StationSheetPage() {
             {patient.owner_name && <span>Besitzer: {patient.owner_name}</span>}
           </div>
           {patient.diagnosis && <div style={{ marginTop: '6px', fontSize: '14px', color: uiTokens.textPrimary }}>Diagnose: {patient.diagnosis}</div>}
+          {patient.diet_type && (
+            <div style={{ marginTop: '6px', padding: '8px 12px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '16px' }}>🍽️</span>
+              <div>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#92400e' }}>Diät: {patient.diet_type}</span>
+                {patient.diet_notes && <span style={{ fontSize: '12px', color: '#a16207', marginLeft: '8px' }}>{patient.diet_notes}</span>}
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '8px' }}>
             {patient.cave && <span style={{ background: '#fef2f2', color: '#dc2626', fontSize: '12px', fontWeight: 700, padding: '3px 10px', borderRadius: '6px' }}>CAVE: {patient.cave_details || 'Ja'}</span>}
             {patient.has_collar && <span style={{ background: '#f0fdf4', color: '#16a34a', fontSize: '12px', padding: '3px 10px', borderRadius: '6px' }}>Halskragen</span>}

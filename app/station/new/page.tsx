@@ -56,6 +56,23 @@ export default function NewStationPatientPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState<'choose' | 'search' | 'manual' | 'voice'>('choose');
+
+  // Prefill von /patienten/[id] — ?prefill=1&patient_id=...&name=...&species=...
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('prefill') !== '1') return;
+    setForm(prev => ({
+      ...prev,
+      patient_id: params.get('patient_id') || '',
+      patient_name: params.get('name') || '',
+      species: params.get('species') || 'Hund',
+      breed: params.get('breed') || '',
+      owner_name: params.get('owner') || '',
+      gender: params.get('gender') || '',
+    }));
+    setMode('manual');
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PatientSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -68,6 +85,7 @@ export default function NewStationPatientPage() {
   const [lastParsedFields, setLastParsedFields] = useState<string[]>([]);
   const [voiceMeds, setVoiceMeds] = useState<Array<{ name: string; dose: string; route: string | null; frequency_label: string | null; scheduled_hours: number[]; is_prn: boolean; is_dti: boolean; dti_rate_ml_h: number | null }>>([]);
   const recognitionRef = useRef<any>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const parseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -191,11 +209,12 @@ export default function NewStationPatientPage() {
     };
   }, []);
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const handleSearch = async (q?: string) => {
+    const query = (q ?? searchQuery).trim();
+    if (!query) return;
     setSearching(true);
     try {
-      const res = await fetchWithAuth(`/api/station/search-patients?q=${encodeURIComponent(searchQuery.trim())}`);
+      const res = await fetchWithAuth(`/api/station/search-patients?q=${encodeURIComponent(query)}`);
       const data = await res.json();
       if (res.ok && data.patients) {
         setSearchResults(data.patients as PatientSearchResult[]);
@@ -440,17 +459,25 @@ export default function NewStationPatientPage() {
 
         {mode === 'search' && (
           <Card style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ marginBottom: '16px' }}>
               <Input
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Patientenname oder Nummer..."
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  // Live-Suche: automatisch suchen ab 1 Zeichen (300ms Debounce)
+                  const q = e.target.value.trim();
+                  if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                  if (q.length >= 1) {
+                    searchDebounceRef.current = setTimeout(() => handleSearch(q), 300);
+                  } else {
+                    setSearchResults([]);
+                  }
+                }}
+                placeholder="Patientenname eingeben — Ergebnisse erscheinen sofort..."
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
                 fullWidth
+                autoFocus
               />
-              <Button variant="primary" onClick={handleSearch} disabled={searching}>
-                {searching ? '...' : 'Suchen'}
-              </Button>
             </div>
             {searchResults.length > 0 && (
               <div style={{ display: 'grid', gap: '8px' }}>

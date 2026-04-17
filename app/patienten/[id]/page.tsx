@@ -902,6 +902,20 @@ export default function PatientDetailPage() {
                 + Konsultation starten
               </Button>
 
+              <Button variant='secondary' onClick={() => {
+                const params = new URLSearchParams({
+                  patient_id: patientId,
+                  name: patient?.name || '',
+                  species: patient?.tierart || '',
+                  breed: patient?.rasse || '',
+                  owner: patient?.owner_name || '',
+                  gender: patient?.geschlecht || '',
+                });
+                router.push(`/station/new?prefill=1&${params.toString()}`);
+              }} style={{ width: '100%' }}>
+                🏥 Stationär aufnehmen
+              </Button>
+
               <Button variant='secondary' onClick={openInVetMindWithContext} style={{ width: '100%' }}>
                 🧠 VetMind öffnen
               </Button>
