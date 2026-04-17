@@ -118,6 +118,7 @@ export default function StationSheetPage() {
   const router = useRouter();
   const patientId = params.id as string;
 
+  const [userRole, setUserRole] = useState<string>('member');
   const [patient, setPatient] = useState<Patient | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [administrations, setAdministrations] = useState<Administration[]>([]);
@@ -161,6 +162,18 @@ export default function StationSheetPage() {
 
   // Admin info popup
   const [adminInfo, setAdminInfo] = useState<Administration | null>(null);
+
+  // Load user role once
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('practice_memberships').select('role').eq('user_id', user.id).limit(1).single();
+      if (data?.role) setUserRole(data.role);
+    })();
+  }, []);
+
+  const isAdmin = userRole === 'admin' || userRole === 'owner';
 
   const loadData = useCallback(async () => {
     try {
@@ -501,16 +514,19 @@ export default function StationSheetPage() {
                       Korrigiert / bestätigt
                     </button>
                   )}
-                  <button
-                    onClick={() => {
-                      const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
-                      setRuleModal({ medication_name: medName, alert_message: a.message });
-                      setRuleText('');
-                    }}
-                    style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: uiTokens.textSecondary, cursor: 'pointer' }}
-                  >
-                    Für uns OK – Regel anlegen
-                  </button>
+                  {(a.severity !== 'critical' || isAdmin) && (
+                    <button
+                      onClick={() => {
+                        if (a.severity === 'critical' && !confirm('ACHTUNG: Diese Warnung betrifft eine potenziell gefährliche Situation. Nur als Admin-Regel anlegen, wenn Sie sich absolut sicher sind.')) return;
+                        const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
+                        setRuleModal({ medication_name: medName, alert_message: a.message });
+                        setRuleText('');
+                      }}
+                      style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: a.severity === 'critical' ? '#dc2626' : uiTokens.textSecondary, cursor: 'pointer' }}
+                    >
+                      {a.severity === 'critical' ? 'Admin: Regel anlegen' : 'Für uns OK – Regel anlegen'}
+                    </button>
+                  )}
                 </div>
               </Card>
             ))}
