@@ -49,6 +49,8 @@ type Medication = {
   dti_rate_ml_h: number | null;
   notes: string | null;
   sort_order: number;
+  is_active: boolean;
+  valid_to: string | null;
 };
 
 type Administration = {
@@ -556,7 +558,7 @@ export default function StationSheetPage() {
                 </tr>
               </thead>
               <tbody>
-                {medications.map((med) => (
+                {medications.filter(m => m.is_active).map((med) => (
                   <tr key={med.id} style={{ borderTop: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '10px 6px', fontWeight: 600, color: uiTokens.textPrimary }}>{med.name}</td>
                     <td style={{ padding: '10px 6px', color: uiTokens.textSecondary, fontSize: '12px' }}>{med.dose}</td>
@@ -622,8 +624,56 @@ export default function StationSheetPage() {
                     )}
                   </tr>
                 ))}
+                {/* Inactive / changed / deleted medications - strikethrough */}
+                {medications.filter(m => !m.is_active).length > 0 && (
+                  <tr><td colSpan={HOURS.length + 3} style={{ padding: '8px 6px', fontSize: '11px', color: uiTokens.textMuted, borderTop: '2px dashed #e5e7eb', letterSpacing: '0.5px' }}>GEÄNDERT / ABGESETZT</td></tr>
+                )}
+                {medications.filter(m => !m.is_active).map((med) => (
+                  <tr key={med.id} style={{ borderTop: '1px solid #f1f5f9', opacity: 0.5 }}>
+                    <td style={{ padding: '10px 6px', fontWeight: 600, color: uiTokens.textMuted, textDecoration: 'line-through' }}>{med.name}</td>
+                    <td style={{ padding: '10px 6px', color: uiTokens.textMuted, fontSize: '12px', textDecoration: 'line-through' }}>{med.dose}</td>
+                    <td style={{ padding: '4px 2px', fontSize: '10px', color: uiTokens.textMuted }}>
+                      {med.valid_to ? `bis ${new Date(med.valid_to).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : 'abgesetzt'}
+                    </td>
+                    {med.is_dti ? (
+                      <td colSpan={HOURS.length} style={{ padding: '10px 6px', textAlign: 'center' }}>
+                        <span style={{ color: uiTokens.textMuted, fontSize: '12px', textDecoration: 'line-through' }}>
+                          DTI {med.dti_rate_ml_h} ml/h
+                        </span>
+                      </td>
+                    ) : (
+                      HOURS.map(h => {
+                        const isScheduled = (med.scheduled_hours || []).includes(h);
+                        const admin = administrations.find(a => a.medication_id === med.id && a.scheduled_hour === h);
+                        return (
+                          <td key={h} style={{ textAlign: 'center', padding: '4px 1px' }}>
+                            {admin ? (
+                              <button
+                                onClick={() => setAdminInfo(admin)}
+                                style={{
+                                  width: '28px', height: '28px', borderRadius: '50%',
+                                  background: '#94a3b8', border: 'none', cursor: 'pointer',
+                                  color: '#fff', fontSize: '9px', fontWeight: 700,
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  opacity: 0.6,
+                                }}
+                                title={`${admin.administered_by} – ${new Date(admin.administered_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`}
+                              >
+                                {admin.administered_by}
+                              </button>
+                            ) : isScheduled ? (
+                              <span style={{ color: '#d1d5db', fontSize: '10px', textDecoration: 'line-through' }}>○</span>
+                            ) : (
+                              <span style={{ color: '#e5e7eb', fontSize: '10px' }}>–</span>
+                            )}
+                          </td>
+                        );
+                      })
+                    )}
+                  </tr>
+                ))}
                 {medications.length === 0 && (
-                  <tr><td colSpan={HOURS.length + 2} style={{ textAlign: 'center', padding: '24px', color: uiTokens.textMuted }}>Keine Medikamente angelegt</td></tr>
+                  <tr><td colSpan={HOURS.length + 3} style={{ textAlign: 'center', padding: '24px', color: uiTokens.textMuted }}>Keine Medikamente angelegt</td></tr>
                 )}
               </tbody>
             </table>

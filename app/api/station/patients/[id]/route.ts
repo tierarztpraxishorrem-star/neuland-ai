@@ -36,7 +36,7 @@ export async function GET(req: Request, ctx: RouteContext) {
         .from('station_medications')
         .select('*')
         .eq('station_patient_id', id)
-        .eq('is_active', true)
+        .order('is_active', { ascending: false })
         .order('sort_order', { ascending: true }),
       supabase
         .from('station_vitals')
