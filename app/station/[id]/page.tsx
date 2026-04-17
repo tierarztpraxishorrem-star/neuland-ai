@@ -214,7 +214,28 @@ export default function StationSheetPage() {
     } catch { showToast({ message: 'Fehler beim Laden.', type: 'error' }); } finally { setLoading(false); }
   }, [patientId, router]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // Zusätzliche Daten laden (neue Features)
+  const loadExtras = useCallback(async () => {
+    // Vital schedules
+    fetchWithAuth(`/api/station/patients/${patientId}/vital-schedule`)
+      .then((r) => r.json())
+      .then((d) => { if (d.schedules) setVitalSchedules(d.schedules); })
+      .catch(() => {});
+    // Daily tasks
+    setDailyTasksLoading(true);
+    fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks`)
+      .then((r) => r.json())
+      .then((d) => { if (d.tasks) setDailyTasks(d.tasks); })
+      .catch(() => {})
+      .finally(() => setDailyTasksLoading(false));
+    // Handoffs
+    fetchWithAuth(`/api/station/patients/${patientId}/handoff`)
+      .then((r) => r.json())
+      .then((d) => { if (d.handoffs) setHandoffs(d.handoffs); })
+      .catch(() => {});
+  }, [patientId]);
+
+  useEffect(() => { loadData(); loadExtras(); }, [loadData, loadExtras]);
 
   // Realtime
   useEffect(() => {
@@ -434,6 +455,100 @@ export default function StationSheetPage() {
       const res = await fetchWithAuth(`/api/station/patients/${patientId}`, { method: 'DELETE' });
       if (res.ok) { showToast({ message: 'Patient entlassen.', type: 'success' }); router.push('/station'); }
     } catch { showToast({ message: 'Fehler.', type: 'error' }); }
+  };
+
+  const handleDischargePdf = async () => {
+    try {
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}/discharge-summary`);
+      if (!res.ok) { showToast({ message: 'PDF-Fehler.', type: 'error' }); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `entlassungsbericht_${patient?.patient_name || 'patient'}.pdf`; a.click(); URL.revokeObjectURL(url);
+    } catch { showToast({ message: 'PDF-Fehler.', type: 'error' }); }
+  };
+
+  // Daily task handlers
+  const handleCheckTask = async (taskId: string, initials?: string, notes?: string) => {
+    try {
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId, checked_by: initials || null, notes: notes || null }),
+      });
+      if (res.ok) loadExtras();
+    } catch { /* ignore */ }
+  };
+
+  const handleUncheckTask = async (checkId: string) => {
+    try {
+      await fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks?check_id=${checkId}`, { method: 'DELETE' });
+      loadExtras();
+    } catch { /* ignore */ }
+  };
+
+  const handleAddTask = async () => {
+    if (!newTaskLabel.trim()) return;
+    try {
+      await fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: newTaskLabel.trim() }),
+      });
+      setNewTaskLabel('');
+      loadExtras();
+    } catch { /* ignore */ }
+  };
+
+  // Vital schedule handler
+  const handleSetVitalSchedule = async (paramKey: string, hours: number[]) => {
+    try {
+      await fetchWithAuth(`/api/station/patients/${patientId}/vital-schedule`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ param_key: paramKey, scheduled_hours: hours, is_highlighted: hours.length > 0 }),
+      });
+      loadExtras();
+    } catch { /* ignore */ }
+  };
+
+  // Handoff voice handler
+  const startHandoffRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
+      handoffChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) handoffChunksRef.current.push(e.data); };
+      recorder.onstop = () => { stream.getTracks().forEach((t) => t.stop()); };
+      handoffRecorderRef.current = recorder;
+      recorder.start(1000);
+      setHandoffRecording(true);
+    } catch {
+      showToast({ message: 'Mikrofon-Zugriff fehlgeschlagen.', type: 'error' });
+    }
+  };
+
+  const stopHandoffRecording = async () => {
+    const recorder = handoffRecorderRef.current;
+    if (!recorder || recorder.state !== 'recording') { setHandoffRecording(false); return; }
+    setHandoffRecording(false);
+    setHandoffTranscribing(true);
+    await new Promise<void>((resolve) => {
+      recorder.onstop = () => { recorder.stream?.getTracks().forEach((t) => t.stop()); resolve(); };
+      recorder.stop();
+    });
+    const blob = new Blob(handoffChunksRef.current, { type: 'audio/webm' });
+    if (blob.size < 1000) { setHandoffTranscribing(false); showToast({ message: 'Aufnahme zu kurz.', type: 'error' }); return; }
+    try {
+      const form = new FormData();
+      form.append('audio', blob, 'handoff.webm');
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}/handoff`, { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Fehler');
+      showToast({ message: 'Übergabe-Notiz gespeichert.', type: 'success' });
+      loadExtras();
+    } catch (err) {
+      showToast({ message: err instanceof Error ? err.message : 'Fehler.', type: 'error' });
+    } finally {
+      setHandoffTranscribing(false);
+    }
   };
 
   if (loading) return <main style={{ minHeight: '100vh', background: uiTokens.pageBackground, padding: uiTokens.pagePadding }}><Card><p style={{ textAlign: 'center', padding: '40px', color: uiTokens.textSecondary }}>Lade Stationsblatt...</p></Card></main>;
@@ -751,16 +866,83 @@ export default function StationSheetPage() {
                   { label: 'AF', key: 'resp_rate' },
                   { label: 'Temp', key: 'temperature_c' },
                   { label: 'Schmerz', key: 'pain_score' },
-                ].map(row => (
-                  <tr key={row.key} style={{ borderTop: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '8px 6px', fontWeight: 600, color: uiTokens.textPrimary, fontSize: '12px' }}>{row.label}</td>
-                    {HOURS.map(h => {
-                      const v = vitals.find(vt => vt.measured_hour === h);
-                      const val = v ? (v as Record<string, unknown>)[row.key] : null;
-                      return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', color: val != null ? uiTokens.textPrimary : '#e5e7eb', fontSize: '12px' }}>{val != null ? String(val) : '–'}</td>;
-                    })}
-                  </tr>
-                ))}
+                ].map(row => {
+                  const schedule = vitalSchedules.find(s => s.param_key === row.key);
+                  const scheduledHours = schedule?.scheduled_hours || [];
+                  const isHighlighted = schedule?.is_highlighted || false;
+                  return (
+                    <tr key={row.key} style={{
+                      borderTop: '1px solid #f1f5f9',
+                      background: isHighlighted ? '#f0fdf4' : 'transparent',
+                    }}>
+                      <td
+                        style={{
+                          padding: '8px 6px', fontWeight: 600, fontSize: '12px', cursor: 'pointer',
+                          color: isHighlighted ? '#0f6b74' : uiTokens.textPrimary,
+                        }}
+                        onClick={() => {
+                          if (scheduleEditing === row.key) {
+                            setScheduleEditing(null);
+                          } else {
+                            setScheduleEditing(row.key);
+                            setScheduleHoursInput(scheduledHours.join(','));
+                          }
+                        }}
+                        title="Klicken um Mess-Zeiten zu setzen"
+                      >
+                        {row.label}
+                        {scheduledHours.length > 0 && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#0f6b74' }}>⏰</span>}
+                        {scheduleEditing === row.key && (
+                          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: '4px' }}>
+                            <input
+                              value={scheduleHoursInput}
+                              onChange={(e) => setScheduleHoursInput(e.target.value)}
+                              placeholder="z.B. 8,12,16,20"
+                              style={{ width: '90px', padding: '3px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const hours = scheduleHoursInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23);
+                                  handleSetVitalSchedule(row.key, hours);
+                                  setScheduleEditing(null);
+                                }
+                              }}
+                            />
+                            <div style={{ fontSize: '9px', color: uiTokens.textMuted, marginTop: '2px' }}>Enter = speichern</div>
+                          </div>
+                        )}
+                      </td>
+                      {HOURS.map(h => {
+                        const v = vitals.find(vt => vt.measured_hour === h);
+                        const val = v ? (v as Record<string, unknown>)[row.key] : null;
+                        const isScheduled = scheduledHours.includes(h);
+                        const isOverdue = isScheduled && val == null && h < currentHour;
+                        return (
+                          <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '12px' }}>
+                            {val != null ? (
+                              <span style={{
+                                color: uiTokens.textPrimary,
+                                background: isScheduled ? '#dcfce7' : 'transparent',
+                                borderRadius: '50%',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '26px', height: '26px', fontWeight: isScheduled ? 700 : 400,
+                              }}>{String(val)}</span>
+                            ) : isScheduled ? (
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '22px', height: '22px', borderRadius: '50%',
+                                border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`,
+                                background: isOverdue ? '#fef2f2' : 'transparent',
+                                fontSize: '9px', color: isOverdue ? '#ef4444' : '#0f6b74',
+                              }}>{isOverdue ? '!' : ''}</span>
+                            ) : (
+                              <span style={{ color: '#e5e7eb' }}>–</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
                 {/* Feces row */}
                 <tr style={{ borderTop: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '8px 6px', fontWeight: 600, color: uiTokens.textPrimary, fontSize: '12px' }}>Kot</td>
@@ -830,6 +1012,111 @@ export default function StationSheetPage() {
             </table>
           </div>
         </Section>
+
+        {/* ═══ Tägliche Checkliste ═══ */}
+        <Section title="Tägliche Routine" actions={
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <input
+              value={newTaskLabel}
+              onChange={(e) => setNewTaskLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddTask(); }}
+              placeholder="+ Eigene Aufgabe"
+              style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px', width: '160px' }}
+            />
+            {newTaskLabel && <Button variant="primary" size="sm" onClick={handleAddTask}>+</Button>}
+          </div>
+        }>
+          {dailyTasksLoading ? (
+            <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>Laden…</div>
+          ) : dailyTasks.length === 0 ? (
+            <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>Keine Aufgaben definiert.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              {dailyTasks.map((task) => (
+                <div key={task.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '10px 12px', borderRadius: '10px',
+                  background: task.checked ? '#f0fdf4' : '#fffbeb',
+                  border: `1px solid ${task.checked ? '#bbf7d0' : '#fde68a'}`,
+                  transition: 'all 0.15s',
+                }}>
+                  <button
+                    onClick={() => {
+                      if (task.checked && task.check_id) {
+                        handleUncheckTask(task.check_id);
+                      } else {
+                        const initials = prompt('Kürzel (2-4 Buchstaben):');
+                        if (initials) handleCheckTask(task.id, initials);
+                      }
+                    }}
+                    style={{
+                      width: '24px', height: '24px', borderRadius: '6px', flexShrink: 0,
+                      border: `2px solid ${task.checked ? '#22c55e' : '#d97706'}`,
+                      background: task.checked ? '#22c55e' : 'transparent',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#fff', fontSize: '14px', fontWeight: 700,
+                    }}
+                  >
+                    {task.checked ? '✓' : ''}
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: task.checked ? '#166534' : uiTokens.textPrimary, textDecoration: task.checked ? 'line-through' : 'none' }}>
+                      {task.label}
+                    </div>
+                    {task.checked && task.checked_by && (
+                      <div style={{ fontSize: '11px', color: uiTokens.textMuted }}>
+                        {task.checked_by} · {new Date(task.checked_at!).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                        {task.notes && ` · ${task.notes}`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        {/* ═══ Schichtübergabe ═══ */}
+        <Section title="Übergabe" actions={
+          <button
+            onClick={handoffRecording ? stopHandoffRecording : startHandoffRecording}
+            disabled={handoffTranscribing}
+            style={{
+              padding: '6px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: 600,
+              background: handoffRecording ? '#ef4444' : handoffTranscribing ? '#eab308' : uiTokens.brand,
+              color: '#fff', border: 'none', cursor: handoffTranscribing ? 'wait' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: '6px',
+            }}
+          >
+            {handoffTranscribing ? '⏳ Transkribiert...' : handoffRecording ? '⏹ Stopp' : '🎤 Übergabe aufnehmen'}
+          </button>
+        }>
+          {handoffs.length === 0 ? (
+            <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>Noch keine Übergabe-Notizen. Mikrofon drücken, Übergabe sprechen, fertig.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {handoffs.map((h) => (
+                <div key={h.id} style={{ padding: '12px', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                  <div style={{ fontSize: '11px', color: uiTokens.textMuted, marginBottom: '4px' }}>
+                    {new Date(h.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {h.recorded_by && ` · ${h.recorded_by}`}
+                    {h.shift_label && ` · ${h.shift_label}`}
+                  </div>
+                  <div style={{ fontSize: '13px', color: uiTokens.textPrimary, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{h.transcript}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        {/* ═══ Entlassungsbericht ═══ */}
+        {patient?.status === 'discharged' && (
+          <Card style={{ padding: '16px', textAlign: 'center' }}>
+            <Button variant="primary" onClick={handleDischargePdf} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              📄 Entlassungsbericht herunterladen
+            </Button>
+          </Card>
+        )}
       </div>
 
       {/* MODALS */}
