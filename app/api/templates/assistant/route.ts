@@ -10,7 +10,10 @@ const getOpenAI = () => {
 };
 
 type Scope = 'private' | 'practice';
-const SUPERADMIN_EMAIL = 'info@tierarztpraxis-horrem.de';
+const SUPERADMIN_EMAILS = [
+  'info@tierarztpraxis-horrem.de',
+  's.sarter@tierarztpraxis-horrem.de',
+];
 
 type CreatePayload = {
   action: 'create';
@@ -134,7 +137,7 @@ export async function POST(req: Request) {
     }
 
     const payload = (await req.json()) as Payload;
-    const isSuperadmin = (user.email || '').toLowerCase() === SUPERADMIN_EMAIL;
+    const isSuperadmin = SUPERADMIN_EMAILS.includes((user.email || '').toLowerCase());
 
     if (payload.action === 'create') {
       const name = payload.name?.trim();

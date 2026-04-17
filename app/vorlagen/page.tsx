@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { uiTokens } from '../../components/ui/System';
 
-const SUPERADMIN_EMAIL = 'info@tierarztpraxis-horrem.de';
+const SUPERADMIN_EMAILS = [
+  'info@tierarztpraxis-horrem.de',
+  's.sarter@tierarztpraxis-horrem.de',
+];
 
 export default function VorlagenPage() {
   const [templates, setTemplates] = useState<any[]>([]);
@@ -44,7 +47,7 @@ export default function VorlagenPage() {
     const [editContent, setEditContent] = useState('');
     const [editUntersuchung, setEditUntersuchung] = useState('');
 
-    const isSuperadmin = userEmail.toLowerCase() === SUPERADMIN_EMAIL;
+    const isSuperadmin = SUPERADMIN_EMAILS.includes(userEmail.toLowerCase());
 
     const loadTemplates = async () => {
       await supabase.from('templates').update({ category: 'internal' }).eq('category', 'admin');
