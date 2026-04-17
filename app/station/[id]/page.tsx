@@ -130,6 +130,11 @@ export default function StationSheetPage() {
   const [editMedForm, setEditMedForm] = useState({ name: '', dose: '', route: '', frequency_label: '', scheduled_hours: '', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
   const [editMedSubmitting, setEditMedSubmitting] = useState(false);
 
+  // AI rule feedback modal
+  const [ruleModal, setRuleModal] = useState<{ medication_name: string; alert_message: string } | null>(null);
+  const [ruleText, setRuleText] = useState('');
+  const [ruleSubmitting, setRuleSubmitting] = useState(false);
+
   // Admin info popup
   const [adminInfo, setAdminInfo] = useState<Administration | null>(null);
 
@@ -287,6 +292,22 @@ export default function StationSheetPage() {
     } catch { showToast({ message: 'KI-Prüfung fehlgeschlagen.', type: 'error' }); } finally { setAiChecking(false); }
   };
 
+  const handleSaveRule = async () => {
+    if (!ruleModal || !ruleText.trim()) return;
+    setRuleSubmitting(true);
+    try {
+      const res = await fetchWithAuth('/api/station/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ medication_name: ruleModal.medication_name, rule_text: ruleText.trim() }),
+      });
+      if (!res.ok) { showToast({ message: 'Fehler beim Speichern.', type: 'error' }); return; }
+      showToast({ message: 'Regel gespeichert! Wird bei zukünftigen Prüfungen berücksichtigt.', type: 'success' });
+      setRuleModal(null);
+      setRuleText('');
+    } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setRuleSubmitting(false); }
+  };
+
   const handlePdf = async () => {
     try {
       const res = await fetchWithAuth(`/api/station/patients/${patientId}/pdf`);
@@ -395,6 +416,16 @@ export default function StationSheetPage() {
                   <span style={{ fontWeight: 600, fontSize: '14px' }}>{a.message}</span>
                 </div>
                 {a.details && <div style={{ fontSize: '13px', color: uiTokens.textSecondary, marginLeft: '24px' }}>{a.details}</div>}
+                <button
+                  onClick={() => {
+                    const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
+                    setRuleModal({ medication_name: medName, alert_message: a.message });
+                    setRuleText('');
+                  }}
+                  style={{ marginLeft: '24px', marginTop: '6px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: uiTokens.textSecondary, cursor: 'pointer' }}
+                >
+                  Für uns OK – Regel anlegen
+                </button>
               </Card>
             ))}
           </div>
@@ -747,6 +778,40 @@ export default function StationSheetPage() {
               <Input label="Notizen" value={editMedForm.notes} onChange={(e) => setEditMedForm({ ...editMedForm, notes: e.target.value })} />
               <Button variant="primary" onClick={handleEditMed} disabled={editMedSubmitting || !editMedForm.name.trim() || !editMedForm.dose.trim()} style={{ minHeight: '44px' }}>
                 {editMedSubmitting ? 'Speichern...' : 'Änderungen speichern'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* AI rule feedback modal */}
+      {ruleModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }} onClick={() => setRuleModal(null)}>
+          <Card style={{ maxWidth: '480px', width: '100%', padding: '24px' }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Praxis-Regel anlegen</h3>
+              <button onClick={() => setRuleModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <div style={{ background: '#fefce8', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '13px', color: '#854d0e' }}>
+              <strong>KI-Warnung:</strong> {ruleModal.alert_message}
+            </div>
+            <p style={{ fontSize: '13px', color: uiTokens.textSecondary, marginBottom: '12px' }}>
+              Beschreibe, warum das in eurer Praxis OK ist. Diese Regel wird bei allen zukünftigen KI-Prüfungen berücksichtigt.
+            </p>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <Input label="Medikament" value={ruleModal.medication_name} disabled />
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Eure Regel / Begründung *</label>
+                <textarea
+                  value={ruleText}
+                  onChange={(e) => setRuleText(e.target.value)}
+                  placeholder="z.B. Metamizol 50mg/kg ist bei uns bei starken Schmerzen Standard, wird gut vertragen."
+                  rows={3}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px', resize: 'vertical', boxSizing: 'border-box' }}
+                />
+              </div>
+              <Button variant="primary" onClick={handleSaveRule} disabled={ruleSubmitting || !ruleText.trim()} style={{ minHeight: '44px' }}>
+                {ruleSubmitting ? 'Speichern...' : 'Regel speichern'}
               </Button>
             </div>
           </Card>

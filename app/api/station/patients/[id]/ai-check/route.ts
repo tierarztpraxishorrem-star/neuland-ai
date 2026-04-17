@@ -44,7 +44,24 @@ export async function POST(req: Request, ctx: RouteContext) {
       return NextResponse.json({ ok: true, alerts: [], message: 'Keine aktiven Medikamente zu prüfen.' });
     }
 
+    // Load practice-specific rules
+    const { data: practiceRules } = await supabase
+      .from('station_ai_rules')
+      .select('medication_name, rule_text')
+      .eq('practice_id', practiceId)
+      .eq('is_active', true);
+
     const openai = new OpenAI();
+
+    let rulesBlock = '';
+    if (practiceRules && practiceRules.length > 0) {
+      rulesBlock = `
+
+PRAXIS-SPEZIFISCHE REGELN (von den Tierärzten dieser Praxis bestätigt – diese Regeln haben Vorrang vor allgemeinen Empfehlungen):
+${practiceRules.map((r) => `- ${r.medication_name}: ${r.rule_text}`).join('\n')}
+
+Wenn ein Medikament durch eine Praxis-Regel abgedeckt ist, gib KEINE Warnung für den abgedeckten Sachverhalt aus.`;
+    }
 
     const systemPrompt = `Du bist ein veterinärmedizinisches KI-Sicherheitssystem für eine Tierarztpraxis.
 Deine Aufgabe ist die Sicherheitsprüfung von Medikamentenplänen. Du MUSST Fehler finden – ein übersehener Fehler kann ein Tier töten.
@@ -77,6 +94,7 @@ Prüfe JEDEN Medikamenteneintrag systematisch auf:
 5. **UNGEWÖHNLICHE KOMBINATIONEN (severity: info oder warning)**
 
 WICHTIG: Im Zweifel IMMER warnen. Ein false-positive ist akzeptabel, ein false-negative ist gefährlich.
+${rulesBlock}
 
 Antworte NUR mit einem JSON-Array. Kein Text davor oder danach.
 Format: [{ "alert_type": "dose_too_high|dose_too_low|interaction|allergy|missing_info|unusual_combination", "severity": "info|warning|critical", "message": "Kurze deutsche Warnung", "details": "Ausführliche Erklärung auf Deutsch mit empfohlener Dosis", "medication_name": "Name des betreffenden Medikaments" }]
