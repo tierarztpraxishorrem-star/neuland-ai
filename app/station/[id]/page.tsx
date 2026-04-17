@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { uiTokens, Card, Button, Input, Section } from '../../../components/ui/System';
 import { showToast } from '../../../lib/toast';
-import { ArrowLeft, FileDown, ShieldCheck, Plus, X, AlertTriangle, CheckCircle, Info } from 'lucide-react';
+import { ArrowLeft, FileDown, ShieldCheck, Plus, X, AlertTriangle, CheckCircle, Info, Pencil, Trash2 } from 'lucide-react';
 
 type Patient = {
   id: string;
@@ -125,6 +125,11 @@ export default function StationSheetPage() {
   const [vitalsForm, setVitalsForm] = useState({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', recorded_by: '', notes: '' });
   const [vitalsSubmitting, setVitalsSubmitting] = useState(false);
 
+  // Edit medication modal
+  const [editMed, setEditMed] = useState<Medication | null>(null);
+  const [editMedForm, setEditMedForm] = useState({ name: '', dose: '', route: '', frequency_label: '', scheduled_hours: '', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
+  const [editMedSubmitting, setEditMedSubmitting] = useState(false);
+
   // Admin info popup
   const [adminInfo, setAdminInfo] = useState<Administration | null>(null);
 
@@ -193,6 +198,56 @@ export default function StationSheetPage() {
       setMedForm({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,13,19', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
       loadData();
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setMedSubmitting(false); }
+  };
+
+  const openEditMed = (med: Medication) => {
+    setEditMed(med);
+    setEditMedForm({
+      name: med.name,
+      dose: med.dose,
+      route: med.route || '',
+      frequency_label: med.frequency_label || '',
+      scheduled_hours: med.scheduled_hours.join(','),
+      is_prn: med.is_prn,
+      is_dti: med.is_dti,
+      dti_rate_ml_h: med.dti_rate_ml_h ? String(med.dti_rate_ml_h) : '',
+      ordered_by: '',
+      notes: med.notes || '',
+    });
+  };
+
+  const handleEditMed = async () => {
+    if (!editMed || !editMedForm.name.trim() || !editMedForm.dose.trim()) return;
+    setEditMedSubmitting(true);
+    try {
+      const scheduled_hours = editMedForm.is_prn || editMedForm.is_dti
+        ? []
+        : editMedForm.scheduled_hours.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h));
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}/medications/${editMed.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...editMedForm,
+          scheduled_hours,
+          dti_rate_ml_h: editMedForm.dti_rate_ml_h ? parseFloat(editMedForm.dti_rate_ml_h) : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast({ message: data.error || 'Fehler', type: 'error' }); return; }
+      showToast({ message: 'Medikament aktualisiert!', type: 'success' });
+      setEditMed(null);
+      loadData();
+    } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setEditMedSubmitting(false); }
+  };
+
+  const handleDeleteMed = async (med: Medication) => {
+    if (!confirm(`${med.name} wirklich deaktivieren?`)) return;
+    try {
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}/medications/${med.id}`, { method: 'DELETE' });
+      if (!res.ok) { showToast({ message: 'Fehler beim Deaktivieren.', type: 'error' }); return; }
+      showToast({ message: `${med.name} deaktiviert.`, type: 'success' });
+      loadData();
+    } catch { showToast({ message: 'Fehler.', type: 'error' }); }
   };
 
   const handleAddVitals = async () => {
@@ -336,6 +391,7 @@ export default function StationSheetPage() {
                 <tr>
                   <th style={{ textAlign: 'left', padding: '8px 6px', color: uiTokens.textMuted, fontSize: '11px', fontWeight: 600, width: '120px' }}>Medikament</th>
                   <th style={{ textAlign: 'left', padding: '8px 6px', color: uiTokens.textMuted, fontSize: '11px', fontWeight: 600, width: '100px' }}>Dosis</th>
+                  <th style={{ width: '52px' }} />
                   {HOURS.map(h => (
                     <th key={h} style={{
                       textAlign: 'center', padding: '4px 1px', color: h === currentHour ? uiTokens.brand : uiTokens.textMuted,
@@ -350,6 +406,12 @@ export default function StationSheetPage() {
                   <tr key={med.id} style={{ borderTop: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '10px 6px', fontWeight: 600, color: uiTokens.textPrimary }}>{med.name}</td>
                     <td style={{ padding: '10px 6px', color: uiTokens.textSecondary, fontSize: '12px' }}>{med.dose}</td>
+                    <td style={{ padding: '4px 2px' }}>
+                      <div style={{ display: 'flex', gap: '2px' }}>
+                        <button onClick={() => openEditMed(med)} title="Bearbeiten" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '4px', color: uiTokens.textMuted }}><Pencil size={14} /></button>
+                        <button onClick={() => handleDeleteMed(med)} title="Deaktivieren" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '4px', color: '#dc2626' }}><Trash2 size={14} /></button>
+                      </div>
+                    </td>
                     {med.is_dti ? (
                       <td colSpan={HOURS.length} style={{ padding: '10px 6px', textAlign: 'center' }}>
                         <span style={{ background: '#eff6ff', color: '#2563eb', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 600 }}>
@@ -602,6 +664,44 @@ export default function StationSheetPage() {
               <Input label="Notizen" value={vitalsForm.notes} onChange={(e) => setVitalsForm({ ...vitalsForm, notes: e.target.value })} />
               <Button variant="primary" onClick={handleAddVitals} disabled={vitalsSubmitting} style={{ minHeight: '44px' }}>
                 {vitalsSubmitting ? 'Speichern...' : 'Messung speichern'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit medication modal */}
+      {editMed && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', overflowY: 'auto' }} onClick={() => setEditMed(null)}>
+          <Card style={{ maxWidth: '480px', width: '100%', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Medikament bearbeiten</h3>
+              <button onClick={() => setEditMed(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <Input label="Name *" value={editMedForm.name} onChange={(e) => setEditMedForm({ ...editMedForm, name: e.target.value })} />
+              <Input label="Dosis *" value={editMedForm.dose} onChange={(e) => setEditMedForm({ ...editMedForm, dose: e.target.value })} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Input label="Applikationsweg" value={editMedForm.route} onChange={(e) => setEditMedForm({ ...editMedForm, route: e.target.value })} />
+                <Input label="Häufigkeit" value={editMedForm.frequency_label} onChange={(e) => setEditMedForm({ ...editMedForm, frequency_label: e.target.value })} />
+              </div>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={editMedForm.is_prn} onChange={(e) => setEditMedForm({ ...editMedForm, is_prn: e.target.checked, is_dti: false })} /> Bei Bedarf (PRN)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={editMedForm.is_dti} onChange={(e) => setEditMedForm({ ...editMedForm, is_dti: e.target.checked, is_prn: false })} /> Dauerinfusion (DTI)
+                </label>
+              </div>
+              {editMedForm.is_dti && (
+                <Input label="DTI Rate (ml/h)" value={editMedForm.dti_rate_ml_h} onChange={(e) => setEditMedForm({ ...editMedForm, dti_rate_ml_h: e.target.value })} type="number" />
+              )}
+              {!editMedForm.is_prn && !editMedForm.is_dti && (
+                <Input label="Uhrzeiten (kommagetrennt)" value={editMedForm.scheduled_hours} onChange={(e) => setEditMedForm({ ...editMedForm, scheduled_hours: e.target.value })} placeholder="7,13,19" />
+              )}
+              <Input label="Notizen" value={editMedForm.notes} onChange={(e) => setEditMedForm({ ...editMedForm, notes: e.target.value })} />
+              <Button variant="primary" onClick={handleEditMed} disabled={editMedSubmitting || !editMedForm.name.trim() || !editMedForm.dose.trim()} style={{ minHeight: '44px' }}>
+                {editMedSubmitting ? 'Speichern...' : 'Änderungen speichern'}
               </Button>
             </div>
           </Card>

@@ -46,18 +46,42 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const openai = new OpenAI();
 
-    const systemPrompt = `Du bist ein veterinärmedizinisches KI-Sicherheitssystem.
-Prüfe die folgenden Medikamente für den Patienten auf:
-1. Dosierungsfehler (zu hoch / zu niedrig für Gewicht und Tierart)
-2. Bekannte Wechselwirkungen zwischen den Medikamenten
-3. Fehlende wichtige Angaben (z.B. kein Gewicht bei gewichtsbasierter Dosis)
-4. Ungewöhnliche oder bedenkliche Kombinationen
+    const systemPrompt = `Du bist ein veterinärmedizinisches KI-Sicherheitssystem für eine Tierarztpraxis.
+Deine Aufgabe ist die Sicherheitsprüfung von Medikamentenplänen. Du MUSST Fehler finden – ein übersehener Fehler kann ein Tier töten.
+
+Prüfe JEDEN Medikamenteneintrag systematisch auf:
+
+1. **KONTRAINDIKATIONEN (severity: critical)**
+   - Medikamente, die bei bestimmten Tierarten kontraindiziert sind
+   - Beispiele: Ibuprofen, Paracetamol, Diclofenac → bei Hund und Katze KONTRAINDIZIERT (nephro-/hepatotoxisch)
+   - Permethrin → bei Katzen TÖDLICH
+   - Metronidazol-Überdosierung → neurotoxisch
+   - Meloxicam bei Katzen nur einmalig s.c., NICHT oral mehrtägig
+
+2. **DOSIERUNGSFEHLER (severity: critical oder warning)**
+   - Vergleiche die angegebene Dosis (mg/kg) mit der empfohlenen therapeutischen Dosis für die Tierart
+   - Eine Dosis >2x der Maximaldosis = critical
+   - Eine Dosis >1.5x der Maximaldosis = warning
+   - Häufigkeit prüfen: Wie oft pro Tag? Passt das zum Medikament?
+
+3. **WECHSELWIRKUNGEN (severity: warning oder critical)**
+   - NSAIDs + Kortikosteroide = GI-Ulzera-Risiko (critical)
+   - Mehrere NSAIDs gleichzeitig = critical
+   - Nephrotoxische Kombination = critical
+
+4. **FEHLENDE ANGABEN (severity: info)**
+   - Kein Gewicht bei gewichtsabhängiger Dosierung
+   - Keine Tierart angegeben
+   - Applikationsweg fehlt
+
+5. **UNGEWÖHNLICHE KOMBINATIONEN (severity: info oder warning)**
+
+WICHTIG: Im Zweifel IMMER warnen. Ein false-positive ist akzeptabel, ein false-negative ist gefährlich.
 
 Antworte NUR mit einem JSON-Array. Kein Text davor oder danach.
-Format: [{ "alert_type": "dose_too_high|dose_too_low|interaction|missing_info|unusual_combination", "severity": "info|warning|critical", "message": "Kurze deutsche Warnung", "details": "Ausführliche Erklärung auf Deutsch", "medication_name": "Name des betreffenden Medikaments oder null" }]
+Format: [{ "alert_type": "dose_too_high|dose_too_low|interaction|allergy|missing_info|unusual_combination", "severity": "info|warning|critical", "message": "Kurze deutsche Warnung", "details": "Ausführliche Erklärung auf Deutsch mit empfohlener Dosis", "medication_name": "Name des betreffenden Medikaments" }]
 
-Wenn alles in Ordnung ist: []
-Sei konservativ – lieber eine Warnung mehr als eine zu wenig.`;
+Wenn alles in Ordnung ist: []`;
 
     const userPrompt = `Patient: ${patient.species || 'unbekannt'}, ${patient.breed || 'unbekannt'}, ${patient.gender || 'unbekannt'}
 Gewicht: ${patient.weight_kg ? `${patient.weight_kg} kg` : 'nicht angegeben'}
@@ -65,10 +89,18 @@ Alter: ${calculateAge(patient.birth_date)}
 Diagnose: ${patient.diagnosis || 'keine angegeben'}
 
 Medikamente:
-${medications.map((m: Record<string, unknown>) => `- ${m.name}: ${m.dose} (${m.frequency_label || 'keine Angabe'}${m.dose_mg_per_kg ? `, ${m.dose_mg_per_kg} mg/kg` : ''})`).join('\n')}`;
+${medications.map((m: Record<string, unknown>) => {
+      const hours = (m.scheduled_hours as number[]) || [];
+      const freq = m.frequency_label || (hours.length > 0 ? `${hours.length}x täglich (${hours.map(h => `${h}:00`).join(', ')})` : 'keine Angabe');
+      const doseInfo = m.dose_mg_per_kg ? `, ${m.dose_mg_per_kg} mg/kg` : '';
+      const route = m.route ? `, ${m.route}` : '';
+      const dti = m.is_dti ? `, Dauerinfusion ${m.dti_rate_ml_h} ml/h` : '';
+      const prn = m.is_prn ? ', bei Bedarf' : '';
+      return `- ${m.name}: ${m.dose} (${freq}${doseInfo}${route}${dti}${prn})`;
+    }).join('\n')}`;
 
     const response = await openai.responses.create({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-4.1',
       input: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
