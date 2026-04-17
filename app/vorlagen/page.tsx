@@ -377,18 +377,23 @@ export default function VorlagenPage() {
                         </select>
                       </>
                     )}
-                    <textarea value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} style={textarea} placeholder='Aenderungswunsch (z. B. kuerzer, klarer, besitzerfreundlicher)' />
-                    <div style={{ display: 'flex', gap: 10 }}>
+
+                    {isSuperadmin && (
+                      <div style={{ marginTop: 10, padding: 12, border: '1px solid #c7d2fe', borderRadius: 8, background: '#eef2ff' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#4338ca', marginBottom: 8 }}>Prompt (direkt bearbeiten)</div>
+                        <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} style={{ ...textarea, minHeight: '200px', fontFamily: 'monospace', fontSize: '13px' }} placeholder='Interner Prompt / Anweisung' />
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#4338ca', marginBottom: 8, marginTop: 8 }}>Untersuchungsfelder (eine pro Zeile)</div>
+                        <textarea value={editUntersuchung} onChange={(e) => setEditUntersuchung(e.target.value)} style={{ ...textarea, minHeight: '80px' }} placeholder={'z. B. Allgemeinbefinden\nHerz\nLunge'} />
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: 10, fontSize: 13, color: '#64748b' }}>VetMind-Aenderungswunsch (optional):</div>
+                    <textarea value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} style={textarea} placeholder='z. B. kuerzer, klarer, besitzerfreundlicher' />
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {isSuperadmin && <button onClick={saveEditedTemplate} style={{ ...primaryBtn, background: '#4338ca' }}>Speichern</button>}
                       <button onClick={reviseTemplateWithAssistant} style={primaryBtn} disabled={assistantLoading}>Mit VetMind bearbeiten</button>
-                      {isSuperadmin && <button onClick={saveEditedTemplate} style={{ ...primaryBtn, background: '#334155' }}>Stammdaten speichern</button>}
                       <button onClick={cancelEditTemplate} style={secondaryBtn}>Abbrechen</button>
                     </div>
-                    {isSuperadmin && (
-                      <>
-                        <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} style={textarea} placeholder='Interner Prompt (Owner)' />
-                        <textarea value={editUntersuchung} onChange={(e) => setEditUntersuchung(e.target.value)} style={textarea} placeholder='Untersuchung (eine pro Zeile)' />
-                      </>
-                    )}
                   </>
                 ) : (
                   <>
@@ -406,9 +411,15 @@ export default function VorlagenPage() {
                       </div>
                     </div>
 
-                    <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', marginTop: '10px', color: '#374151' }}>
-                      Interner Prompt ist verborgen. Bearbeitung erfolgt ueber VetMind-Aenderungswunsch.
-                    </div>
+                    {isSuperadmin ? (
+                      <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', marginTop: '10px', color: '#374151', background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', maxHeight: '120px', overflow: 'auto' }}>
+                        {t.content || 'Kein Prompt hinterlegt'}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', marginTop: '10px', color: '#374151' }}>
+                        Interner Prompt ist verborgen. Bearbeitung erfolgt ueber VetMind-Aenderungswunsch.
+                      </div>
+                    )}
 
                     {t.structure?.untersuchung && (
                       <div style={{ marginTop: '10px', fontSize: '13px' }}>
