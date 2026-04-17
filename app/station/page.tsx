@@ -139,7 +139,7 @@ export default function StationPage() {
     const nextMeds: Array<{ time: string; patient: string; med: string }> = [];
     for (const p of patients) {
       const s = medStatuses[p.id];
-      if (s?.next_hour !== null && s?.next_med) {
+      if (s && s.next_hour !== null && s.next_med) {
         nextMeds.push({
           time: `${String(s.next_hour).padStart(2, '0')}:00`,
           patient: p.patient_name,
@@ -169,7 +169,7 @@ export default function StationPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '20px', marginBottom: '40px' }}>
           {patients.map((p) => {
             const s = medStatuses[p.id];
-            const borderColor = p.cave ? '#ef4444' : s?.overdue ? '#ef4444' : s?.next_hour !== null && s.next_hour - now.getHours() <= 1 ? '#eab308' : '#22c55e';
+            const borderColor = p.cave ? '#ef4444' : s?.overdue ? '#ef4444' : (s && s.next_hour !== null && s.next_hour - now.getHours() <= 1) ? '#eab308' : '#22c55e';
             return (
               <div key={p.id} style={{
                 background: '#1e293b', borderRadius: '16px', padding: '24px',
@@ -275,7 +275,7 @@ export default function StationPage() {
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: uiTokens.textMuted, borderTop: '1px solid #f1f5f9', paddingTop: '8px', marginTop: '4px' }}>
                       <span>{s?.overdue ? `${s.overdue} überfällig` : s?.total_scheduled ? `${s.given}/${s.total_scheduled} gegeben` : 'Keine Medikamente'}</span>
-                      {s?.next_hour !== null && s?.next_med && (
+                      {s && s.next_hour !== null && s.next_med && (
                         <span>Nächstes: {String(s.next_hour).padStart(2, '0')}:00</span>
                       )}
                     </div>
