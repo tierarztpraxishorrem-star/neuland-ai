@@ -95,6 +95,7 @@ type CustomParam = {
   label: string;
   unit: string | null;
   is_required: boolean;
+  is_active: boolean;
   sort_order: number;
 };
 
@@ -358,6 +359,17 @@ export default function StationSheetPage() {
       });
       const data = await res.json();
       if (!res.ok) { showToast({ message: data.error || 'Fehler', type: 'error' }); return; }
+
+      // Custom-Parameter-Werte aus dem Formular mitschicken
+      const hour = vitalsForm.measured_hour;
+      const formAny = vitalsForm as unknown as Record<string, string>;
+      for (const cp of customParams.filter(c => c.is_active)) {
+        const val = formAny[`custom_${cp.id}`];
+        if (val && val.trim()) {
+          handleAddCustomValue(cp.id, hour, val.trim());
+        }
+      }
+
       showToast({ message: 'Messung gespeichert!', type: 'success' });
       setShowVitalsModal(false);
       setVitalsForm({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', feces_amount: '', feces_consistency: '', food_eaten: '', recorded_by: '', notes: '' });
@@ -943,26 +955,64 @@ export default function StationSheetPage() {
                     </tr>
                   );
                 })}
-                {/* Feces row */}
-                <tr style={{ borderTop: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '8px 6px', fontWeight: 600, color: uiTokens.textPrimary, fontSize: '12px' }}>Kot</td>
-                  {HOURS.map(h => {
-                    const v = vitals.find(vt => vt.measured_hour === h);
-                    const val = v && (v.feces_amount || v.feces_color || v.feces_consistency)
-                      ? [v.feces_amount, v.feces_color, v.feces_consistency].filter(Boolean).join('/')
-                      : null;
-                    return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', color: val ? uiTokens.textPrimary : '#e5e7eb', fontSize: '10px' }}>{val || '–'}</td>;
-                  })}
-                </tr>
-                {/* Urine row */}
-                <tr style={{ borderTop: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '8px 6px', fontWeight: 600, color: uiTokens.textPrimary, fontSize: '12px' }}>Urin</td>
-                  {HOURS.map(h => {
-                    const v = vitals.find(vt => vt.measured_hour === h);
-                    const val = v?.urine || null;
-                    return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', color: val ? uiTokens.textPrimary : '#e5e7eb', fontSize: '10px' }}>{val || '–'}</td>;
-                  })}
-                </tr>
+                {/* Feces row — mit Schedule-Kringeln */}
+                {(() => {
+                  const fecesSchedule = vitalSchedules.find(s => s.param_key === 'feces');
+                  const fecesHours = fecesSchedule?.scheduled_hours || [];
+                  const fecesHL = fecesSchedule?.is_highlighted || false;
+                  return (
+                    <tr style={{ borderTop: '1px solid #f1f5f9', background: fecesHL ? '#f0fdf4' : 'transparent' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 600, fontSize: '12px', cursor: 'pointer', color: fecesHL ? '#0f6b74' : uiTokens.textPrimary }}
+                        onClick={() => { setScheduleEditing(scheduleEditing === 'feces' ? null : 'feces'); setScheduleHoursInput(fecesHours.join(',')); }}
+                        title="Klicken um Mess-Zeiten zu setzen"
+                      >
+                        Kot{fecesHours.length > 0 && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#0f6b74' }}>⏰</span>}
+                        {scheduleEditing === 'feces' && (
+                          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: '4px' }}>
+                            <input value={scheduleHoursInput} onChange={(e) => setScheduleHoursInput(e.target.value)} placeholder="z.B. 8,16" style={{ width: '90px', padding: '3px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { const hrs = scheduleHoursInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23); handleSetVitalSchedule('feces', hrs); setScheduleEditing(null); } }} />
+                          </div>
+                        )}
+                      </td>
+                      {HOURS.map(h => {
+                        const v = vitals.find(vt => vt.measured_hour === h);
+                        const val = v && (v.feces_amount || v.feces_color || v.feces_consistency) ? [v.feces_amount, v.feces_color, v.feces_consistency].filter(Boolean).join('/') : null;
+                        const isScheduled = fecesHours.includes(h);
+                        const isOverdue = isScheduled && !val && h < currentHour;
+                        return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '10px' }}>{val ? <span style={{ color: uiTokens.textPrimary, background: isScheduled ? '#dcfce7' : 'transparent', borderRadius: '50%', padding: '2px 4px' }}>{val}</span> : isScheduled ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`, background: isOverdue ? '#fef2f2' : 'transparent', fontSize: '8px', color: isOverdue ? '#ef4444' : '#0f6b74' }}>{isOverdue ? '!' : ''}</span> : <span style={{ color: '#e5e7eb' }}>–</span>}</td>;
+                      })}
+                    </tr>
+                  );
+                })()}
+                {/* Urine row — mit Schedule-Kringeln */}
+                {(() => {
+                  const urineSchedule = vitalSchedules.find(s => s.param_key === 'urine');
+                  const urineHours = urineSchedule?.scheduled_hours || [];
+                  const urineHL = urineSchedule?.is_highlighted || false;
+                  return (
+                    <tr style={{ borderTop: '1px solid #f1f5f9', background: urineHL ? '#f0fdf4' : 'transparent' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 600, fontSize: '12px', cursor: 'pointer', color: urineHL ? '#0f6b74' : uiTokens.textPrimary }}
+                        onClick={() => { setScheduleEditing(scheduleEditing === 'urine' ? null : 'urine'); setScheduleHoursInput(urineHours.join(',')); }}
+                        title="Klicken um Mess-Zeiten zu setzen"
+                      >
+                        Urin{urineHours.length > 0 && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#0f6b74' }}>⏰</span>}
+                        {scheduleEditing === 'urine' && (
+                          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: '4px' }}>
+                            <input value={scheduleHoursInput} onChange={(e) => setScheduleHoursInput(e.target.value)} placeholder="z.B. 8,16" style={{ width: '90px', padding: '3px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { const hrs = scheduleHoursInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23); handleSetVitalSchedule('urine', hrs); setScheduleEditing(null); } }} />
+                          </div>
+                        )}
+                      </td>
+                      {HOURS.map(h => {
+                        const v = vitals.find(vt => vt.measured_hour === h);
+                        const val = v?.urine || null;
+                        const isScheduled = urineHours.includes(h);
+                        const isOverdue = isScheduled && !val && h < currentHour;
+                        return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '10px' }}>{val ? <span style={{ color: uiTokens.textPrimary, background: isScheduled ? '#dcfce7' : 'transparent', borderRadius: '50%', padding: '2px 4px' }}>{val}</span> : isScheduled ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`, background: isOverdue ? '#fef2f2' : 'transparent', fontSize: '8px', color: isOverdue ? '#ef4444' : '#0f6b74' }}>{isOverdue ? '!' : ''}</span> : <span style={{ color: '#e5e7eb' }}>–</span>}</td>;
+                      })}
+                    </tr>
+                  );
+                })()}
                 {/* Notes row */}
                 <tr style={{ borderTop: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '8px 6px', fontWeight: 600, color: uiTokens.textPrimary, fontSize: '12px' }}>Notiz</td>
@@ -1298,6 +1348,27 @@ export default function StationSheetPage() {
                 <Input label="Kot Menge" value={vitalsForm.feces_amount} onChange={(e) => setVitalsForm({ ...vitalsForm, feces_amount: e.target.value })} placeholder="wenig, normal, viel" />
                 <Input label="Kot Konsistenz" value={vitalsForm.feces_consistency} onChange={(e) => setVitalsForm({ ...vitalsForm, feces_consistency: e.target.value })} placeholder="fest, breiig, flüssig" />
               </div>
+              {/* Custom-Parameter (selbst hinzugefügte Felder) */}
+              {customParams.filter(cp => cp.is_active).length > 0 && (
+                <>
+                  <div style={{ borderTop: '1px dashed #e5e7eb', paddingTop: '8px', marginTop: '4px' }}>
+                    <div style={{ fontSize: '11px', color: uiTokens.textMuted, fontWeight: 600, marginBottom: '8px', letterSpacing: '0.5px' }}>
+                      INDIVIDUELLE PARAMETER
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      {customParams.filter(cp => cp.is_active).map(cp => (
+                        <Input
+                          key={cp.id}
+                          label={`${cp.label}${cp.unit ? ` (${cp.unit})` : ''}${cp.is_required ? ' *' : ''}`}
+                          value={(vitalsForm as unknown as Record<string, string>)[`custom_${cp.id}`] || ''}
+                          onChange={(e) => setVitalsForm({ ...vitalsForm, [`custom_${cp.id}`]: e.target.value })}
+                          placeholder={cp.is_required ? 'Pflichtfeld' : 'optional'}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
               <Input label="Kürzel" value={vitalsForm.recorded_by} onChange={(e) => setVitalsForm({ ...vitalsForm, recorded_by: e.target.value })} placeholder="LH" />
               <Input label="Freitext / Notizen" value={vitalsForm.notes} onChange={(e) => setVitalsForm({ ...vitalsForm, notes: e.target.value })} placeholder="Individuelle Beobachtungen..." />
               <Button variant="primary" onClick={handleAddVitals} disabled={vitalsSubmitting} style={{ minHeight: '44px' }}>
