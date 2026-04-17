@@ -125,24 +125,33 @@ ${medications.map((m: Record<string, unknown>) => {
       .eq('is_acknowledged', false);
 
     // Save new alerts
-    if (alerts.length > 0) {
-      const alertRows = alerts.map((a) => {
-        // Try to find the medication_id by name
-        const matchedMed = medications.find(
-          (m: Record<string, unknown>) => m.name === a.medication_name
-        );
-        return {
-          station_patient_id: id,
-          practice_id: practiceId,
-          alert_type: a.alert_type,
-          severity: a.severity,
-          message: a.message,
-          details: a.details || null,
-          medication_id: matchedMed?.id || null,
-        };
-      });
+    const VALID_ALERT_TYPES = ['dose_too_high', 'dose_too_low', 'interaction', 'allergy', 'missing_info', 'unusual_combination', 'weight_mismatch'];
+    const VALID_SEVERITIES = ['info', 'warning', 'critical'];
 
-      await supabase.from('station_ai_alerts').insert(alertRows);
+    if (alerts.length > 0) {
+      const alertRows = alerts
+        .filter((a) => a.message && typeof a.message === 'string')
+        .map((a) => {
+          const matchedMed = medications.find(
+            (m: Record<string, unknown>) => m.name === a.medication_name
+          );
+          return {
+            station_patient_id: id,
+            practice_id: practiceId,
+            alert_type: VALID_ALERT_TYPES.includes(String(a.alert_type)) ? a.alert_type : 'unusual_combination',
+            severity: VALID_SEVERITIES.includes(String(a.severity)) ? a.severity : 'warning',
+            message: String(a.message),
+            details: a.details ? String(a.details) : null,
+            medication_id: matchedMed?.id || null,
+          };
+        });
+
+      if (alertRows.length > 0) {
+        const { error: insertError } = await supabase.from('station_ai_alerts').insert(alertRows);
+        if (insertError) {
+          console.error('[api/station/ai-check] Insert Fehler:', insertError);
+        }
+      }
     }
 
     return NextResponse.json({ ok: true, alerts });

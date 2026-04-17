@@ -314,6 +314,8 @@ export default function StationSheetPage() {
 
   const currentHour = new Date().getHours();
   const unacknowledgedAlerts = alerts.filter(a => !a.is_acknowledged);
+  const hasBeenChecked = alerts.length > 0 || medications.length === 0;
+  const needsCheck = medications.length > 0 && !hasBeenChecked;
 
   return (
     <main style={{ minHeight: '100vh', background: uiTokens.pageBackground, padding: '16px' }}>
@@ -353,15 +355,31 @@ export default function StationSheetPage() {
         </Card>
 
         {/* AI check strip */}
-        <Card style={{ marginBottom: '12px', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        <Card style={{
+          marginBottom: '12px', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px',
+          borderLeft: `4px solid ${unacknowledgedAlerts.length > 0 ? '#dc2626' : needsCheck ? '#eab308' : '#16a34a'}`,
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldCheck size={18} color={unacknowledgedAlerts.length > 0 ? '#dc2626' : '#16a34a'} />
-            <span style={{ fontSize: '14px', color: unacknowledgedAlerts.length > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
-              KI-Prüfung: {unacknowledgedAlerts.length > 0 ? `${unacknowledgedAlerts.length} Warnungen` : 'Keine Auffälligkeiten'}
+            {unacknowledgedAlerts.length > 0 ? (
+              <AlertTriangle size={18} color="#dc2626" />
+            ) : needsCheck ? (
+              <AlertTriangle size={18} color="#eab308" />
+            ) : (
+              <ShieldCheck size={18} color="#16a34a" />
+            )}
+            <span style={{
+              fontSize: '14px', fontWeight: 600,
+              color: unacknowledgedAlerts.length > 0 ? '#dc2626' : needsCheck ? '#b45309' : '#16a34a',
+            }}>
+              {unacknowledgedAlerts.length > 0
+                ? `KI-Prüfung: ${unacknowledgedAlerts.length} Warnungen`
+                : needsCheck
+                  ? 'KI-Prüfung: Noch nicht geprüft'
+                  : 'KI-Prüfung: Keine Auffälligkeiten'}
             </span>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleAiCheck} disabled={aiChecking}>
-            {aiChecking ? 'Prüfe...' : 'Neu prüfen'}
+          <Button variant={needsCheck ? 'primary' : 'ghost'} size="sm" onClick={handleAiCheck} disabled={aiChecking}>
+            {aiChecking ? 'Prüfe...' : needsCheck ? 'Jetzt prüfen' : 'Neu prüfen'}
           </Button>
         </Card>
 
