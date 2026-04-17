@@ -65,11 +65,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Patientenname ist erforderlich.' }, { status: 400 });
     }
 
+    // Auto-Create: Wenn kein patient_id übergeben wurde, lege den Patienten
+    // auch in der Haupt-Tabelle `patients` an, damit er in /patienten sichtbar ist.
+    let patientId: string | null = body.patient_id || null;
+    if (!patientId) {
+      const { data: newPatient, error: patErr } = await supabase
+        .from('patients')
+        .insert({
+          practice_id: practiceId,
+          name: body.patient_name?.trim(),
+          tierart: body.species || null,
+          rasse: body.breed || null,
+          geschlecht: body.gender || null,
+          owner_name: body.owner_name || null,
+          external_id: body.chip_number || null,
+        })
+        .select('id')
+        .single();
+      if (!patErr && newPatient) {
+        patientId = newPatient.id;
+      }
+    }
+
     const insert: Record<string, unknown> = {
       practice_id: practiceId,
       created_by: userId,
+      patient_id: patientId,
     };
     for (const field of INSERT_FIELDS) {
+      if (field === 'patient_id') continue; // already set above
       if (body[field] !== undefined) {
         insert[field] = body[field];
       }
@@ -86,7 +110,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Fehler beim Anlegen des Stationspatienten.' }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, patient: data }, { status: 201 });
+    return NextResponse.json({ ok: true, patient: data, linked_patient_id: patientId }, { status: 201 });
   } catch (error) {
     console.error('[api/station/patients] POST Fehler:', error);
     return NextResponse.json({ error: 'Unbekannter Fehler.' }, { status: 500 });

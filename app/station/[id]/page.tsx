@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
@@ -161,6 +161,25 @@ export default function StationSheetPage() {
   const [ruleModal, setRuleModal] = useState<{ medication_name: string; alert_message: string } | null>(null);
   const [ruleText, setRuleText] = useState('');
   const [ruleSubmitting, setRuleSubmitting] = useState(false);
+
+  // Vital schedules (Mess-Zeiten)
+  type VitalSchedule = { id: string; param_key: string; scheduled_hours: number[]; is_highlighted: boolean };
+  const [vitalSchedules, setVitalSchedules] = useState<VitalSchedule[]>([]);
+  const [scheduleEditing, setScheduleEditing] = useState<string | null>(null); // param_key being edited
+  const [scheduleHoursInput, setScheduleHoursInput] = useState('');
+
+  // Daily checklist
+  type DailyTask = { id: string; label: string; is_default: boolean; sort_order: number; checked: boolean; checked_at: string | null; checked_by: string | null; check_id: string | null; notes: string | null };
+  const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
+  const [dailyTasksLoading, setDailyTasksLoading] = useState(false);
+  const [newTaskLabel, setNewTaskLabel] = useState('');
+
+  // Handoff (Schichtübergabe)
+  const [handoffs, setHandoffs] = useState<Array<{ id: string; shift_label: string | null; transcript: string; recorded_by: string | null; created_at: string }>>([]);
+  const [handoffRecording, setHandoffRecording] = useState(false);
+  const handoffRecorderRef = useRef<MediaRecorder | null>(null);
+  const handoffChunksRef = useRef<Blob[]>([]);
+  const [handoffTranscribing, setHandoffTranscribing] = useState(false);
 
   // Admin info popup
   const [adminInfo, setAdminInfo] = useState<Administration | null>(null);

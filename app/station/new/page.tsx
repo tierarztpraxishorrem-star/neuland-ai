@@ -170,13 +170,13 @@ export default function NewStationPatientPage() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const term = `%${searchQuery.trim()}%`;
-      const { data } = await supabase
-        .from('patients')
-        .select('id, name, tierart, rasse, owner_name')
-        .or(`name.ilike.${term},owner_name.ilike.${term}`)
-        .limit(20);
-      setSearchResults((data || []) as PatientSearchResult[]);
+      const res = await fetchWithAuth(`/api/station/search-patients?q=${encodeURIComponent(searchQuery.trim())}`);
+      const data = await res.json();
+      if (res.ok && data.patients) {
+        setSearchResults(data.patients as PatientSearchResult[]);
+      } else {
+        setSearchResults([]);
+      }
     } catch { /* ignore */ } finally { setSearching(false); }
   };
 
