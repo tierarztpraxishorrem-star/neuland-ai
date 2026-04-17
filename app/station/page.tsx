@@ -50,6 +50,10 @@ export default function StationPage() {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
 
+  // Daily tasks per patient (für TV-Modus Abholzeiten + offene Checks)
+  type DailyTaskInfo = { label: string; checked: boolean; notes: string | null };
+  const [dailyTasksMap, setDailyTasksMap] = useState<Record<string, DailyTaskInfo[]>>({});
+
   const loadData = useCallback(async () => {
     try {
       const [res, disRes] = await Promise.all([
@@ -112,6 +116,23 @@ export default function StationPage() {
         })
       );
       setMedStatuses(statuses);
+
+      // Daily tasks für TV-Modus laden
+      const tasksMap: Record<string, DailyTaskInfo[]> = {};
+      await Promise.all(
+        (data.patients || []).map(async (p: StationPatient) => {
+          try {
+            const dtRes = await fetchWithAuth(`/api/station/patients/${p.id}/daily-tasks`);
+            if (dtRes.ok) {
+              const dtData = await dtRes.json();
+              tasksMap[p.id] = (dtData.tasks || []).map((t: { label: string; checked: boolean; notes: string | null }) => ({
+                label: t.label, checked: t.checked, notes: t.notes,
+              }));
+            }
+          } catch { /* ignore */ }
+        })
+      );
+      setDailyTasksMap(tasksMap);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -252,6 +273,26 @@ export default function StationPage() {
                   <div style={{ marginTop: 'auto', fontSize: '14px', color: s?.overdue ? '#fca5a5' : '#86efac' }}>
                     {s?.overdue ? `${s.overdue} Med. fällig` : s?.total_scheduled ? 'alles OK' : '–'}
                   </div>
+                  {/* Offene Tasks + Abholzeit */}
+                  {(() => {
+                    const tasks = dailyTasksMap[p.id] || [];
+                    const openCount = tasks.filter(t => !t.checked).length;
+                    const pickupTask = tasks.find(t => t.label.toLowerCase().includes('abholung') && t.checked && t.notes);
+                    return (
+                      <>
+                        {pickupTask && (
+                          <div style={{ marginTop: '8px', padding: '4px 8px', borderRadius: '6px', background: '#164e63', fontSize: '13px', fontWeight: 700, color: '#22d3ee' }}>
+                            🚗 Abholung: {pickupTask.notes}
+                          </div>
+                        )}
+                        {openCount > 0 && (
+                          <div style={{ marginTop: '4px', fontSize: '12px', color: '#fbbf24' }}>
+                            ○ {openCount} Aufgabe{openCount > 1 ? 'n' : ''} offen
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </Link>
             );

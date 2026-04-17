@@ -137,6 +137,7 @@ export default function StationSheetPage() {
   const [newParamLabel, setNewParamLabel] = useState('');
   const [newParamUnit, setNewParamUnit] = useState('');
   const [newParamRequired, setNewParamRequired] = useState(false);
+  const [newParamSchedule, setNewParamSchedule] = useState('');
 
   // Administer modal
   const [adminModal, setAdminModal] = useState<{ medId: string; medName: string; hour: number } | null>(null);
@@ -409,12 +410,17 @@ export default function StationSheetPage() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
+      const scheduledHours = newParamSchedule
+        .split(',')
+        .map(s => parseInt(s.trim()))
+        .filter(n => !isNaN(n) && n >= 0 && n <= 23);
       const { error } = await supabase.from('station_vital_params').insert({
         station_patient_id: patientId,
         practice_id: (await supabase.from('station_patients').select('practice_id').eq('id', patientId).single()).data?.practice_id,
         label: newParamLabel.trim(),
         unit: newParamUnit.trim() || null,
         is_required: newParamRequired,
+        scheduled_hours: scheduledHours,
       });
       if (error) { showToast({ message: 'Fehler.', type: 'error' }); return; }
       showToast({ message: 'Parameter hinzugefügt!', type: 'success' });
@@ -422,6 +428,7 @@ export default function StationSheetPage() {
       setNewParamLabel('');
       setNewParamUnit('');
       setNewParamRequired(false);
+      setNewParamSchedule('');
       loadData();
     } catch { showToast({ message: 'Fehler.', type: 'error' }); }
   };
@@ -1121,7 +1128,14 @@ export default function StationSheetPage() {
                         handleUncheckTask(task.check_id);
                       } else {
                         const initials = prompt('Kürzel (2-4 Buchstaben):');
-                        if (initials) handleCheckTask(task.id, initials);
+                        if (!initials) return;
+                        // Bei Abholung-Task nach Details fragen
+                        const isPickup = task.label.toLowerCase().includes('abholung');
+                        let notes: string | undefined;
+                        if (isPickup) {
+                          notes = prompt('Abholung um welche Uhrzeit? Oder "bleibt bis [Datum]":') || undefined;
+                        }
+                        handleCheckTask(task.id, initials, notes);
                       }
                     }}
                     style={{
@@ -1141,9 +1155,15 @@ export default function StationSheetPage() {
                     {task.checked && task.checked_by && (
                       <div style={{ fontSize: '11px', color: uiTokens.textMuted }}>
                         {task.checked_by} · {new Date(task.checked_at!).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-                        {task.notes && ` · ${task.notes}`}
                       </div>
                     )}
+                    {task.notes && task.label.toLowerCase().includes('abholung') ? (
+                      <div style={{ marginTop: '4px', padding: '4px 10px', borderRadius: '6px', background: '#f0fdfa', border: '1px solid #99f6e4', fontSize: '12px', fontWeight: 700, color: '#0f766e' }}>
+                        🚗 {task.notes}
+                      </div>
+                    ) : task.notes ? (
+                      <div style={{ fontSize: '11px', color: uiTokens.textMuted }}>{task.notes}</div>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -1456,6 +1476,7 @@ export default function StationSheetPage() {
             <div style={{ display: 'grid', gap: '12px' }}>
               <Input label="Bezeichnung *" value={newParamLabel} onChange={(e) => setNewParamLabel(e.target.value)} placeholder="z.B. Blutzucker, Drainagemenge, SpO2" />
               <Input label="Einheit" value={newParamUnit} onChange={(e) => setNewParamUnit(e.target.value)} placeholder="z.B. mg/dl, ml, %" />
+              <Input label="Mess-Zeiten (Kringel, kommagetrennt)" value={newParamSchedule || ''} onChange={(e) => setNewParamSchedule(e.target.value)} placeholder="z.B. 8,12,16,20 (leer = keine Kringel)" />
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
                 <input type="checkbox" checked={newParamRequired} onChange={(e) => setNewParamRequired(e.target.checked)} />
                 <span>Pflicht-Parameter <span style={{ color: uiTokens.textMuted, fontSize: '12px' }}>(gelb hervorgehoben)</span></span>
