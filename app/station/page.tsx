@@ -54,6 +54,10 @@ export default function StationPage() {
   type DailyTaskInfo = { label: string; checked: boolean; notes: string | null };
   const [dailyTasksMap, setDailyTasksMap] = useState<Record<string, DailyTaskInfo[]>>({});
 
+  // Offene Verlaufsmessungen pro Patient
+  type OpenVital = { param: string; hour: number };
+  const [openVitalsMap, setOpenVitalsMap] = useState<Record<string, OpenVital[]>>({});
+
   const loadData = useCallback(async () => {
     try {
       const [res, disRes] = await Promise.all([
@@ -133,6 +137,45 @@ export default function StationPage() {
         })
       );
       setDailyTasksMap(tasksMap);
+
+      // Offene Verlaufsmessungen laden (TV)
+      const paramLabels: Record<string, string> = {
+        heart_rate: 'HF', resp_rate: 'AF', temperature_c: 'Temp',
+        pain_score: 'Schmerz', feces: 'Kot', urine: 'Urin', notes: 'Notiz',
+      };
+      const vitalsMap: Record<string, OpenVital[]> = {};
+      const currentHour = new Date().getHours();
+      await Promise.all(
+        (data.patients || []).map(async (p: StationPatient) => {
+          try {
+            const [schedRes, vitalsRes] = await Promise.all([
+              fetchWithAuth(`/api/station/patients/${p.id}/vital-schedule`),
+              fetchWithAuth(`/api/station/patients/${p.id}/vitals`),
+            ]);
+            if (!schedRes.ok || !vitalsRes.ok) return;
+            const schedData = await schedRes.json();
+            const vitalsData = await vitalsRes.json();
+            const schedules: Array<{ param_key: string; scheduled_hours: number[] }> = schedData.schedules || [];
+            const vitals: Array<Record<string, unknown>> = vitalsData.vitals || [];
+            const recordedHours = new Set(vitals.map(v => v.measured_hour as number));
+
+            const open: OpenVital[] = [];
+            for (const sched of schedules) {
+              for (const h of sched.scheduled_hours) {
+                if (h > currentHour) continue; // nur vergangene/aktuelle Stunden
+                // Prüfe ob für diese Stunde ein Wert existiert
+                const vitalAtHour = vitals.find(v => v.measured_hour === h);
+                const hasValue = vitalAtHour && sched.param_key in vitalAtHour && vitalAtHour[sched.param_key] != null;
+                if (!hasValue) {
+                  open.push({ param: paramLabels[sched.param_key] || sched.param_key, hour: h });
+                }
+              }
+            }
+            if (open.length > 0) vitalsMap[p.id] = open;
+          } catch { /* ignore */ }
+        })
+      );
+      setOpenVitalsMap(vitalsMap);
     } catch { /* ignore */ } finally {
       setLoading(false);
     }
@@ -273,11 +316,13 @@ export default function StationPage() {
                   <div style={{ marginTop: 'auto', fontSize: '14px', color: s?.overdue ? '#fca5a5' : '#86efac' }}>
                     {s?.overdue ? `${s.overdue} Med. fällig` : s?.total_scheduled ? 'alles OK' : '–'}
                   </div>
-                  {/* Offene Tasks + Abholzeit */}
+                  {/* Offene Tasks + Abholzeit + Offene Messungen */}
                   {(() => {
                     const tasks = dailyTasksMap[p.id] || [];
                     const openCount = tasks.filter(t => !t.checked).length;
+                    const openTasks = tasks.filter(t => !t.checked);
                     const pickupTask = tasks.find(t => t.label.toLowerCase().includes('abholung') && t.checked && t.notes);
+                    const openVitals = openVitalsMap[p.id] || [];
                     return (
                       <>
                         {pickupTask && (
@@ -285,9 +330,20 @@ export default function StationPage() {
                             🚗 Abholung: {pickupTask.notes}
                           </div>
                         )}
+                        {openVitals.length > 0 && (
+                          <div style={{ marginTop: '6px', fontSize: '12px', color: '#f97316' }}>
+                            📊 {openVitals.length} Messung{openVitals.length > 1 ? 'en' : ''} offen
+                            <span style={{ color: '#94a3b8', marginLeft: '4px' }}>
+                              ({[...new Set(openVitals.map(v => v.param))].join(', ')})
+                            </span>
+                          </div>
+                        )}
                         {openCount > 0 && (
                           <div style={{ marginTop: '4px', fontSize: '12px', color: '#fbbf24' }}>
                             ○ {openCount} Aufgabe{openCount > 1 ? 'n' : ''} offen
+                            <span style={{ color: '#94a3b8', marginLeft: '4px' }}>
+                              ({openTasks.slice(0, 3).map(t => t.label.length > 20 ? t.label.slice(0, 18) + '...' : t.label).join(', ')}{openCount > 3 ? ', ...' : ''})
+                            </span>
                           </div>
                         )}
                       </>
@@ -302,6 +358,46 @@ export default function StationPage() {
             <span style={{ fontSize: '18px', color: '#64748b' }}>FREI</span>
           </div>
         </div>
+
+        {/* Offene Aufgaben & Messungen – Gesamtübersicht */}
+        {(() => {
+          const allOpen: Array<{ patient: string; box: string; type: 'task' | 'vital'; label: string; detail?: string }> = [];
+          patients.forEach((p) => {
+            const tasks = dailyTasksMap[p.id] || [];
+            tasks.filter(t => !t.checked).forEach(t => {
+              allOpen.push({ patient: p.patient_name, box: p.box_number || '–', type: 'task', label: t.label });
+            });
+            const vitals = openVitalsMap[p.id] || [];
+            vitals.forEach(v => {
+              allOpen.push({ patient: p.patient_name, box: p.box_number || '–', type: 'vital', label: v.param, detail: `${v.hour}:00` });
+            });
+          });
+          if (allOpen.length === 0) return null;
+          return (
+            <div style={{ marginBottom: '40px' }}>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#94a3b8', marginBottom: '12px', letterSpacing: '1px' }}>OFFENE AUFGABEN & MESSUNGEN</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '8px' }}>
+                {allOpen.map((item, i) => (
+                  <div key={i} style={{
+                    fontSize: '14px', padding: '8px 12px', borderRadius: '8px',
+                    background: item.type === 'vital' ? '#431407' : '#1c1917',
+                    border: `1px solid ${item.type === 'vital' ? '#9a3412' : '#334155'}`,
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span>
+                      <span style={{ color: item.type === 'vital' ? '#fb923c' : '#fbbf24', marginRight: '8px' }}>
+                        {item.type === 'vital' ? '📊' : '○'}
+                      </span>
+                      <span style={{ color: '#e2e8f0' }}>{item.label}</span>
+                      {item.detail && <span style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.detail})</span>}
+                    </span>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>Box {item.box} · {item.patient}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Next medications */}
         {nextMeds.length > 0 && (
