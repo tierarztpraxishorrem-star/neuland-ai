@@ -1,3 +1,5 @@
+export const maxDuration = 60; // live analysis should be fast, but avoid premature timeout
+
 import {
   ANAMNESIS_TEMPLATES,
   AnamnesisQuestion,

@@ -1,6 +1,10 @@
+export const maxDuration = 300; // 5 min – AssemblyAI polling for long audio needs time
+export const runtime = 'nodejs';
+
 const ASSEMBLY_API_URL = "https://api.assemblyai.com/v2";
-const DEFAULT_POLL_INTERVAL_MS = 1500;
-const MAX_POLL_ATTEMPTS = 80;
+const OPENAI_FILE_SIZE_LIMIT_MB = 24; // OpenAI Whisper/transcribe hard limit is 25 MB
+const DEFAULT_POLL_INTERVAL_MS = 2000;
+const MAX_POLL_ATTEMPTS = 130; // ~260s max polling – fits within 300s maxDuration
 const CORRECTION_MIN_LENGTH = 300;
 
 const MEDICAL_WORD_BOOST = [
@@ -209,10 +213,12 @@ export async function POST(req: Request) {
       return Response.json({ error: "No file uploaded" }, { status: 400 });
     }
 
+    const fileSizeMB = file.size / (1024 * 1024);
     const openAiKey = process.env.OPENAI_API_KEY;
 
     // Fast path for live mode to avoid queue backlog and delayed transcript updates.
-    if (isLiveMode && openAiKey) {
+    // Skip OpenAI if file exceeds their 25 MB limit – go straight to AssemblyAI.
+    if (isLiveMode && openAiKey && fileSizeMB <= OPENAI_FILE_SIZE_LIMIT_MB) {
       try {
         const text = await transcribeWithOpenAI(file, openAiKey);
         return Response.json({
@@ -224,6 +230,10 @@ export async function POST(req: Request) {
       } catch (error) {
         console.warn("OpenAI live transcription failed, falling back to AssemblyAI", error);
       }
+    }
+
+    if (fileSizeMB > OPENAI_FILE_SIZE_LIMIT_MB) {
+      console.log(`[transcribe] Datei ${fileSizeMB.toFixed(1)}MB > ${OPENAI_FILE_SIZE_LIMIT_MB}MB, nutze AssemblyAI`);
     }
 
     const assemblyKey = process.env.ASSEMBLYAI_API_KEY;

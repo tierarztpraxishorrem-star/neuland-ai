@@ -1,3 +1,5 @@
+export const maxDuration = 300; // 5 min – long transcripts need time for report generation
+
 const PRIMARY_CONSULT_MODEL = process.env.OPENAI_CONSULT_MODEL || process.env.OPENAI_CHAT_MODEL || "gpt-5";
 const FALLBACK_CONSULT_MODEL =
   process.env.OPENAI_CONSULT_FALLBACK_MODEL || process.env.OPENAI_CHAT_FALLBACK_MODEL || "gpt-4.1";
