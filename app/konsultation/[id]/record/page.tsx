@@ -473,11 +473,15 @@ export default function RecordPage() {
   const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4 MB – Vercel body limit is 4.5 MB
 
   const transcribeSegment = async (segment: RecordingSegment) => {
+    const sizeMB = (segment.blob.size / (1024 * 1024)).toFixed(1);
+    console.log(`[transcribe] Segment ${segment.label}: ${sizeMB}MB, type=${segment.blob.type}, source=${segment.source}`);
+
     const formData = new FormData();
     formData.append('mode', 'live');
 
     if (segment.blob.size > DIRECT_UPLOAD_LIMIT) {
       // Large file: upload to Supabase Storage first, then send signed URL to API
+      console.log(`[transcribe] ${sizeMB}MB > 4MB limit → uploading to Supabase Storage...`);
       const ext = segment.source === 'upload' ? 'upload' : 'webm';
       const path = `recordings/${caseId}/transcribe-${segment.id}.${ext}`;
       const uploadRes = await supabase.storage
@@ -488,20 +492,25 @@ export default function RecordPage() {
         });
 
       if (uploadRes.error) {
+        console.error(`[transcribe] Storage upload failed:`, uploadRes.error);
         throw new Error(`Storage-Upload fehlgeschlagen: ${uploadRes.error.message}`);
       }
+      console.log(`[transcribe] Storage upload OK, creating signed URL...`);
 
       const { data: signedData, error: signedError } = await supabase.storage
         .from('recordings')
         .createSignedUrl(path, 600); // 10 min TTL
 
       if (signedError || !signedData?.signedUrl) {
+        console.error(`[transcribe] Signed URL failed:`, signedError);
         throw new Error('Keine signierte URL vom Storage erhalten');
       }
+      console.log(`[transcribe] Signed URL OK, calling /api/transcribe with audio_url`);
 
       formData.append('audio_url', signedData.signedUrl);
     } else {
       // Small file: send directly in request body
+      console.log(`[transcribe] ${sizeMB}MB <= 4MB limit → sending directly to API`);
       const extension = segment.source === 'upload' ? 'upload' : 'webm';
       formData.append('file', segment.blob, `${segment.id}.${extension}`);
     }
@@ -512,6 +521,7 @@ export default function RecordPage() {
     });
 
     const data = await res.json().catch(() => null);
+    console.log(`[transcribe] API response: status=${res.status}`, data);
 
     if (!res.ok) {
       const errorText = typeof data?.error === 'string' ? data.error : 'Transkription fehlgeschlagen';
