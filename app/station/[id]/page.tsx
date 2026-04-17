@@ -144,7 +144,7 @@ export default function StationSheetPage() {
 
   // Add medication modal
   const [showMedModal, setShowMedModal] = useState(false);
-  const [medForm, setMedForm] = useState({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,15,23', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
+  const [medForm, setMedForm] = useState({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '8,16,0', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
   const [medSubmitting, setMedSubmitting] = useState(false);
 
   // Add vitals modal
@@ -165,17 +165,20 @@ export default function StationSheetPage() {
   // Admin info popup
   const [adminInfo, setAdminInfo] = useState<Administration | null>(null);
 
-  // Load user role once
+  // Load user role + display name
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('practice_memberships').select('role').eq('user_id', user.id).limit(1).single();
+      const { data } = await supabase.from('practice_memberships').select('role, display_name').eq('user_id', user.id).limit(1).single();
       if (data?.role) setUserRole(data.role);
+      if (data?.display_name) setUserDisplayName(data.display_name);
     })();
   }, []);
 
   const isAdmin = userRole === 'admin' || userRole === 'owner';
+  const isGroupleader = userRole === 'groupleader';
+  const [userDisplayName, setUserDisplayName] = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -241,7 +244,7 @@ export default function StationSheetPage() {
       if (!res.ok) { showToast({ message: data.error || 'Fehler', type: 'error' }); return; }
       showToast({ message: 'Medikament hinzugefügt!', type: 'success' });
       setShowMedModal(false);
-      setMedForm({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,15,23', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
+      setMedForm({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '8,16,0', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
       loadData();
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setMedSubmitting(false); }
   };
@@ -422,6 +425,11 @@ export default function StationSheetPage() {
   const hasBeenChecked = alerts.length > 0 || medications.length === 0;
   const needsCheck = medications.length > 0 && !hasBeenChecked;
 
+  // Rule permissions: who can create "Für uns OK" rules
+  const isResponsibleVet = patient?.responsible_vet && userDisplayName && patient.responsible_vet.toLowerCase() === userDisplayName.toLowerCase();
+  const canCreateRule = isAdmin || isGroupleader || isResponsibleVet;
+  const canCreateCriticalRule = isAdmin;
+
   return (
     <main style={{ minHeight: '100vh', background: uiTokens.pageBackground, padding: '16px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
@@ -516,18 +524,35 @@ export default function StationSheetPage() {
                       Korrigiert / bestätigt
                     </button>
                   )}
-                  {(a.severity !== 'critical' || isAdmin) && (
-                    <button
-                      onClick={() => {
-                        if (a.severity === 'critical' && !confirm('ACHTUNG: Diese Warnung betrifft eine potenziell gefährliche Situation. Nur als Admin-Regel anlegen, wenn Sie sich absolut sicher sind.')) return;
-                        const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
-                        setRuleModal({ medication_name: medName, alert_message: a.message });
-                        setRuleText('');
-                      }}
-                      style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: a.severity === 'critical' ? '#dc2626' : uiTokens.textSecondary, cursor: 'pointer' }}
-                    >
-                      {a.severity === 'critical' ? 'Admin: Regel anlegen' : 'Für uns OK – Regel anlegen'}
-                    </button>
+                  {a.severity === 'critical' ? (
+                    canCreateCriticalRule && (
+                      <button
+                        onClick={() => {
+                          if (!confirm('ACHTUNG: Diese Warnung betrifft eine potenziell gefährliche Situation. Nur als Admin-Regel anlegen, wenn Sie sich absolut sicher sind.')) return;
+                          const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
+                          setRuleModal({ medication_name: medName, alert_message: a.message });
+                          setRuleText('');
+                        }}
+                        style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#dc2626', cursor: 'pointer' }}
+                      >
+                        Admin: Regel anlegen
+                      </button>
+                    )
+                  ) : (
+                    canCreateRule ? (
+                      <button
+                        onClick={() => {
+                          const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
+                          setRuleModal({ medication_name: medName, alert_message: a.message });
+                          setRuleText('');
+                        }}
+                        style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: uiTokens.textSecondary, cursor: 'pointer' }}
+                      >
+                        Für uns OK – Regel anlegen
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: uiTokens.textMuted, padding: '4px 0' }}>Regel nur durch Stationstierarzt oder Admin</span>
+                    )
                   )}
                 </div>
               </Card>
@@ -857,21 +882,41 @@ export default function StationSheetPage() {
             </div>
             <div style={{ display: 'grid', gap: '12px' }}>
               <Input label="Medikament *" value={medForm.name} onChange={(e) => setMedForm({ ...medForm, name: e.target.value })} placeholder="z.B. Metamizol" />
-              <Input label="Dosis *" value={medForm.dose} onChange={(e) => setMedForm({ ...medForm, dose: e.target.value })} placeholder="z.B. 3,1 ml oder 25mg/kg" />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
+                <Input label="Dosis *" value={medForm.dose} onChange={(e) => setMedForm({ ...medForm, dose: e.target.value })} placeholder="z.B. 3,1 ml oder 25mg/kg" />
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Applikationsweg</label>
+                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Applikation</label>
                   <select value={medForm.route} onChange={(e) => setMedForm({ ...medForm, route: e.target.value })} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}>
-                    <option value="i.v.">i.v. (intravenös)</option>
-                    <option value="p.o.">p.o. (oral)</option>
-                    <option value="s.c.">s.c. (subkutan)</option>
-                    <option value="i.m.">i.m. (intramuskulär)</option>
+                    <option value="i.v.">i.v.</option>
+                    <option value="p.o.">p.o.</option>
+                    <option value="s.c.">s.c.</option>
+                    <option value="i.m.">i.m.</option>
                     <option value="rektal">rektal</option>
                     <option value="topisch">topisch</option>
                     <option value="inhalativ">inhalativ</option>
                     <option value="">sonstige</option>
                   </select>
                 </div>
+              </div>
+              {/* Art der Gabe */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Regelmäßig', check: !medForm.is_prn && !medForm.is_dti, onClick: () => setMedForm({ ...medForm, is_prn: false, is_dti: false }) },
+                  { label: 'Bei Bedarf (PRN)', check: medForm.is_prn, onClick: () => setMedForm({ ...medForm, is_prn: true, is_dti: false }) },
+                  { label: 'Dauertropf (DTI)', check: medForm.is_dti, onClick: () => setMedForm({ ...medForm, is_dti: true, is_prn: false }) },
+                ].map(opt => (
+                  <button key={opt.label} onClick={opt.onClick} type="button" style={{
+                    padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                    background: opt.check ? uiTokens.brand : '#f1f5f9', color: opt.check ? '#fff' : uiTokens.textPrimary,
+                    border: opt.check ? 'none' : '1px solid #d1d5db',
+                  }}>{opt.label}</button>
+                ))}
+              </div>
+              {medForm.is_dti && (
+                <Input label="DTI Rate (ml/h)" value={medForm.dti_rate_ml_h} onChange={(e) => setMedForm({ ...medForm, dti_rate_ml_h: e.target.value })} type="number" placeholder="z.B. 60" />
+              )}
+              {!medForm.is_prn && !medForm.is_dti && (
+                <>
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Häufigkeit</label>
                   <select value={medForm.frequency_label} onChange={(e) => {
@@ -879,37 +924,28 @@ export default function StationSheetPage() {
                     let hours = medForm.scheduled_hours;
                     if (freq === '1x täglich') hours = '8';
                     else if (freq === '2x täglich') hours = '8,20';
-                    else if (freq === '3x täglich') hours = '7,15,23';
-                    else if (freq === '4x täglich') hours = '7,13,19,1';
-                    else if (freq === '6x täglich') hours = '7,11,15,19,23,3';
+                    else if (freq === '3x täglich') hours = '8,16,0';
+                    else if (freq === '4x täglich') hours = '8,14,20,2';
+                    else if (freq === '6x täglich') hours = '8,12,16,20,0,4';
                     setMedForm({ ...medForm, frequency_label: freq, scheduled_hours: hours });
                   }} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}>
                     <option value="1x täglich">1x täglich</option>
-                    <option value="2x täglich">2x täglich</option>
-                    <option value="3x täglich">3x täglich</option>
-                    <option value="4x täglich">4x täglich</option>
-                    <option value="6x täglich">6x täglich</option>
-                    <option value="individuell">individuell</option>
+                    <option value="2x täglich">2x täglich (alle 12h)</option>
+                    <option value="3x täglich">3x täglich (alle 8h)</option>
+                    <option value="4x täglich">4x täglich (alle 6h)</option>
+                    <option value="6x täglich">6x täglich (alle 4h)</option>
+                    <option value="individuell">individuell...</option>
                   </select>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: '16px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={medForm.is_prn} onChange={(e) => setMedForm({ ...medForm, is_prn: e.target.checked, is_dti: false })} /> Bei Bedarf (PRN)
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={medForm.is_dti} onChange={(e) => setMedForm({ ...medForm, is_dti: e.target.checked, is_prn: false })} /> Dauerinfusion (DTI)
-                </label>
-              </div>
-              {medForm.is_dti && (
-                <Input label="DTI Rate (ml/h)" value={medForm.dti_rate_ml_h} onChange={(e) => setMedForm({ ...medForm, dti_rate_ml_h: e.target.value })} type="number" />
-              )}
-              {!medForm.is_prn && !medForm.is_dti && (
+                {medForm.frequency_label === 'individuell' && (
+                  <Input label="Häufigkeit (Freitext)" value={medForm.frequency_label} onChange={(e) => setMedForm({ ...medForm, frequency_label: e.target.value })} placeholder="z.B. alle 2 Stunden, morgens und abends" />
+                )}
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Uhrzeiten</label>
-                  <Input value={medForm.scheduled_hours} onChange={(e) => setMedForm({ ...medForm, scheduled_hours: e.target.value })} placeholder="7,15,23" />
-                  <div style={{ fontSize: '11px', color: uiTokens.textMuted, marginTop: '4px' }}>Wird automatisch berechnet – bei Bedarf anpassen</div>
+                  <Input value={medForm.scheduled_hours} onChange={(e) => setMedForm({ ...medForm, scheduled_hours: e.target.value })} placeholder="8,16,0" />
+                  <div style={{ fontSize: '11px', color: uiTokens.textMuted, marginTop: '4px' }}>Automatisch berechnet – bei Bedarf anpassen</div>
                 </div>
+                </>
               )}
               <Input label="Angeordnet von" value={medForm.ordered_by} onChange={(e) => setMedForm({ ...medForm, ordered_by: e.target.value })} placeholder="Dr. Müller" />
               <Input label="Notizen" value={medForm.notes} onChange={(e) => setMedForm({ ...medForm, notes: e.target.value })} />
