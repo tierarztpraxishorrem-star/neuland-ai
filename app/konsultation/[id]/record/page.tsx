@@ -564,16 +564,42 @@ export default function RecordPage() {
     return new Promise<number>((resolve) => {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      let resolved = false;
 
-      audio.onloadedmetadata = () => {
-        const duration = Number.isFinite(audio.duration) ? Math.max(1, Math.floor(audio.duration)) : 1;
+      const finish = (dur: number) => {
+        if (resolved) return;
+        resolved = true;
         URL.revokeObjectURL(url);
-        resolve(duration);
+        resolve(dur);
       };
 
+      const tryRead = () => {
+        if (Number.isFinite(audio.duration) && audio.duration > 0.5) {
+          finish(Math.max(1, Math.floor(audio.duration)));
+        }
+      };
+
+      // Some formats (mp3, m4a) need the browser to scan further before duration is known.
+      // loadedmetadata fires first but duration may still be Infinity.
+      // durationchange fires when the browser finally resolves the real duration.
+      audio.onloadedmetadata = tryRead;
+      audio.ondurationchange = tryRead;
+
+      // Fallback: estimate from file size if browser can't determine duration.
+      // ~128kbps is a reasonable average for speech audio.
+      const timeoutMs = 3000;
+      setTimeout(() => {
+        if (!resolved) {
+          const estimatedBitrate = 128 * 1024 / 8; // 128kbps in bytes/sec
+          const estimated = Math.max(1, Math.floor(blob.size / estimatedBitrate));
+          finish(estimated);
+        }
+      }, timeoutMs);
+
       audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(1);
+        const estimatedBitrate = 128 * 1024 / 8;
+        const estimated = Math.max(1, Math.floor(blob.size / estimatedBitrate));
+        finish(estimated);
       };
     });
   };
