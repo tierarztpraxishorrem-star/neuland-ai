@@ -423,7 +423,6 @@ export default function StationPage() {
                       {item.detail && <span style={{ color: '#94a3b8', marginLeft: '6px' }}>({item.detail})</span>}
                     </span>
                     <span style={{ fontSize: '12px', color: '#64748b' }}>
-                      {item.type === 'task' && <span style={{ color: '#4ade80', marginRight: '6px' }}>klick = erledigt</span>}
                       Box {item.box} · {item.patient}
                     </span>
                   </div>
