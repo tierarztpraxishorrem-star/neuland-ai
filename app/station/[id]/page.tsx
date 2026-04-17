@@ -88,6 +88,22 @@ type Alert = {
   medication_id: string | null;
 };
 
+type CustomParam = {
+  id: string;
+  label: string;
+  unit: string | null;
+  is_required: boolean;
+  sort_order: number;
+};
+
+type CustomValue = {
+  id: string;
+  param_id: string;
+  measured_hour: number;
+  value: string;
+  recorded_by: string | null;
+};
+
 const HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6];
 
 async function fetchWithAuth(path: string, init?: RequestInit) {
@@ -107,8 +123,16 @@ export default function StationSheetPage() {
   const [administrations, setAdministrations] = useState<Administration[]>([]);
   const [vitals, setVitals] = useState<Vital[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [customParams, setCustomParams] = useState<CustomParam[]>([]);
+  const [customValues, setCustomValues] = useState<CustomValue[]>([]);
   const [loading, setLoading] = useState(true);
   const [aiChecking, setAiChecking] = useState(false);
+
+  // Add custom param
+  const [showAddParam, setShowAddParam] = useState(false);
+  const [newParamLabel, setNewParamLabel] = useState('');
+  const [newParamUnit, setNewParamUnit] = useState('');
+  const [newParamRequired, setNewParamRequired] = useState(false);
 
   // Administer modal
   const [adminModal, setAdminModal] = useState<{ medId: string; medName: string; hour: number } | null>(null);
@@ -148,6 +172,8 @@ export default function StationSheetPage() {
       setAdministrations(data.administrations || []);
       setVitals(data.vitals || []);
       setAlerts(data.alerts || []);
+      setCustomParams(data.custom_params || []);
+      setCustomValues(data.custom_values || []);
     } catch { showToast({ message: 'Fehler beim Laden.', type: 'error' }); } finally { setLoading(false); }
   }, [patientId, router]);
 
@@ -308,6 +334,49 @@ export default function StationSheetPage() {
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setRuleSubmitting(false); }
   };
 
+  const handleAddCustomParam = async () => {
+    if (!newParamLabel.trim()) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { error } = await supabase.from('station_vital_params').insert({
+        station_patient_id: patientId,
+        practice_id: (await supabase.from('station_patients').select('practice_id').eq('id', patientId).single()).data?.practice_id,
+        label: newParamLabel.trim(),
+        unit: newParamUnit.trim() || null,
+        is_required: newParamRequired,
+      });
+      if (error) { showToast({ message: 'Fehler.', type: 'error' }); return; }
+      showToast({ message: 'Parameter hinzugefügt!', type: 'success' });
+      setShowAddParam(false);
+      setNewParamLabel('');
+      setNewParamUnit('');
+      setNewParamRequired(false);
+      loadData();
+    } catch { showToast({ message: 'Fehler.', type: 'error' }); }
+  };
+
+  const handleAddCustomValue = async (paramId: string, hour: number, value: string) => {
+    if (!value.trim()) return;
+    try {
+      const { error } = await supabase.from('station_vital_custom_values').insert({
+        param_id: paramId,
+        station_patient_id: patientId,
+        practice_id: (await supabase.from('station_patients').select('practice_id').eq('id', patientId).single()).data?.practice_id,
+        measured_hour: hour,
+        value: value.trim(),
+      });
+      if (!error) loadData();
+    } catch { /* ignore */ }
+  };
+
+  const handleAcknowledgeAlert = async (alertId: string) => {
+    try {
+      await supabase.from('station_ai_alerts').update({ is_acknowledged: true, acknowledged_at: new Date().toISOString() }).eq('id', alertId);
+      loadData();
+    } catch { /* ignore */ }
+  };
+
   const handlePdf = async () => {
     try {
       const res = await fetchWithAuth(`/api/station/patients/${patientId}/pdf`);
@@ -416,16 +485,33 @@ export default function StationSheetPage() {
                   <span style={{ fontWeight: 600, fontSize: '14px' }}>{a.message}</span>
                 </div>
                 {a.details && <div style={{ fontSize: '13px', color: uiTokens.textSecondary, marginLeft: '24px' }}>{a.details}</div>}
-                <button
-                  onClick={() => {
-                    const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
-                    setRuleModal({ medication_name: medName, alert_message: a.message });
-                    setRuleText('');
-                  }}
-                  style={{ marginLeft: '24px', marginTop: '6px', background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: uiTokens.textSecondary, cursor: 'pointer' }}
-                >
-                  Für uns OK – Regel anlegen
-                </button>
+                <div style={{ display: 'flex', gap: '8px', marginLeft: '24px', marginTop: '8px', flexWrap: 'wrap' }}>
+                  {a.severity !== 'critical' ? (
+                    <button
+                      onClick={() => handleAcknowledgeAlert(a.id)}
+                      style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#16a34a', cursor: 'pointer' }}
+                    >
+                      OK, erledigt
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { if (confirm('Diese kritische Warnung wirklich als erledigt markieren? Bitte sicherstellen, dass die Medikation korrigiert wurde.')) handleAcknowledgeAlert(a.id); }}
+                      style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#dc2626', cursor: 'pointer' }}
+                    >
+                      Korrigiert / bestätigt
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      const medName = medications.find(m => m.id === a.medication_id)?.name || a.message.split(':')[0] || 'Medikament';
+                      setRuleModal({ medication_name: medName, alert_message: a.message });
+                      setRuleText('');
+                    }}
+                    style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: uiTokens.textSecondary, cursor: 'pointer' }}
+                  >
+                    Für uns OK – Regel anlegen
+                  </button>
+                </div>
               </Card>
             ))}
           </div>
@@ -530,9 +616,14 @@ export default function StationSheetPage() {
 
         {/* Vitals section */}
         <Section title="Verlauf (heute)" actions={
-          <Button variant="primary" size="sm" onClick={() => setShowVitalsModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Plus size={14} /> Eintrag
-          </Button>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <Button variant="ghost" size="sm" onClick={() => setShowAddParam(true)} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+              <Plus size={14} /> Parameter
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setShowVitalsModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Plus size={14} /> Eintrag
+            </Button>
+          </div>
         }>
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '700px' }}>
@@ -597,6 +688,34 @@ export default function StationSheetPage() {
                     );
                   })}
                 </tr>
+                {/* Custom parameter rows */}
+                {customParams.map(cp => (
+                  <tr key={cp.id} style={{ borderTop: `1px solid ${cp.is_required ? '#fde68a' : '#f1f5f9'}`, background: cp.is_required ? '#fffbeb' : 'transparent' }}>
+                    <td style={{ padding: '8px 6px', fontWeight: 600, color: cp.is_required ? '#b45309' : uiTokens.textPrimary, fontSize: '12px' }}>
+                      {cp.label}{cp.unit ? ` (${cp.unit})` : ''}{cp.is_required ? ' *' : ''}
+                    </td>
+                    {HOURS.map(h => {
+                      const cv = customValues.find(v => v.param_id === cp.id && v.measured_hour === h);
+                      return (
+                        <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '11px' }}>
+                          {cv ? (
+                            <span style={{ color: uiTokens.textPrimary }}>{cv.value}</span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                const val = prompt(`${cp.label} um ${String(h).padStart(2, '0')}:00:`);
+                                if (val) handleAddCustomValue(cp.id, h, val);
+                              }}
+                              style={{ color: cp.is_required ? '#eab308' : '#e5e7eb', background: 'none', border: 'none', cursor: 'pointer', fontSize: '10px' }}
+                            >
+                              {cp.is_required ? '!' : '–'}
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -778,6 +897,32 @@ export default function StationSheetPage() {
               <Input label="Notizen" value={editMedForm.notes} onChange={(e) => setEditMedForm({ ...editMedForm, notes: e.target.value })} />
               <Button variant="primary" onClick={handleEditMed} disabled={editMedSubmitting || !editMedForm.name.trim() || !editMedForm.dose.trim()} style={{ minHeight: '44px' }}>
                 {editMedSubmitting ? 'Speichern...' : 'Änderungen speichern'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Add custom vital param modal */}
+      {showAddParam && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }} onClick={() => setShowAddParam(false)}>
+          <Card style={{ maxWidth: '400px', width: '100%', padding: '24px' }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Eigenen Messwert hinzufügen</h3>
+              <button onClick={() => setShowAddParam(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <p style={{ fontSize: '13px', color: uiTokens.textSecondary, marginBottom: '12px' }}>
+              Füge einen individuellen Parameter hinzu, der nur für diesen Patienten gilt.
+            </p>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <Input label="Bezeichnung *" value={newParamLabel} onChange={(e) => setNewParamLabel(e.target.value)} placeholder="z.B. Blutzucker, Drainagemenge, SpO2" />
+              <Input label="Einheit" value={newParamUnit} onChange={(e) => setNewParamUnit(e.target.value)} placeholder="z.B. mg/dl, ml, %" />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={newParamRequired} onChange={(e) => setNewParamRequired(e.target.checked)} />
+                <span>Pflicht-Parameter <span style={{ color: uiTokens.textMuted, fontSize: '12px' }}>(gelb hervorgehoben)</span></span>
+              </label>
+              <Button variant="primary" onClick={handleAddCustomParam} disabled={!newParamLabel.trim()} style={{ minHeight: '44px' }}>
+                Parameter hinzufügen
               </Button>
             </div>
           </Card>

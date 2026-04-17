@@ -31,7 +31,7 @@ export async function GET(req: Request, ctx: RouteContext) {
       return NextResponse.json({ error: 'Patient nicht gefunden.' }, { status: 404 });
     }
 
-    const [medsRes, vitalsRes, alertsRes] = await Promise.all([
+    const [medsRes, vitalsRes, alertsRes, paramsRes] = await Promise.all([
       supabase
         .from('station_medications')
         .select('*')
@@ -50,16 +50,31 @@ export async function GET(req: Request, ctx: RouteContext) {
         .eq('station_patient_id', id)
         .order('created_at', { ascending: false })
         .limit(20),
+      supabase
+        .from('station_vital_params')
+        .select('*')
+        .eq('station_patient_id', id)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true }),
     ]);
 
-    // Load today's administrations
+    // Load today's administrations + custom values
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const { data: admins } = await supabase
-      .from('station_med_administrations')
-      .select('*')
-      .eq('station_patient_id', id)
-      .gte('created_at', todayStart.toISOString());
+    const todayStr = todayStart.toISOString().split('T')[0];
+
+    const [adminsRes, customValsRes] = await Promise.all([
+      supabase
+        .from('station_med_administrations')
+        .select('*')
+        .eq('station_patient_id', id)
+        .gte('created_at', todayStart.toISOString()),
+      supabase
+        .from('station_vital_custom_values')
+        .select('*')
+        .eq('station_patient_id', id)
+        .eq('measured_date', todayStr),
+    ]);
 
     return NextResponse.json({
       ok: true,
@@ -67,7 +82,9 @@ export async function GET(req: Request, ctx: RouteContext) {
       medications: medsRes.data || [],
       vitals: vitalsRes.data || [],
       alerts: alertsRes.data || [],
-      administrations: admins || [],
+      administrations: adminsRes.data || [],
+      custom_params: paramsRes.data || [],
+      custom_values: customValsRes.data || [],
     });
   } catch (error) {
     console.error('[api/station/patients/[id]] GET Fehler:', error);
