@@ -109,6 +109,130 @@ const contextFields: Record<string, Array<{ key: string; label: string; type?: s
   ]
 };
 
+const GENERATION_QUOTES = [
+  'VetMind denkt nach... das ist wie Differentialdiagnose, nur mit Text 🧠',
+  'Die KI strukturiert gerade dein Transkript – gruendlicher als eine Katze beim Putzen 🐱',
+  'Dokumentation wird erstellt... schneller als Karteischreiben von Hand 📝',
+  'VetMind arbeitet... zum Glueck muss die KI keine Handschriften entziffern ✍️',
+  'Noch einen Moment – auch der beste Bericht braucht seine Zeit 📋',
+  'Text wird generiert... wie ein gut sortierter Medikamentenschrank, nur digital 💊',
+  'Die KI fasst zusammen... aufmerksamer als ein Border Collie bei der Arbeit 🐕',
+  'Formulierungen werden poliert – praeziser als ein Ultraschallbild 🔬',
+  'Bericht entsteht... eleganter als eine Katzenlandung (meistens) 🐈',
+  'VetMind formuliert... das dauert kuerzer als ein Besitzer der "kurz was fragen" will 😅',
+  'Strukturierung laeuft... gruendlicher als die Anamnese eines besorgten Hundebesitzers 🐾',
+  'Fast geschafft – die KI gibt sich mehr Muehe als ein Praktikant am ersten Tag 💪',
+  'Daten werden verarbeitet... kein Kaffee noetig, die KI ist schon wach ☕',
+  'Dokumentation wird gebaut... stabiler als ein Katzenkratzbaum 🏗️',
+];
+
+function GenerationOverlay({ transcriptLength }: { transcriptLength: number }) {
+  const [quoteIndex, setQuoteIndex] = useState(() => Math.floor(Math.random() * GENERATION_QUOTES.length));
+  const [progress, setProgress] = useState(0);
+  const [fadeIn, setFadeIn] = useState(true);
+  const startTimeRef = useRef(Date.now());
+
+  // Rough estimate: ~1s per 1000 chars input, minimum 10s
+  const estimatedSeconds = Math.max(10, Math.ceil(transcriptLength / 1000) * 1.5);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFadeIn(false);
+      setTimeout(() => {
+        setQuoteIndex((prev) => (prev + 1) % GENERATION_QUOTES.length);
+        setFadeIn(true);
+      }, 400);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - startTimeRef.current) / 1000;
+      const ratio = Math.min(elapsed / estimatedSeconds, 1);
+      const eased = 1 - Math.pow(1 - ratio, 2.5);
+      setProgress(Math.min(eased * 95, 95));
+    }, 200);
+    return () => clearInterval(interval);
+  }, [estimatedSeconds]);
+
+  const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 9999,
+      background: 'rgba(0, 0, 0, 0.85)',
+      backdropFilter: 'blur(8px)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+    }}>
+      <div style={{
+        fontSize: '48px',
+        marginBottom: '24px',
+        animation: 'vetmind-pulse 2s ease-in-out infinite',
+      }}>
+        🧠
+      </div>
+
+      <div style={{
+        fontSize: '16px',
+        fontWeight: 500,
+        color: '#fff',
+        textAlign: 'center',
+        maxWidth: '480px',
+        minHeight: '48px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: fadeIn ? 1 : 0,
+        transition: 'opacity 0.4s ease',
+        marginBottom: '32px',
+        lineHeight: 1.5,
+      }}>
+        {GENERATION_QUOTES[quoteIndex]}
+      </div>
+
+      <div style={{
+        width: '100%',
+        maxWidth: '400px',
+        height: '8px',
+        background: 'rgba(255, 255, 255, 0.15)',
+        borderRadius: '4px',
+        overflow: 'hidden',
+        marginBottom: '16px',
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${progress}%`,
+          background: 'linear-gradient(90deg, #6366f1, #a78bfa)',
+          borderRadius: '4px',
+          transition: 'width 0.3s ease-out',
+        }} />
+      </div>
+
+      <div style={{
+        fontSize: '13px',
+        color: 'rgba(255, 255, 255, 0.7)',
+        textAlign: 'center',
+      }}>
+        ca. {estimatedMinutes} {estimatedMinutes === 1 ? 'Minute' : 'Minuten'} geschaetzt
+      </div>
+
+      <style>{`
+        @keyframes vetmind-pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.85; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function ResultPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1598,6 +1722,10 @@ export default function ResultPage() {
   }
 
   return (
+    <>
+    {loading && transcript.length > 0 && (
+      <GenerationOverlay transcriptLength={transcript.length} />
+    )}
     <main
       style={{
         minHeight: '100vh',
@@ -2586,5 +2714,6 @@ export default function ResultPage() {
         </div>
       )}
     </main>
+    </>
   );
 }
