@@ -997,6 +997,7 @@ export default function ResultPage() {
         blobAudioUrlRef.current = previewUrl;
         setRecordingAudioUrl(previewUrl);
 
+        let storagePublicUrl = '';
         try {
           const path = `recordings/${caseId}/${Date.now()}.webm`;
           const uploadRes = await supabase.storage
@@ -1005,9 +1006,9 @@ export default function ResultPage() {
 
           if (!uploadRes.error) {
             const publicRes = supabase.storage.from('recordings').getPublicUrl(path);
-            const publicUrl = publicRes?.data?.publicUrl || '';
-            if (publicUrl) {
-              setRecordingAudioUrl(publicUrl);
+            storagePublicUrl = publicRes?.data?.publicUrl || '';
+            if (storagePublicUrl) {
+              setRecordingAudioUrl(storagePublicUrl);
             }
           }
         } catch {
@@ -1015,7 +1016,14 @@ export default function ResultPage() {
         }
 
         const formData = new FormData();
-        formData.append('file', blob);
+        const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4 MB
+
+        if (blob.size > DIRECT_UPLOAD_LIMIT && storagePublicUrl) {
+          // Large file already in Storage – send URL instead of body
+          formData.append('audio_url', storagePublicUrl);
+        } else {
+          formData.append('file', blob);
+        }
 
         const res = await fetch('/api/transcribe', {
           method: 'POST',

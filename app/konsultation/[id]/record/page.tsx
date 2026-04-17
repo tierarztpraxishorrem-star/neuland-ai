@@ -470,11 +470,39 @@ export default function RecordPage() {
     }
   };
 
+  const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4 MB – Vercel body limit is 4.5 MB
+
   const transcribeSegment = async (segment: RecordingSegment) => {
     const formData = new FormData();
-    const extension = segment.source === 'upload' ? 'upload' : 'webm';
-    formData.append('file', segment.blob, `${segment.id}.${extension}`);
     formData.append('mode', 'live');
+
+    if (segment.blob.size > DIRECT_UPLOAD_LIMIT) {
+      // Large file: upload to Supabase Storage first, then send URL to API
+      const ext = segment.source === 'upload' ? 'upload' : 'webm';
+      const path = `recordings/${caseId}/transcribe-${segment.id}.${ext}`;
+      const uploadRes = await supabase.storage
+        .from('recordings')
+        .upload(path, segment.blob, {
+          contentType: segment.blob.type || 'audio/webm',
+          upsert: true
+        });
+
+      if (uploadRes.error) {
+        throw new Error(`Storage-Upload fehlgeschlagen: ${uploadRes.error.message}`);
+      }
+
+      const publicRes = supabase.storage.from('recordings').getPublicUrl(path);
+      const publicUrl = publicRes?.data?.publicUrl;
+      if (!publicUrl) {
+        throw new Error('Keine öffentliche URL vom Storage erhalten');
+      }
+
+      formData.append('audio_url', publicUrl);
+    } else {
+      // Small file: send directly in request body
+      const extension = segment.source === 'upload' ? 'upload' : 'webm';
+      formData.append('file', segment.blob, `${segment.id}.${extension}`);
+    }
 
     const res = await fetch('/api/transcribe', {
       method: 'POST',

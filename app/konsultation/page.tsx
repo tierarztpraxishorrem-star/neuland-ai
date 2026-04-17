@@ -559,7 +559,21 @@ const submitRecording = async () => {
   try {
     // 🔥 1. Transkription
     const formData = new FormData();
-    formData.append("file", audioBlob, "aufnahme.webm");
+    const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4 MB
+
+    if (audioBlob.size > DIRECT_UPLOAD_LIMIT) {
+      // Large file: upload to Supabase Storage first, send URL
+      const path = `recordings/direct/aufnahme-${Date.now()}.webm`;
+      const uploadRes = await supabase.storage
+        .from('recordings')
+        .upload(path, audioBlob, { contentType: 'audio/webm', upsert: true });
+      if (uploadRes.error) throw new Error(`Storage-Upload fehlgeschlagen: ${uploadRes.error.message}`);
+      const publicUrl = supabase.storage.from('recordings').getPublicUrl(path)?.data?.publicUrl;
+      if (!publicUrl) throw new Error('Keine öffentliche URL vom Storage erhalten');
+      formData.append('audio_url', publicUrl);
+    } else {
+      formData.append("file", audioBlob, "aufnahme.webm");
+    }
 
     const transcribeRes = await fetch("/api/transcribe", {
       method: "POST",

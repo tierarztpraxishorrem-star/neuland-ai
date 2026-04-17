@@ -206,21 +206,48 @@ export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
+    const audioUrl = sanitizeText(formData.get("audio_url"));
     const mode = sanitizeText(formData.get("mode"));
     const isLiveMode = mode.toLowerCase() === "live";
 
-    if (!file) {
-      return Response.json({ error: "No file uploaded" }, { status: 400 });
+    if (!file && !audioUrl) {
+      return Response.json({ error: "No file or audio_url provided" }, { status: 400 });
     }
 
-    const fileSizeMB = file.size / (1024 * 1024);
+    // --- Path A: pre-uploaded file via URL (large files bypass Vercel body limit) ---
+    if (audioUrl) {
+      console.log(`[transcribe] Using pre-uploaded audio_url`);
+
+      const assemblyKey = process.env.ASSEMBLYAI_API_KEY;
+      if (!assemblyKey) {
+        return Response.json(
+          { error: "ASSEMBLYAI_API_KEY is not configured" },
+          { status: 500 }
+        );
+      }
+
+      // AssemblyAI accepts any public URL directly – no need to re-upload
+      const transcriptId = await createAssemblyTranscript(audioUrl, assemblyKey);
+      const rawText = await pollAssemblyTranscript(transcriptId, assemblyKey);
+      const { text, corrected } = await maybeCorrectTranscript(rawText);
+
+      return Response.json({
+        text,
+        rawText,
+        corrected,
+        provider: "assemblyai-url"
+      });
+    }
+
+    // --- Path B: file sent in request body (small files only, <4.5 MB Vercel limit) ---
+    const fileSizeMB = file!.size / (1024 * 1024);
     const openAiKey = process.env.OPENAI_API_KEY;
 
     // Fast path for live mode to avoid queue backlog and delayed transcript updates.
     // Skip OpenAI if file exceeds their 25 MB limit – go straight to AssemblyAI.
     if (isLiveMode && openAiKey && fileSizeMB <= OPENAI_FILE_SIZE_LIMIT_MB) {
       try {
-        const text = await transcribeWithOpenAI(file, openAiKey);
+        const text = await transcribeWithOpenAI(file!, openAiKey);
         return Response.json({
           text,
           rawText: text,
@@ -232,10 +259,6 @@ export async function POST(req: Request) {
       }
     }
 
-    if (fileSizeMB > OPENAI_FILE_SIZE_LIMIT_MB) {
-      console.log(`[transcribe] Datei ${fileSizeMB.toFixed(1)}MB > ${OPENAI_FILE_SIZE_LIMIT_MB}MB, nutze AssemblyAI`);
-    }
-
     const assemblyKey = process.env.ASSEMBLYAI_API_KEY;
     if (!assemblyKey) {
       return Response.json(
@@ -244,7 +267,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const uploadUrl = await uploadToAssembly(file, assemblyKey);
+    const uploadUrl = await uploadToAssembly(file!, assemblyKey);
     const transcriptId = await createAssemblyTranscript(uploadUrl, assemblyKey);
     const rawText = await pollAssemblyTranscript(transcriptId, assemblyKey);
 
