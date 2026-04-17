@@ -1,10 +1,10 @@
-export const maxDuration = 300; // 5 min – AssemblyAI polling for long audio needs time
+export const maxDuration = 900; // 15 min – AssemblyAI "best" model can take 5-10 min for long audio
 export const runtime = 'nodejs';
 
 const ASSEMBLY_API_URL = "https://api.assemblyai.com/v2";
 const OPENAI_FILE_SIZE_LIMIT_MB = 24; // OpenAI Whisper/transcribe hard limit is 25 MB
-const DEFAULT_POLL_INTERVAL_MS = 2000;
-const MAX_POLL_ATTEMPTS = 130; // ~260s max polling – fits within 300s maxDuration
+const DEFAULT_POLL_INTERVAL_MS = 3000;
+const MAX_POLL_ATTEMPTS = 250; // ~750s max polling – fits within 900s maxDuration
 const CORRECTION_MIN_LENGTH = 300;
 
 const MEDICAL_WORD_BOOST = [

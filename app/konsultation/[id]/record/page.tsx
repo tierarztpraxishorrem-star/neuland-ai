@@ -118,7 +118,8 @@ function TranscriptionOverlay({ totalDurationSeconds }: { totalDurationSeconds: 
   const startTimeRef = useRef(Date.now());
 
   // ~3 sec transcription per 1 min audio, minimum 15s
-  const estimatedSeconds = Math.max(15, Math.ceil(totalDurationSeconds * 0.05));
+  // AssemblyAI "best" model: ~30-50% of real-time + upload + correction
+  const estimatedSeconds = Math.max(30, Math.ceil(totalDurationSeconds * 0.35));
   const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
 
   // Rotate quotes every 4 seconds with fade
