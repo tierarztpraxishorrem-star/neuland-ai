@@ -141,7 +141,7 @@ export default function StationSheetPage() {
 
   // Add medication modal
   const [showMedModal, setShowMedModal] = useState(false);
-  const [medForm, setMedForm] = useState({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,13,19', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
+  const [medForm, setMedForm] = useState({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,15,23', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
   const [medSubmitting, setMedSubmitting] = useState(false);
 
   // Add vitals modal
@@ -226,7 +226,7 @@ export default function StationSheetPage() {
       if (!res.ok) { showToast({ message: data.error || 'Fehler', type: 'error' }); return; }
       showToast({ message: 'Medikament hinzugefügt!', type: 'success' });
       setShowMedModal(false);
-      setMedForm({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,13,19', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
+      setMedForm({ name: '', dose: '', route: 'i.v.', frequency_label: '3x täglich', scheduled_hours: '7,15,23', is_prn: false, is_dti: false, dti_rate_ml_h: '', ordered_by: '', notes: '' });
       loadData();
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setMedSubmitting(false); }
   };
@@ -790,11 +790,42 @@ export default function StationSheetPage() {
               <button onClick={() => setShowMedModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
             <div style={{ display: 'grid', gap: '12px' }}>
-              <Input label="Name *" value={medForm.name} onChange={(e) => setMedForm({ ...medForm, name: e.target.value })} placeholder="z.B. Metamizol" />
-              <Input label="Dosis *" value={medForm.dose} onChange={(e) => setMedForm({ ...medForm, dose: e.target.value })} placeholder="z.B. 3,1 ml i.v." />
+              <Input label="Medikament *" value={medForm.name} onChange={(e) => setMedForm({ ...medForm, name: e.target.value })} placeholder="z.B. Metamizol" />
+              <Input label="Dosis *" value={medForm.dose} onChange={(e) => setMedForm({ ...medForm, dose: e.target.value })} placeholder="z.B. 3,1 ml oder 25mg/kg" />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <Input label="Applikationsweg" value={medForm.route} onChange={(e) => setMedForm({ ...medForm, route: e.target.value })} placeholder="i.v., p.o., s.c." />
-                <Input label="Häufigkeit" value={medForm.frequency_label} onChange={(e) => setMedForm({ ...medForm, frequency_label: e.target.value })} placeholder="3x täglich" />
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Applikationsweg</label>
+                  <select value={medForm.route} onChange={(e) => setMedForm({ ...medForm, route: e.target.value })} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}>
+                    <option value="i.v.">i.v. (intravenös)</option>
+                    <option value="p.o.">p.o. (oral)</option>
+                    <option value="s.c.">s.c. (subkutan)</option>
+                    <option value="i.m.">i.m. (intramuskulär)</option>
+                    <option value="rektal">rektal</option>
+                    <option value="topisch">topisch</option>
+                    <option value="inhalativ">inhalativ</option>
+                    <option value="">sonstige</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Häufigkeit</label>
+                  <select value={medForm.frequency_label} onChange={(e) => {
+                    const freq = e.target.value;
+                    let hours = medForm.scheduled_hours;
+                    if (freq === '1x täglich') hours = '8';
+                    else if (freq === '2x täglich') hours = '8,20';
+                    else if (freq === '3x täglich') hours = '7,15,23';
+                    else if (freq === '4x täglich') hours = '7,13,19,1';
+                    else if (freq === '6x täglich') hours = '7,11,15,19,23,3';
+                    setMedForm({ ...medForm, frequency_label: freq, scheduled_hours: hours });
+                  }} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}>
+                    <option value="1x täglich">1x täglich</option>
+                    <option value="2x täglich">2x täglich</option>
+                    <option value="3x täglich">3x täglich</option>
+                    <option value="4x täglich">4x täglich</option>
+                    <option value="6x täglich">6x täglich</option>
+                    <option value="individuell">individuell</option>
+                  </select>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: '16px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
@@ -808,7 +839,11 @@ export default function StationSheetPage() {
                 <Input label="DTI Rate (ml/h)" value={medForm.dti_rate_ml_h} onChange={(e) => setMedForm({ ...medForm, dti_rate_ml_h: e.target.value })} type="number" />
               )}
               {!medForm.is_prn && !medForm.is_dti && (
-                <Input label="Uhrzeiten (kommagetrennt)" value={medForm.scheduled_hours} onChange={(e) => setMedForm({ ...medForm, scheduled_hours: e.target.value })} placeholder="7,13,19" />
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Uhrzeiten</label>
+                  <Input value={medForm.scheduled_hours} onChange={(e) => setMedForm({ ...medForm, scheduled_hours: e.target.value })} placeholder="7,15,23" />
+                  <div style={{ fontSize: '11px', color: uiTokens.textMuted, marginTop: '4px' }}>Wird automatisch berechnet – bei Bedarf anpassen</div>
+                </div>
               )}
               <Input label="Angeordnet von" value={medForm.ordered_by} onChange={(e) => setMedForm({ ...medForm, ordered_by: e.target.value })} placeholder="Dr. Müller" />
               <Input label="Notizen" value={medForm.notes} onChange={(e) => setMedForm({ ...medForm, notes: e.target.value })} />
