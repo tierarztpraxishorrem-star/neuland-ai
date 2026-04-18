@@ -269,6 +269,7 @@ export default function StationSheetPage() {
   // Reload vitals + tasks + administrations when selectedDate changes
   const todayStr = new Date().toISOString().slice(0, 10);
   const isToday = selectedDate === todayStr;
+  const isPastDay = selectedDate < todayStr;
 
   // Lade tagesabhängige Daten (Vitals, Tasks, Administrations, CustomValues)
   const loadDayData = useCallback(async (date: string) => {
@@ -980,7 +981,9 @@ export default function StationSheetPage() {
                         const isScheduled = med.scheduled_hours.includes(h);
                         const admin = administrations.find(a => a.medication_id === med.id && a.scheduled_hour === h);
                         // Nur überfällig wenn: heutiger Tag UND Stunde bereits vergangen
-                        const isOverdue = isScheduled && !admin && isToday && h <= currentHour;
+                        // Vergangener Tag: alles was nicht gegeben wurde ist überfällig
+                        // Heute: nur vergangene Stunden sind überfällig
+                        const isOverdue = isScheduled && !admin && (isPastDay || (isToday && h <= currentHour));
 
                         return (
                           <td key={h} style={{ textAlign: 'center', padding: '4px 1px' }}>
@@ -1151,7 +1154,7 @@ export default function StationSheetPage() {
                         const v = vitals.find(vt => vt.measured_hour === h);
                         const val = v ? (v as Record<string, unknown>)[row.key] : null;
                         const isScheduled = scheduledHours.includes(h);
-                        const isOverdue = isScheduled && val == null && isToday && h < currentHour;
+                        const isOverdue = isScheduled && val == null && (isPastDay || (isToday && h < currentHour));
                         const quickEntry = () => {
                           const input = prompt(`${row.label} um ${String(h).padStart(2, '0')}:00:`);
                           if (input && input.trim()) {
@@ -1218,7 +1221,7 @@ export default function StationSheetPage() {
                         const v = vitals.find(vt => vt.measured_hour === h);
                         const val = v && (v.feces_amount || v.feces_color || v.feces_consistency) ? [v.feces_amount, v.feces_color, v.feces_consistency].filter(Boolean).join('/') : null;
                         const isScheduled = fecesHours.includes(h);
-                        const isOverdue = isScheduled && !val && isToday && h < currentHour;
+                        const isOverdue = isScheduled && !val && (isPastDay || (isToday && h < currentHour));
                         return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '10px' }}>{val ? <span style={{ color: uiTokens.textPrimary, background: isScheduled ? '#dcfce7' : 'transparent', borderRadius: '50%', padding: '2px 4px' }}>{val}</span> : isScheduled ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`, background: isOverdue ? '#fef2f2' : 'transparent', fontSize: '8px', color: isOverdue ? '#ef4444' : '#0f6b74' }}>{isOverdue ? '!' : ''}</span> : <span style={{ color: '#e5e7eb' }}>–</span>}</td>;
                       })}
                     </tr>
@@ -1247,7 +1250,7 @@ export default function StationSheetPage() {
                         const v = vitals.find(vt => vt.measured_hour === h);
                         const val = v?.urine || null;
                         const isScheduled = urineHours.includes(h);
-                        const isOverdue = isScheduled && !val && isToday && h < currentHour;
+                        const isOverdue = isScheduled && !val && (isPastDay || (isToday && h < currentHour));
                         return <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '10px' }}>{val ? <span style={{ color: uiTokens.textPrimary, background: isScheduled ? '#dcfce7' : 'transparent', borderRadius: '50%', padding: '2px 4px' }}>{val}</span> : isScheduled ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`, background: isOverdue ? '#fef2f2' : 'transparent', fontSize: '8px', color: isOverdue ? '#ef4444' : '#0f6b74' }}>{isOverdue ? '!' : ''}</span> : <span style={{ color: '#e5e7eb' }}>–</span>}</td>;
                       })}
                     </tr>
