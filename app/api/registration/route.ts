@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendMail } from '../../../lib/server/mail';
 import { jsPDF } from 'jspdf';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 
 export const maxDuration = 60;
 
@@ -391,12 +393,14 @@ export async function POST(req: Request) {
       const { data: patientData } = await supabase
         .from('patients')
         .insert({
+          practice_id: PRACTICE_ID,
           name: animal.name,
           tierart: mapSpeciesToTierart(animal.species),
           rasse: animal.breed || null,
           alter: animal.birthDate || null,
           geschlecht: mapGender(animal.gender, animal.isCastrated),
           owner_name: `${owner.firstName} ${owner.lastName}`,
+          external_id: animal.chipNumber || null,
         })
         .select('id')
         .single();
@@ -545,6 +549,46 @@ export async function POST(req: Request) {
       });
     } catch (confirmError) {
       console.error('Confirmation email error:', confirmError);
+    }
+
+    // Send insurance info flyer if any animal requested it
+    const wantsInsuranceFlyer = animals.some((a) => a.wantsInsuranceInfo);
+    if (wantsInsuranceFlyer && owner.email) {
+      try {
+        const flyerPath = join(process.cwd(), 'public', 'Information_Tierkrankenversicherung.pdf');
+        const flyerBuffer = await readFile(flyerPath);
+        const flyerBase64 = flyerBuffer.toString('base64');
+
+        const petNames = animals.filter((a) => a.wantsInsuranceInfo).map((a) => a.name).join(', ');
+
+        await sendMail({
+          to: [owner.email],
+          subject: `Neukundenformular + Informationen Tierversicherung - ${petNames}`,
+          isHtml: true,
+          body: `
+            <div style="font-family:Arial,sans-serif;max-width:600px;">
+              <h2 style="color:#0f6b74;">Informationen zu Tierkrankenversicherungen</h2>
+              <p>Sehr geehrte/r ${owner.salutation || 'Frau/Herr'} ${owner.lastName},</p>
+              <p>Sie haben gerade ein <strong>Neukundenformular im Tierärztezentrum Neuland</strong> ausgefüllt und dabei angegeben, dass Sie <strong>weiterführende Informationen zu Versicherungen</strong> wünschen.</p>
+              <p>Anbei erhalten Sie unseren Info-Flyer - bei Fragen sprechen Sie uns gerne an!</p>
+              <p>Vielen Dank!</p>
+              <p>Mit freundlichen Grüßen,<br/><strong>Ihr Team vom Tierärztezentrum Neuland</strong></p>
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;"/>
+              <p style="font-size:11px;color:#94a3b8;">
+                Tierärztezentrum Neuland | Kopernikusstraße 35 | 50126 Bergheim<br/>
+                Tel.: +49 2271 5885269 | empfang@tierarztpraxis-horrem.de
+              </p>
+            </div>
+          `,
+          attachments: [{
+            name: 'Information_Tierkrankenversicherung.pdf',
+            contentType: 'application/pdf',
+            contentBytes: flyerBase64,
+          }],
+        });
+      } catch (flyerError) {
+        console.error('Insurance flyer email error:', flyerError);
+      }
     }
 
     return NextResponse.json({ ok: true, registration_id: registrationId });
