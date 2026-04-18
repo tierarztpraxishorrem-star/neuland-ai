@@ -403,17 +403,28 @@ export default function StationPage() {
                 {allOpen.map((item, i) => (
                   <div
                     key={`${item.patientId}-${item.taskId || item.label}-${i}`}
-                    onClick={item.type === 'task' && item.taskId ? () => checkTask(item.patientId, item.taskId!) : undefined}
+                    onClick={item.type === 'task' && item.taskId
+                      ? () => checkTask(item.patientId, item.taskId!)
+                      : () => router.push(`/station/${item.patientId}#verlauf`)
+                    }
                     style={{
                       fontSize: '14px', padding: '8px 12px', borderRadius: '8px',
                       background: item.type === 'vital' ? '#431407' : '#1c1917',
                       border: `1px solid ${item.type === 'vital' ? '#9a3412' : '#334155'}`,
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      cursor: item.type === 'task' ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       transition: 'background 0.15s, transform 0.1s',
                     }}
-                    onMouseEnter={item.type === 'task' ? (e) => { e.currentTarget.style.background = '#22c55e20'; e.currentTarget.style.borderColor = '#22c55e'; } : undefined}
-                    onMouseLeave={item.type === 'task' ? (e) => { e.currentTarget.style.background = '#1c1917'; e.currentTarget.style.borderColor = '#334155'; } : undefined}
+                    onMouseEnter={(e) => {
+                      const bg = item.type === 'vital' ? '#f9731520' : '#22c55e20';
+                      const bc = item.type === 'vital' ? '#f97315' : '#22c55e';
+                      e.currentTarget.style.background = bg; e.currentTarget.style.borderColor = bc;
+                    }}
+                    onMouseLeave={(e) => {
+                      const bg = item.type === 'vital' ? '#431407' : '#1c1917';
+                      const bc = item.type === 'vital' ? '#9a3412' : '#334155';
+                      e.currentTarget.style.background = bg; e.currentTarget.style.borderColor = bc;
+                    }}
                   >
                     <span>
                       <span style={{ color: item.type === 'vital' ? '#fb923c' : '#fbbf24', marginRight: '8px' }}>
