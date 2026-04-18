@@ -211,11 +211,9 @@ export default function StationSheetPage() {
       const data = await res.json();
       setPatient(data.patient);
       setMedications(data.medications || []);
-      setAdministrations(data.administrations || []);
-      setVitals(data.vitals || []);
       setAlerts(data.alerts || []);
       setCustomParams(data.custom_params || []);
-      setCustomValues(data.custom_values || []);
+      // Vitals, Administrations, CustomValues werden vom selectedDate-useEffect gesteuert
     } catch { showToast({ message: 'Fehler beim Laden.', type: 'error' }); } finally { setLoading(false); }
   }, [patientId, router]);
 
@@ -246,41 +244,48 @@ export default function StationSheetPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const isToday = selectedDate === todayStr;
 
-  useEffect(() => {
+  // Lade tagesabhängige Daten (Vitals, Tasks, Administrations, CustomValues)
+  const loadDayData = useCallback(async (date: string) => {
     if (!patientId) return;
-    // Vitals für gewählten Tag laden
-    fetchWithAuth(`/api/station/patients/${patientId}/vitals?date=${selectedDate}`)
+    const today = new Date().toISOString().slice(0, 10);
+    const viewing = date;
+
+    // Vitals für gewählten Tag
+    fetchWithAuth(`/api/station/patients/${patientId}/vitals?date=${viewing}`)
       .then((r) => r.json())
-      .then((d) => { if (d.vitals) setVitals(d.vitals); })
-      .catch(() => {});
-    // Tasks für gewählten Tag laden
-    fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks?date=${selectedDate}`)
+      .then((d) => setVitals(d.vitals || []))
+      .catch(() => setVitals([]));
+
+    // Tasks für gewählten Tag
+    fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks?date=${viewing}`)
       .then((r) => r.json())
       .then((d) => { if (d.tasks) setDailyTasks(d.tasks); })
       .catch(() => {});
-    // Administrations für gewählten Tag laden
-    const dayStart = `${selectedDate}T00:00:00`;
-    const dayEnd = `${selectedDate}T23:59:59`;
+
+    // Administrations + CustomValues
     fetchWithAuth(`/api/station/patients/${patientId}`)
       .then((r) => r.json())
       .then((d) => {
         const allAdmins: Administration[] = d.administrations || [];
-        if (!isToday) {
-          const dayAdmins = allAdmins.filter(a => a.administered_at >= dayStart && a.administered_at <= dayEnd);
-          setAdministrations(dayAdmins);
+        if (viewing !== today) {
+          const dayStart = `${viewing}T00:00:00`;
+          const dayEnd = `${viewing}T23:59:59`;
+          setAdministrations(allAdmins.filter(a => a.administered_at >= dayStart && a.administered_at <= dayEnd));
         } else {
           setAdministrations(allAdmins);
         }
         setCustomValues(d.custom_values || []);
       })
       .catch(() => {});
-  }, [selectedDate, patientId, isToday]);
+  }, [patientId]);
+
+  useEffect(() => { loadDayData(selectedDate); }, [selectedDate, loadDayData]);
 
   // Realtime
   useEffect(() => {
     const channel = supabase
       .channel(`station-sheet-${patientId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'station_med_administrations', filter: `station_patient_id=eq.${patientId}` }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'station_med_administrations', filter: `station_patient_id=eq.${patientId}` }, () => { loadData(); loadDayData(selectedDate); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [patientId, loadData]);
@@ -411,7 +416,7 @@ export default function StationSheetPage() {
       showToast({ message: 'Messung gespeichert!', type: 'success' });
       setShowVitalsModal(false);
       setVitalsForm({ measured_hour: new Date().getHours(), heart_rate: '', resp_rate: '', temperature_c: '', pain_score: '', urine: '', feces_amount: '', feces_consistency: '', food_eaten: '', recorded_by: '', notes: '' });
-      loadData();
+      loadDayData(selectedDate);
     } catch { showToast({ message: 'Fehler.', type: 'error' }); } finally { setVitalsSubmitting(false); }
   };
 
@@ -667,13 +672,17 @@ export default function StationSheetPage() {
                         key={dayNum}
                         onClick={(e) => { e.preventDefault(); setSelectedDate(dateStr); }}
                         style={{
-                          padding: '4px 10px', borderRadius: '8px', fontSize: '13px', fontWeight: isSelected ? 700 : 400,
+                          padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: isSelected ? 700 : 400,
                           background: isSelected ? uiTokens.brand : '#f1f5f9',
                           color: isSelected ? '#fff' : uiTokens.textSecondary,
                           border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px',
                         }}
                       >
-                        Tag {dayNum}
+                        <span>Tag {dayNum}</span>
+                        <span style={{ fontSize: '10px', opacity: 0.75 }}>
+                          {dayDate.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}
+                        </span>
                       </button>
                     );
                   })}
