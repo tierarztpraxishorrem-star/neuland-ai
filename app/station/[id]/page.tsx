@@ -122,6 +122,7 @@ export default function StationSheetPage() {
   const patientId = params.id as string;
 
   const [userRole, setUserRole] = useState<string>('member');
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [patient, setPatient] = useState<Patient | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [administrations, setAdministrations] = useState<Administration[]>([]);
@@ -240,6 +241,40 @@ export default function StationSheetPage() {
   }, [patientId]);
 
   useEffect(() => { loadData(); loadExtras(); }, [loadData, loadExtras]);
+
+  // Reload vitals + tasks + administrations when selectedDate changes
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isToday = selectedDate === todayStr;
+
+  useEffect(() => {
+    if (!patientId) return;
+    // Vitals für gewählten Tag laden
+    fetchWithAuth(`/api/station/patients/${patientId}/vitals?date=${selectedDate}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.vitals) setVitals(d.vitals); })
+      .catch(() => {});
+    // Tasks für gewählten Tag laden
+    fetchWithAuth(`/api/station/patients/${patientId}/daily-tasks?date=${selectedDate}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.tasks) setDailyTasks(d.tasks); })
+      .catch(() => {});
+    // Administrations für gewählten Tag laden
+    const dayStart = `${selectedDate}T00:00:00`;
+    const dayEnd = `${selectedDate}T23:59:59`;
+    fetchWithAuth(`/api/station/patients/${patientId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const allAdmins: Administration[] = d.administrations || [];
+        if (!isToday) {
+          const dayAdmins = allAdmins.filter(a => a.administered_at >= dayStart && a.administered_at <= dayEnd);
+          setAdministrations(dayAdmins);
+        } else {
+          setAdministrations(allAdmins);
+        }
+        setCustomValues(d.custom_values || []);
+      })
+      .catch(() => {});
+  }, [selectedDate, patientId, isToday]);
 
   // Realtime
   useEffect(() => {
@@ -615,7 +650,36 @@ export default function StationSheetPage() {
             <Link href="/station"><Button variant="ghost" size="sm"><ArrowLeft size={16} /></Button></Link>
             <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 700, color: uiTokens.textPrimary }}>{patient.patient_name}</h1>
             <span style={{ background: '#f1f5f9', borderRadius: '8px', padding: '4px 10px', fontSize: '13px', color: uiTokens.textSecondary, fontWeight: 600 }}>BOX {patient.box_number || '–'}</span>
-            <span style={{ background: '#f1f5f9', borderRadius: '8px', padding: '4px 10px', fontSize: '13px', color: uiTokens.textSecondary }}>Tag {patient.station_day}</span>
+            {/* Tage-Navigation */}
+            {(() => {
+              const totalDays = patient.station_day || 1;
+              const admDate = new Date(patient.admission_date + 'T12:00:00');
+              return (
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {Array.from({ length: totalDays }, (_, i) => {
+                    const dayNum = i + 1;
+                    const dayDate = new Date(admDate);
+                    dayDate.setDate(dayDate.getDate() + i);
+                    const dateStr = dayDate.toISOString().slice(0, 10);
+                    const isSelected = selectedDate === dateStr;
+                    return (
+                      <button
+                        key={dayNum}
+                        onClick={(e) => { e.preventDefault(); setSelectedDate(dateStr); }}
+                        style={{
+                          padding: '4px 10px', borderRadius: '8px', fontSize: '13px', fontWeight: isSelected ? 700 : 400,
+                          background: isSelected ? uiTokens.brand : '#f1f5f9',
+                          color: isSelected ? '#fff' : uiTokens.textSecondary,
+                          border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+                        }}
+                      >
+                        Tag {dayNum}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <Button variant="ghost" size="sm" onClick={handlePdf} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
