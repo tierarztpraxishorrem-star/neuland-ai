@@ -15,10 +15,10 @@ const PRIMARY_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5";
 const FALLBACK_MODEL = process.env.OPENAI_CHAT_FALLBACK_MODEL || "gpt-4.1";
 const MAX_NEXT_QUESTIONS = 6;
 
-const SYSTEM_PROMPT = `Du bist ein erfahrener Anamnese-Assistent fuer tiermedizinische Fachangestellte (TFA) in der Kleintierpraxis.
+const SYSTEM_PROMPT = `Du bist ein erfahrener Anamnese-Assistent für tiermedizinische Fachangestellte (TFA) in der Kleintierpraxis.
 Du analysierst ein Live-Transkript und extrahierst strukturierte Informationen anhand eines Templates.
 
-Fuer jeden Template-Punkt:
+Für jeden Template-Punkt:
 - known: Klar benannt im Transkript. WICHTIG: Extrahiere den KONKRETEN Wert aus dem Transkript als "value".
   Beispiele: "seit 3 Tagen", "2x taeglich", "wässrig, gelblich", "linke Hintergliedmaße", "Metacam 0.5 mg 1x taeglich"
   NICHT: "erwaehnt", "bekannt", "vorhanden" – diese Woerter sind verboten als value bei "known".
@@ -820,13 +820,13 @@ async function callModel(
     "Bereits offene/angezeigte Fragen (nicht doppeln):",
     openBlock,
     "",
-    "Bereits verwendete Feld-Keys fuer Fragen (nicht wiederverwenden):",
+    "Bereits verwendete Feld-Keys für Fragen (nicht wiederverwenden):",
     askedKeyBlock,
     "",
-    "Bereits offene Feld-Keys fuer Fragen (nicht doppeln):",
+    "Bereits offene Feld-Keys für Fragen (nicht doppeln):",
     openKeyBlock,
     "",
-    "WICHTIG - Regeln fuer das value-Feld bei status=known:",
+    "WICHTIG - Regeln für das value-Feld bei status=known:",
     "- Extrahiere den KONKRETEN Wert woertlich oder zusammengefasst aus dem Transkript.",
     '- Richtig: "seit 3 Tagen", "2x taeglich morgens und abends", "wässrig, gelblich", "linke Hintergliedmaße"',
     '- FALSCH: "erwaehnt", "bekannt", "vorhanden", "genannt" – diese Woerter NIEMALS als value verwenden.',
@@ -836,12 +836,12 @@ async function callModel(
     "- Generiere 4-6 Rueckfragen insgesamt.",
     "- Decke SOWOHL fehlende Template-Felder ALS AUCH kontextbezogene Nachfragen ab.",
     "- Kontextbezogen heisst: Wenn z.B. Erbrechen erwaehnt wird, frage gezielt nach Aussehen des Erbrochenen, Fremdkoerperaufnahme, Futterwechsel, letzer Kotabsatz, weitere Symptome.",
-    "- Fuer kontextbezogene Fragen die nicht zu einem Template-Feld passen: key='context_followup' verwenden.",
+    "- Für kontextbezogene Fragen die nicht zu einem Template-Feld passen: key='context_followup' verwenden.",
     "- Formuliere alle Fragen so, dass eine TFA sie freundlich und verstaendlich dem Tierbesitzer stellen kann.",
     "- Keine Diagnose, keine Therapieempfehlungen.",
     "- Prioritaet high/medium/low angeben.",
-    "- category mit Template-Key fuellen.",
-    "- key mit Feld-Key fuellen (oder 'context_followup' fuer Kontextfragen).",
+    "- category mit Template-Key füllen.",
+    "- key mit Feld-Key füllen (oder 'context_followup' für Kontextfragen).",
     "- reason als kurze Begruendung pro Rueckfrage.",
     "- Keine Wiederholungen bereits gestellter/offener Fragen.",
     "- Wenn ausreichend: nextQuestions leer lassen, isComplete=true.",

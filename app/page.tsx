@@ -206,7 +206,7 @@ export default function Home() {
     }
 
     if (!data.session) {
-      alert('Registrierung erfolgreich. Bitte E-Mail bestaetigen und danach einloggen.');
+      alert('Registrierung erfolgreich. Bitte E-Mail bestätigen und danach einloggen.');
       return;
     }
 
@@ -367,7 +367,7 @@ export default function Home() {
       }
 
       setShowHrStartPrompt(false);
-      setHrStartHint('Arbeitszeit laeuft jetzt');
+      setHrStartHint('Arbeitszeit läuft jetzt');
       showToast({ message: 'Arbeitszeit gestartet', type: 'success' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Fehler beim Starten';

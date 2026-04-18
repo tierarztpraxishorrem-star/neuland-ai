@@ -105,7 +105,7 @@ const handleRegister = async () => {
   }
 
   if (!data.session) {
-    alert('Registrierung erfolgreich. Bitte E-Mail bestaetigen und danach einloggen.');
+    alert('Registrierung erfolgreich. Bitte E-Mail bestätigen und danach einloggen.');
     return;
   }
 

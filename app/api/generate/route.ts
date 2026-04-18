@@ -30,9 +30,9 @@ ${imageAnalysis}
       : "";
 
     const prompt = `
-  Du arbeitest auf Diplomate-/Professoren-Niveau (ECVIM/ACVIM, Innere Medizin) als medizinischer Dokumentations- und Konsiliarassistent fuer eine tieraerztliche Ueberweisungspraxis.
+  Du arbeitest auf Diplomate-/Professoren-Niveau (ECVIM/ACVIM, Innere Medizin) als medizinischer Dokumentations- und Konsiliarassistent für eine tierärztliche Überweisungspraxis.
 
-  Erstelle klinische Befundberichte fuer Kolleg:innen in professioneller, praeziser, deutscher Sprache.
+  Erstelle klinische Befundberichte für Kolleg:innen in professioneller, präziser, deutscher Sprache.
 
   PRIMAERZIEL:
   - maximal korrekte, differenzierte und klinisch belastbare Darstellung
@@ -125,7 +125,7 @@ ${imageSection}
             {
               role: "system",
               content:
-                "Du bist ein hochqualifizierter Fachtierarzt (Diplomate-Niveau) fuer Innere Medizin und erstellst klinisch belastbare, strukturierte Dokumentation fuer ein veterinärmedizinisches Fachpublikum.",
+                "Du bist ein hochqualifizierter Fachtierarzt (Diplomate-Niveau) für Innere Medizin und erstellst klinisch belastbare, strukturierte Dokumentation für ein veterinärmedizinisches Fachpublikum.",
             },
             { role: "user", content: prompt },
           ],

@@ -39,8 +39,8 @@ type Stats = {
   };
   zeit: {
     durchschnittMinutenProFall: number;
-    gespaarteStunden: number;
-    gespaarteMinuten: number;
+    gesparteStunden: number;
+    gesparteMinuten: number;
     patientenbriefeErstellt: number;
     verteilungNachDauer: { bucket: string; count: number }[];
   };
@@ -198,7 +198,7 @@ export default function AdminStatistikPage() {
               />
               <KpiCard
                 label="Gesparte Zeit"
-                value={`${stats.zeit.gespaarteStunden}h ${stats.zeit.gespaarteMinuten}m`}
+                value={`${stats.zeit.gesparteStunden}h ${stats.zeit.gesparteMinuten}m`}
                 sub={`Ø ${stats.zeit.durchschnittMinutenProFall} min/Fall`}
                 isText
               />
@@ -346,7 +346,7 @@ export default function AdminStatistikPage() {
               <SectionCard title="Zeiteffizienz">
                 <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
                   <MiniStat label="Ø pro Fall" value={`${stats.zeit.durchschnittMinutenProFall} min`} />
-                  <MiniStat label="Gespart" value={`${stats.zeit.gespaarteStunden}h ${stats.zeit.gespaarteMinuten}m`} />
+                  <MiniStat label="Gespart" value={`${stats.zeit.gesparteStunden}h ${stats.zeit.gesparteMinuten}m`} />
                   <MiniStat label="Briefe" value={String(stats.zeit.patientenbriefeErstellt)} />
                 </div>
                 <div style={{ width: '100%', height: 180 }}>

@@ -16,6 +16,10 @@ type Patient = {
   owner_name: string | null;
   external_id: string | null;
   created_at: string;
+  isStation?: boolean;
+  stationStatus?: string;
+  boxNumber?: string | null;
+  diagnosis?: string | null;
 };
 
 type CaseLite = {
@@ -133,10 +137,60 @@ export default function PatientenPage() {
       activePracticeIdRef.current = activePracticeId;
 
       try {
-        const loaded = await loadPatients(activePracticeId, '', 0);
-        setPatients(loaded);
-        setHasMore(loaded.length >= PAGE_SIZE);
-        const caseMap = await loadLatestCases(activePracticeId, loaded.map((p) => p.id));
+        const [loaded, stationRes] = await Promise.all([
+          loadPatients(activePracticeId, '', 0),
+          supabase
+            .from('station_patients')
+            .select('id, patient_id, patient_name, species, breed, gender, owner_name, box_number, diagnosis, status')
+            .eq('practice_id', activePracticeId)
+            .eq('status', 'active'),
+        ]);
+
+        const stationPatients = (stationRes.data || []) as {
+          id: string; patient_id: string | null; patient_name: string;
+          species: string | null; breed: string | null; gender: string | null;
+          owner_name: string | null; box_number: string | null; diagnosis: string | null; status: string;
+        }[];
+
+        // Auto-create patient records for station patients that have no linked patient
+        const unlinked = stationPatients.filter((s) => !s.patient_id);
+        for (const sp of unlinked) {
+          const { data: created } = await supabase
+            .from('patients')
+            .insert({
+              practice_id: activePracticeId,
+              name: sp.patient_name,
+              tierart: sp.species || null,
+              rasse: sp.breed || null,
+              geschlecht: sp.gender || null,
+              owner_name: sp.owner_name || null,
+            })
+            .select('id')
+            .single();
+          if (created) {
+            sp.patient_id = created.id;
+            // Link the station patient to the new patient record
+            await supabase.from('station_patients').update({ patient_id: created.id }).eq('id', sp.id);
+          }
+        }
+
+        // Mark patients that have an active station stay
+        const stationByPatientId = new Map(
+          stationPatients.filter((s) => s.patient_id).map((s) => [s.patient_id!, s]),
+        );
+
+        // Re-load if we created new patients
+        const finalLoaded = unlinked.length > 0 ? await loadPatients(activePracticeId, '', 0) : loaded;
+
+        const merged = finalLoaded.map((p) => {
+          const sp = stationByPatientId.get(p.id);
+          if (sp) return { ...p, isStation: true, stationStatus: sp.status, boxNumber: sp.box_number, diagnosis: sp.diagnosis };
+          return p;
+        });
+
+        setPatients(merged);
+        setHasMore(finalLoaded.length >= PAGE_SIZE);
+        const caseMap = await loadLatestCases(activePracticeId, finalLoaded.map((p) => p.id));
         setLatestByPatient(caseMap);
       } catch {
         setPatients([]);
@@ -290,13 +344,24 @@ export default function PatientenPage() {
 
       <div style={{ display: 'grid', gap: '12px' }}>
         {filteredPatients.map((patient) => (
-          <ListItem key={patient.id} onClick={() => router.push(`/patienten/${patient.id}`)}>
+          <ListItem
+            key={patient.id}
+            onClick={() => router.push(`/patienten/${patient.id}`)}
+            style={patient.isStation ? { borderLeft: `3px solid ${uiTokens.brand}` } : undefined}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 700, fontSize: '17px' }}>
                 {patient.name}
                 {patient.external_id ? ` (#${patient.external_id})` : ''}
               </div>
-              <Badge tone='accent'>{patient.tierart || 'Tierart offen'}</Badge>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                {patient.isStation && (
+                  <Badge tone='success'>
+                    Stationär{patient.boxNumber ? ` · Box ${patient.boxNumber}` : ''}
+                  </Badge>
+                )}
+                <Badge tone='accent'>{patient.tierart || 'Tierart offen'}</Badge>
+              </div>
             </div>
 
             <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>
@@ -306,6 +371,12 @@ export default function PatientenPage() {
             <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>
               Besitzer: {patient.owner_name || '-'}
             </div>
+
+            {patient.isStation && patient.diagnosis && (
+              <div style={{ fontSize: '12px', color: uiTokens.brand, fontWeight: 600 }}>
+                Diagnose: {patient.diagnosis}
+              </div>
+            )}
 
             <div style={{ fontSize: '12px', color: uiTokens.textMuted }}>
               Letzte Konsultation: {formatDate(latestByPatient[patient.id])}

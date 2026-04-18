@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { uiTokens, Card, Button, Badge } from '../../../components/ui/System';
 
@@ -12,12 +13,17 @@ type Animal = {
   birth_date: string | null;
   gender: string | null;
   is_castrated: boolean;
+  coat_color: string | null;
   chip_number: string | null;
   has_insurance: boolean;
   insurance_company: string | null;
+  insurance_type: string | null;
   insurance_number: string | null;
   wants_direct_billing: boolean;
+  wants_insurance_info: boolean;
   assignment_signed: boolean;
+  assignment_signature_data: string | null;
+  patient_id: string | null;
 };
 
 type Registration = {
@@ -36,6 +42,7 @@ type Registration = {
   appointment_time: string | null;
   referral_source: string | null;
   referring_vet: string | null;
+  visit_reason: string | null;
   status: 'pending' | 'processed' | 'archived';
   submitted_at: string;
   processed_at: string | null;
@@ -62,6 +69,8 @@ export default function RegistrierungenPage() {
   const [filter, setFilter] = useState<FilterValue>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [processModal, setProcessModal] = useState<Registration | null>(null);
+  const [pmsIds, setPmsIds] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,18 +90,34 @@ export default function RegistrierungenPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const markProcessed = async (id: string) => {
-    setProcessing(id);
+  const markProcessed = async (reg: Registration) => {
+    setProcessing(reg.id);
     try {
+      // Update external_id (PMS-ID) on linked patient records
+      for (const a of reg.animals) {
+        const easyvetId = pmsIds[a.id] || '';
+        if (a.patient_id && easyvetId) {
+          await supabase.from('patients').update({ external_id: easyvetId }).eq('id', a.patient_id);
+        }
+        // Store visit_reason as first document context if provided
+        if (a.patient_id && reg.visit_reason) {
+          // Save as a note on the patient for later reference
+          await supabase.from('patients').update({
+            alter: (await supabase.from('patients').select('alter').eq('id', a.patient_id).single()).data?.alter || null,
+          }).eq('id', a.patient_id);
+        }
+      }
+
       const res = await fetchWithAuth('/api/admin/registrations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: 'processed' }),
+        body: JSON.stringify({ id: reg.id, status: 'processed' }),
       });
       if (res?.ok) {
         setRegistrations((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, status: 'processed' as const, processed_at: new Date().toISOString() } : r)),
+          prev.map((r) => (r.id === reg.id ? { ...r, status: 'processed' as const, processed_at: new Date().toISOString() } : r)),
         );
+        setProcessModal(null);
       }
     } catch {
       // silent
@@ -137,6 +162,20 @@ export default function RegistrierungenPage() {
               </span>
             )}
           </h1>
+          <Link
+            href="/admin/registrierungen/statistik"
+            style={{
+              padding: '8px 16px',
+              borderRadius: '10px',
+              background: uiTokens.brand,
+              color: '#fff',
+              textDecoration: 'none',
+              fontWeight: 600,
+              fontSize: '13px',
+            }}
+          >
+            Statistik
+          </Link>
         </div>
 
         {/* Filter */}
@@ -268,21 +307,29 @@ export default function RegistrierungenPage() {
                             background: '#fff',
                             border: '1px solid #e5e7eb',
                             borderRadius: '10px',
-                            padding: '12px 16px',
+                            padding: '14px 16px',
                             fontSize: '13px',
-                            lineHeight: 1.6,
+                            lineHeight: 1.7,
                           }}
                         >
-                          <strong>{a.name}</strong> ({a.species})
-                          {a.breed && <> &middot; {a.breed}</>}
-                          {a.gender && <> &middot; {a.gender}</>}
-                          {a.is_castrated && <> &middot; kastriert</>}
-                          {a.chip_number && <> &middot; Chip: {a.chip_number}</>}
-                          {a.has_insurance && (
+                          <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '6px' }}>{a.name}</div>
+                          <div>Tierart: <strong>{a.species}</strong></div>
+                          {a.breed && <div>Rasse: {a.breed}</div>}
+                          {a.birth_date && <div>Geburtsdatum: {a.birth_date}</div>}
+                          {a.gender && <div>Geschlecht: {a.gender}{a.is_castrated ? ' (kastriert)' : ''}</div>}
+                          {a.coat_color && <div>Fellfarbe: {a.coat_color}</div>}
+                          {a.chip_number && <div>Chipnummer: {a.chip_number}</div>}
+                          {a.has_insurance ? (
+                            <div style={{ marginTop: '6px', padding: '8px 10px', background: '#f0fdfa', borderRadius: '8px', border: '1px solid #99f6e4' }}>
+                              <div>Versicherung: <strong>{a.insurance_company}</strong></div>
+                              {a.insurance_type && <div>Art: {a.insurance_type}</div>}
+                              {a.wants_direct_billing && <div>Direktabrechnung: Ja · Nr. {a.insurance_number || '-'}</div>}
+                              {a.assignment_signed && <div style={{ color: uiTokens.brand, fontWeight: 600 }}>Abtretungserklärung unterschrieben</div>}
+                            </div>
+                          ) : (
                             <div style={{ marginTop: '4px', color: uiTokens.textSecondary }}>
-                              Versicherung: {a.insurance_company} ({a.insurance_number || '-'})
-                              {a.wants_direct_billing && <> &middot; Direktabrechnung</>}
-                              {a.assignment_signed && <> &middot; Abtretung unterschrieben</>}
+                              Versicherung: Nein
+                              {a.wants_insurance_info && <span style={{ marginLeft: '8px', color: uiTokens.brand }}> · Infos gewünscht</span>}
                             </div>
                           )}
                         </div>
@@ -290,18 +337,102 @@ export default function RegistrierungenPage() {
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  {reg.status === 'pending' && (
+                  {/* Termingrund */}
+                  {reg.visit_reason && (
                     <div style={{ marginTop: '16px' }}>
-                      <Button
-                        variant="primary"
-                        onClick={() => markProcessed(reg.id)}
-                        disabled={processing === reg.id}
-                      >
-                        {processing === reg.id ? 'Wird verarbeitet...' : 'Als verarbeitet markieren'}
-                      </Button>
+                      <div style={{ fontWeight: 600, fontSize: '13px', color: uiTokens.brand, marginBottom: '6px' }}>Termingrund (vom Besitzer)</div>
+                      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', fontSize: '13px', lineHeight: 1.6, color: '#92400e', whiteSpace: 'pre-wrap' }}>
+                        {reg.visit_reason}
+                      </div>
                     </div>
                   )}
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+                    {reg.status === 'pending' && (
+                      <Button
+                        variant="primary"
+                        onClick={() => { setProcessModal(reg); setPmsIds({}); }}
+                      >
+                        Als verarbeitet markieren
+                      </Button>
+                    )}
+                    {/* PDF Download – Summary */}
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        const w = window.open('', '_blank');
+                        if (!w) return;
+                        const animalHtml = reg.animals.map((a) => `
+                          <div style="margin-bottom:12px;padding:10px;border:1px solid #ddd;border-radius:8px;">
+                            <strong>${a.name}</strong> (${a.species})<br/>
+                            ${a.breed ? `Rasse: ${a.breed}<br/>` : ''}
+                            ${a.birth_date ? `Geb.: ${a.birth_date}<br/>` : ''}
+                            ${a.gender ? `Geschlecht: ${a.gender}${a.is_castrated ? ' (kastriert)' : ''}<br/>` : ''}
+                            ${a.coat_color ? `Fellfarbe: ${a.coat_color}<br/>` : ''}
+                            ${a.chip_number ? `Chip: ${a.chip_number}<br/>` : ''}
+                            ${a.has_insurance ? `Versicherung: ${a.insurance_company}${a.insurance_type ? ` (${a.insurance_type})` : ''}${a.wants_direct_billing ? ` · Direktabr. Nr. ${a.insurance_number || '-'}` : ''}${a.assignment_signed ? ' · Abtretung unterz.' : ''}` : 'Versicherung: Nein'}
+                          </div>
+                        `).join('');
+                        w.document.write(`<html><head><title>Registrierung ${reg.first_name} ${reg.last_name}</title>
+                          <style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;color:#1f2937;font-size:14px;line-height:1.6}h1{color:#0f6b74;font-size:20px}h2{color:#0f6b74;font-size:15px;margin-top:20px}.label{color:#64748b;font-size:12px}</style></head><body>
+                          <h1>Neukundenregistrierung</h1>
+                          <p class="label">Eingegangen: ${new Date(reg.submitted_at).toLocaleString('de-DE')}</p>
+                          <h2>Besitzer</h2>
+                          <p>${reg.salutation || ''} ${reg.first_name} ${reg.last_name}<br/>
+                          ${reg.street || ''} ${reg.house_number || ''}, ${reg.zip || ''} ${reg.city || ''}<br/>
+                          ${reg.birth_date ? `Geb.: ${reg.birth_date}<br/>` : ''}
+                          Tel.: ${reg.phone || '-'}<br/>E-Mail: ${reg.email}</p>
+                          <h2>Tiere</h2>${animalHtml}
+                          <h2>Termin</h2>
+                          <p>${reg.appointment_date ? `${reg.appointment_date}${reg.appointment_time ? ` um ${reg.appointment_time}` : ''}` : 'Kein Termin'}<br/>
+                          ${reg.referral_source ? `Aufmerksam: ${reg.referral_source}<br/>` : ''}
+                          ${reg.referring_vet ? `Haustierarzt: ${reg.referring_vet}<br/>` : ''}</p>
+                          ${reg.visit_reason ? `<h2>Termingrund</h2><p>${reg.visit_reason}</p>` : ''}
+                          <h2>Bestätigungen</h2>
+                          <p>&#10003; Richtigkeit der Angaben bestätigt, Datenschutzerklärung zugestimmt<br/>
+                          &#10003; Gebührenordnung für Tierärzte und AGB anerkannt<br/>
+                          &#10003; Zahlungsbedingungen akzeptiert</p>
+                          <p style="color:#94a3b8;font-size:11px;margin-top:30px;">Registrierung eingegangen am ${new Date(reg.submitted_at).toLocaleString('de-DE')} | Tierärztezentrum Neuland</p>
+                          </body></html>`);
+                        w.document.close();
+                        w.print();
+                      }}
+                    >
+                      PDF drucken
+                    </Button>
+                    {/* Abtretungserklärung Download */}
+                    {reg.animals.some((a) => a.assignment_signed && a.assignment_signature_data) && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          const signed = reg.animals.filter((a) => a.assignment_signed && a.assignment_signature_data);
+                          for (const a of signed) {
+                            const w = window.open('', '_blank');
+                            if (!w) continue;
+                            w.document.write(`<html><head><title>Abtretung ${a.name}</title>
+                              <style>body{font-family:Arial,sans-serif;max-width:600px;margin:40px auto;color:#1f2937;font-size:14px;line-height:1.8}h1{color:#0f6b74;font-size:20px}</style></head><body>
+                              <h1>Abtretungserklärung</h1>
+                              <p>Hiermit trete ich, ${reg.salutation || ''} ${reg.first_name} ${reg.last_name},<br/>
+                              wohnhaft in ${reg.street || ''} ${reg.house_number || ''}, ${reg.zip || ''} ${reg.city || ''},</p>
+                              <p>meinen Erstattungsanspruch aus dem Versicherungsvertrag<br/>
+                              bei ${a.insurance_company || '-'} (Nr.: ${a.insurance_number || '-'})<br/>
+                              für mein Tier "${a.name}" (${a.species})</p>
+                              <p>an das Tierärztezentrum Neuland, Kopernikusstraße 35, 50126 Bergheim ab.</p>
+                              <p>Bergheim, den ${new Date(reg.submitted_at).toLocaleDateString('de-DE')}</p>
+                              <p>Unterschrift:</p>
+                              <img src="${a.assignment_signature_data}" style="max-width:300px;border-bottom:1px solid #333;padding-bottom:8px;"/>
+                              <p>${reg.first_name} ${reg.last_name}</p>
+                              </body></html>`);
+                            w.document.close();
+                            w.print();
+                          }
+                        }}
+                      >
+                        Abtretungserklärung(en)
+                      </Button>
+                    )}
+                  </div>
 
                   {reg.processed_at && (
                     <div style={{ marginTop: '8px', fontSize: '12px', color: uiTokens.textMuted }}>
@@ -320,6 +451,49 @@ export default function RegistrierungenPage() {
           );
         })}
       </div>
+      {/* Verarbeitungs-Modal mit PMS-ID */}
+      {processModal && (
+        <div
+          onClick={() => setProcessModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120 }}
+        >
+          <Card
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            style={{ width: 'min(520px, calc(100vw - 24px))', padding: '24px', maxHeight: '80vh', overflow: 'auto' }}
+          >
+            <h3 style={{ margin: '0 0 16px', fontSize: '18px', color: uiTokens.brand }}>Registrierung verarbeiten</h3>
+            <p style={{ fontSize: '13px', color: uiTokens.textSecondary, marginBottom: '16px' }}>
+              Tragen Sie optional die EasyVet Patienten-ID ein. Die Patienten sind bereits im System angelegt und werden aktualisiert.
+            </p>
+            <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
+              {processModal.animals.map((a) => (
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', background: '#f8fafb', borderRadius: '10px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>{a.name}</div>
+                    <div style={{ fontSize: '12px', color: uiTokens.textSecondary }}>{a.species}{a.breed ? ` · ${a.breed}` : ''}</div>
+                  </div>
+                  <input
+                    value={pmsIds[a.id] || ''}
+                    onChange={(e) => setPmsIds((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                    placeholder="EasyVet ID"
+                    style={{ width: '120px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '13px' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <Button variant="secondary" onClick={() => setProcessModal(null)}>Abbrechen</Button>
+              <Button
+                variant="primary"
+                onClick={() => markProcessed(processModal)}
+                disabled={processing === processModal.id}
+              >
+                {processing === processModal.id ? 'Wird verarbeitet...' : 'Verarbeiten'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </main>
   );
 }

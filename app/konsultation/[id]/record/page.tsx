@@ -98,12 +98,12 @@ const TRANSCRIPTION_QUOTES = [
   'Die KI hoert sich das gerade an... hoffentlich war es kein Katzengejammer 🐱',
   'Whisper transkribiert... das dauert laenger als eine Katze die entscheidet ob sie rein oder raus will 🚪',
   'Noch ein bisschen Geduld – schneller als ein aufgeregter Labrador, aber langsamer als eine Katze die Hunger hat 🐕',
-  'Transkription laeuft... der Tierarzt hat auch nicht immer sofort alle Antworten 🩺',
+  'Transkription läuft... der Tierarzt hat auch nicht immer sofort alle Antworten 🩺',
   'Fast fertig... oder wie der Hamster im Rad sagen wuerde: gleich gleich 🐹',
   'Audiodatei wird analysiert... selbst ein Papagei braucht Zeit zum Nachplappern 🦜',
   'Einen Moment noch – die KI lernt gerade Tieraerztisch 📚',
   'Das Transkript entsteht... Geduld ist eine Tugend, sagt auch jeder Golden Retriever 🐾',
-  'Die Bits und Bytes arbeiten... nicht so elegant wie eine Katze, aber genauso gruendlich 🐈',
+  'Die Bits und Bytes arbeiten... nicht so elegant wie eine Katze, aber genauso gründlich 🐈',
   'Spracherkennung aktiv... zum Glueck muss die KI nicht Hundeschrift entziffern 📝',
   'Noch einen Augenblick – auch Rom wurde nicht an einem Tag erbaut. Und kein Hund an einem Tag erzogen 🏛️',
   'Transkription im Gange... die KI ist aufmerksamer als ein Dackel der ein Leckerli riecht 🦴',
@@ -236,7 +236,7 @@ export default function RecordPage() {
   const [segments, setSegments] = useState<RecordingSegment[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
   const [currentSegmentStartedAtMs, setCurrentSegmentStartedAtMs] = useState<number | null>(null);
-  const [status, setStatus] = useState('Bereit fuer eine neue Session');
+  const [status, setStatus] = useState('Bereit für eine neue Session');
   const [dragActive, setDragActive] = useState(false);
   const [transcriptionDuration, setTranscriptionDuration] = useState(0);
 
@@ -879,7 +879,7 @@ export default function RecordPage() {
     }}>
 
       <h1 style={{ marginBottom: "10px" }}>
-        {recording ? 'Aufnahme laeuft' : paused ? 'Session pausiert' : 'Bereit fuer die Session'}
+        {recording ? 'Aufnahme läuft' : paused ? 'Session pausiert' : 'Bereit für die Session'}
       </h1>
 
       <div style={{
@@ -1143,7 +1143,7 @@ export default function RecordPage() {
                     fontSize: '12px'
                   }}
                 >
-                  Loeschen
+                  Löschen
                 </Button>
               </div>
 

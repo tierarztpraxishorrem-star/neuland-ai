@@ -138,7 +138,7 @@ const validateOutput = ({
 
   const shouldMark = shouldMarkAsPossibleConsideration(inputText, next);
   if (shouldMark) {
-    const marker = "Moegliche Ueberlegung (nicht gesichert):";
+    const marker = "Mögliche Überlegung (nicht gesichert):";
     if (!next.startsWith(marker)) {
       next = `${marker}\n${next}`;
     }
@@ -152,7 +152,7 @@ const validateOutput = ({
 };
 
 const markerForSafeMode = () =>
-  "Hinweis: Es wurden potenziell ueber den Input hinausgehende Inhalte erkannt und als moegliche Ueberlegung gekennzeichnet.";
+  "Hinweis: Es wurden potenziell über den Input hinausgehende Inhalte erkannt und als mögliche Überlegung gekennzeichnet.";
 
 export async function POST(req: Request) {
   const body = (await req.json()) as ChatRequestBody;
@@ -177,7 +177,7 @@ export async function POST(req: Request) {
   const hasExternalKnowledge = mode === "clinical_support";
 
   if (messages.length === 0) {
-    return NextResponse.json({ error: "Keine gueltigen Nachrichten uebergeben." }, { status: 400 });
+    return NextResponse.json({ error: "Keine gültigen Nachrichten übergeben." }, { status: 400 });
   }
 
   const systemPrompt = `
@@ -205,7 +205,7 @@ Wenn ein klinischer Fall, Patient oder medizinische Fragestellung vorliegt:
 ─── KOMMUNIKATION (E-Mails, Briefe, Besitzerkommunikation) ───
 Wenn nach Texten, E-Mails, Briefen oder Besitzerkommunikation gefragt wird:
 - Schreibe professionell, empathisch und klar.
-- Passe Tonalitaet an: formell fuer Ueberweisungen, warm fuer Besitzer.
+- Passe Tonalität an: formell für Überweisungen, warm für Besitzer.
 - Liefere direkt verwendbare Texte.
 
 ─── PRAXISORGANISATION (Dienstplaene, Ablaeufe, SOPs, HR) ───
@@ -350,7 +350,7 @@ if (!text) {
         }
       }
 
-      isUncertain = isUncertain || fullReply.includes("Moegliche Ueberlegung");
+      isUncertain = isUncertain || fullReply.includes("Mögliche Überlegung");
 
       // Emit finalized, validated output once to avoid leaking unvalidated chunks.
       controller.enqueue(encoder.encode(fullReply));

@@ -638,7 +638,7 @@ export default function OnboardingPage() {
               />
 
               <div style={{ fontSize: 12, color: uiTokens.textSecondary }}>
-                Bei professioneller Mail-Domain wird diese Praxis fuer Auto-Zuordnungen neuer Nutzer registriert.
+                Bei professioneller Mail-Domain wird diese Praxis für Auto-Zuordnungen neuer Nutzer registriert.
               </div>
 
               <button

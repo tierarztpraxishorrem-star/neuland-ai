@@ -37,8 +37,8 @@ type StatsPayload = {
 
   zeit: {
     durchschnittMinutenProFall: number;
-    gespaarteStunden: number;
-    gespaarteMinuten: number;
+    gesparteStunden: number;
+    gesparteMinuten: number;
     patientenbriefeErstellt: number;
     verteilungNachDauer: { bucket: string; count: number }[];
   };
@@ -331,8 +331,8 @@ export async function GET(req: Request) {
 
       zeit: {
         durchschnittMinutenProFall: avgMinutes,
-        gespaarteStunden: gespartStunden,
-        gespaarteMinuten: gespartRest,
+        gesparteStunden: gespartStunden,
+        gesparteMinuten: gespartRest,
         patientenbriefeErstellt: patientenbriefe,
         verteilungNachDauer: [
           { bucket: '< 5 min', count: bucketUnder5 },

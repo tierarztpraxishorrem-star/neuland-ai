@@ -150,7 +150,7 @@ export default function VorlagenPage() {
 
     const reviseTemplateWithAssistant = async () => {
       if (!editingId || !editInstruction.trim()) {
-        alert('Bitte einen Aenderungswunsch eingeben.');
+        alert('Bitte einen Änderungswunsch eingeben.');
         return;
       }
 
@@ -174,7 +174,7 @@ export default function VorlagenPage() {
         });
 
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || 'Aenderung fehlgeschlagen.');
+        if (!res.ok) throw new Error(json?.error || 'Änderung fehlgeschlagen.');
 
         setAssistantMessage(json?.forked
           ? 'Geteilte Vorlage wurde als eigene private Kopie erstellt und mit VetMind angepasst.'
@@ -291,7 +291,7 @@ export default function VorlagenPage() {
         <div style={{ marginBottom: 16 }}>
           <h1 style={{ color: uiTokens.brand, margin: 0, fontSize: '32px', fontWeight: 700 }}>Vorlagen</h1>
           <div style={{ marginTop: 6, color: uiTokens.textSecondary, fontSize: 14 }}>
-            VetMind-gestuetzte Vorlagenverwaltung fuer privat, Praxis und globale Inhalte.
+            VetMind-gestützte Vorlagenverwaltung für privat, Praxis und globale Inhalte.
           </div>
         </div>
 
@@ -320,7 +320,7 @@ export default function VorlagenPage() {
           <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Schritt {wizardStep} von 6</div>
 
           {wizardStep === 1 && <input placeholder='Was soll die Vorlage erreichen?' value={wizardAnswers.ziel} onChange={(e) => setWizardAnswers((p) => ({ ...p, ziel: e.target.value }))} style={input} />}
-          {wizardStep === 2 && <input placeholder='Fuer wen ist der Output gedacht?' value={wizardAnswers.zielgruppe} onChange={(e) => setWizardAnswers((p) => ({ ...p, zielgruppe: e.target.value }))} style={input} />}
+          {wizardStep === 2 && <input placeholder='Für wen ist der Output gedacht?' value={wizardAnswers.zielgruppe} onChange={(e) => setWizardAnswers((p) => ({ ...p, zielgruppe: e.target.value }))} style={input} />}
           {wizardStep === 3 && <input placeholder='Ton / Stil (klar, knapp, empathisch...)' value={wizardAnswers.tonalitaet} onChange={(e) => setWizardAnswers((p) => ({ ...p, tonalitaet: e.target.value }))} style={input} />}
           {wizardStep === 4 && <textarea placeholder='Welche Abschnitte soll die Vorlage enthalten?' value={wizardAnswers.abschnitte} onChange={(e) => setWizardAnswers((p) => ({ ...p, abschnitte: e.target.value }))} style={textarea} />}
           {wizardStep === 5 && <textarea placeholder='Was MUSS enthalten sein?' value={wizardAnswers.mussEnthalten} onChange={(e) => setWizardAnswers((p) => ({ ...p, mussEnthalten: e.target.value }))} style={textarea} />}
@@ -341,7 +341,7 @@ export default function VorlagenPage() {
           </div>
 
           <div style={{ fontSize: 13, color: '#64748b', marginTop: 10 }}>
-            Interne Prompt-Details bleiben verborgen. Anpassungen erfolgen ueber den VetMind-Aenderungswunsch.
+            Interne Prompt-Details bleiben verborgen. Anpassungen erfolgen über den VetMind-Änderungswunsch.
           </div>
 
           {isSuperadmin && (
@@ -387,7 +387,7 @@ export default function VorlagenPage() {
                       </div>
                     )}
 
-                    <div style={{ marginTop: 10, fontSize: 13, color: '#64748b' }}>VetMind-Aenderungswunsch (optional):</div>
+                    <div style={{ marginTop: 10, fontSize: 13, color: '#64748b' }}>VetMind-Änderungswunsch (optional):</div>
                     <textarea value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} style={textarea} placeholder='z. B. kuerzer, klarer, besitzerfreundlicher' />
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       {isSuperadmin && <button onClick={saveEditedTemplate} style={{ ...primaryBtn, background: '#4338ca' }}>Speichern</button>}
@@ -407,7 +407,7 @@ export default function VorlagenPage() {
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button onClick={() => startEditTemplate(t)} style={smallBtn}>Bearbeiten</button>
                         <button onClick={() => hideTemplateForMe(t.id)} style={smallBtn}>Ausblenden</button>
-                        {canDelete && <button onClick={() => deleteTemplate(t.id)} style={{ ...smallBtn, background: '#fee2e2', borderColor: '#fecaca', color: '#b91c1c' }}>Loeschen</button>}
+                        {canDelete && <button onClick={() => deleteTemplate(t.id)} style={{ ...smallBtn, background: '#fee2e2', borderColor: '#fecaca', color: '#b91c1c' }}>Löschen</button>}
                       </div>
                     </div>
 
@@ -417,7 +417,7 @@ export default function VorlagenPage() {
                       </div>
                     ) : (
                       <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', marginTop: '10px', color: '#374151' }}>
-                        Interner Prompt ist verborgen. Bearbeitung erfolgt ueber VetMind-Aenderungswunsch.
+                        Interner Prompt ist verborgen. Bearbeitung erfolgt über VetMind-Änderungswunsch.
                       </div>
                     )}
 

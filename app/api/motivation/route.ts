@@ -25,24 +25,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "OPENAI_API_KEY fehlt." }, { status: 500 });
     }
 
-    const prompt = `Schreibe EINEN kurzen, lockeren Satz fuer das Dashboard einer Tierarztpraxis.
+    const prompt = `Schreibe EINEN kurzen, lockeren Satz für das Dashboard einer Tierarztpraxis.
 
 Ton: warm, trocken, mit dezentem Augenzwinkern. Wie ein netter Kollege am Kaffeeautomat. Darf witzig, ironisch oder einfach beilaeufig sein.
 
 Thematisch: gerne mal Tiermedizin-nah (Wartezimmer, Fellnasen, Pfoten, die erste Katze des Tages, bellende Patienten), muss aber nicht -- ganz normale Arbeits-Realitaet (Kaffee, Akten, Kollegen, Feierabend) funktioniert genauso gut. Abwechslung ist gut.
 
 STRIKT VERMEIDEN:
-- Wir-Pathos ("Gemeinsam sorgen wir fuer das Wohl...")
+- Wir-Pathos ("Gemeinsam sorgen wir für das Wohl...")
 - Marketing-Sprech ("Mit Ruhe und Praezision...", "Heute zaehlt...")
 - "tierisch gute"-Wortspiele, "auf-den-Hund-gekommen", "pfoetchengesund"
 - LinkedIn-Ton, Karrierecoach-Vibes, Morgenandacht
-- belehrende Saetze ("Denk dran...", "Achte auf...")
+- belehrende Sätze ("Denk dran...", "Achte auf...")
 - Kitsch und Emoji-Parade
 
 Kontext: ${context}
 (start = Arbeitstag beginnt, running = mittendrin, end = Feierabend naht)
 
-Gute Beispiele fuer den Ton:
+Gute Beispiele für den Ton:
 - "Kaffee steht, Kittel sitzt -- das Wartezimmer faellt nicht von allein leer."
 - "Mal sehen, welches Fellknaeuel heute als erstes versucht, unter den Stuhl zu fluechten."
 - "Heute wieder: Pfoten statt Powerpoint."

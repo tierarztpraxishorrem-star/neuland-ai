@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useCallback, type CSSProperties, type ChangeEvent } from 'react';
+import React, { useState, useCallback, type CSSProperties, type ChangeEvent } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
+import { COMMON_BREEDS } from '../../lib/patientBreeds';
 
 const SignaturePad = dynamic(() => import('../../components/SignaturePad'), { ssr: false });
 
@@ -34,6 +35,8 @@ type AnimalData = {
   chipNumber: string;
   hasInsurance: string;
   insuranceCompany: string;
+  insuranceCustom: string;
+  insuranceType: string;
   insuranceNumber: string;
   wantsDirectBilling: string;
   wantsInsuranceInfo: boolean;
@@ -45,6 +48,8 @@ type AppointmentData = {
   date: string;
   time: string;
   referralSource: string;
+  referralCustom: string;
+  visitReason: string;
   hasReferringVet: string;
   referringVetName: string;
 };
@@ -61,8 +66,15 @@ const T: Record<string, Record<string, string>> = {
     step2Title: 'Ihre Daten',
     step3Title: 'Ihre Tiere',
     step4Title: 'Versicherung',
-    step5Title: 'Termin',
-    step6Title: 'Bestätigung',
+    step5Title: 'Vorbefunde',
+    step5Sub: 'Laden Sie vorhandene Befunde, Laborergebnisse oder Arztbriefe hoch (optional).',
+    step5Drag: 'Dateien hierher ziehen oder klicken',
+    step5Camera: 'Kamera',
+    step5Formats: 'Bilder (JPG, PNG), PDF, Word – max. 20 MB pro Datei',
+    visitReasonLabel: 'Grund Ihres Termins',
+    visitReasonPlaceholder: 'Optional – beschreiben Sie in eigenen Worten, warum Sie zu uns kommen möchten. Je ausführlicher, desto besser können wir uns vorbereiten.',
+    step6Title: 'Termin',
+    step7Title: 'Bestätigung',
     salutation: 'Anrede',
     firstName: 'Vorname *',
     lastName: 'Nachname *',
@@ -97,9 +109,11 @@ const T: Record<string, Record<string, string>> = {
     vetName: 'Name der Praxis',
     confirmData: 'Ich bestätige die Richtigkeit meiner Angaben und stimme der Datenschutzerklärung zu',
     confirmFees: 'Ich erkenne die Gebührenordnung für Tierärzte und die AGB an',
-    confirmPayment: 'Die Bezahlung erfolgt unmittelbar nach der Behandlung',
+    confirmPayment: 'Die Bezahlung erfolgt unmittelbar nach der Behandlung oder wird, sofern die Tierkrankenversicherung dies zulässt, direkt mit dieser abgerechnet',
+    confirmPaymentDirect: 'Die Bezahlung erfolgt unmittelbar nach der Behandlung',
     thankYou: 'Vielen Dank',
-    confirmationText: 'Ihre Anmeldung ist eingegangen.',
+    confirmationText: 'Ihre Anmeldung ist bei uns eingegangen. Wir freuen uns darauf, Sie und Ihren Liebling kennenzulernen!',
+    confirmationHint: 'Sie erhalten in Kürze eine Bestätigung per E-Mail.',
     appointmentLabel: 'Ihr Termin',
     errorRequired: 'Bitte füllen Sie alle Pflichtfelder aus.',
     errorEmailMatch: 'Die E-Mail-Adressen stimmen nicht überein.',
@@ -123,8 +137,11 @@ const T: Record<string, Record<string, string>> = {
     other: 'Sonstiges',
     google: 'Google',
     recommendation: 'Empfehlung',
+    referralVet: 'Überweisung (vom Tierarzt)',
     socialMedia: 'Social Media',
     newspaper: 'Zeitung',
+    otherCustom: 'Andere',
+    referralCustomLabel: 'Wie genau?',
   },
   en: {
     welcome: 'Welcome to Tierärztezentrum Neuland!',
@@ -136,8 +153,15 @@ const T: Record<string, Record<string, string>> = {
     step2Title: 'Your details',
     step3Title: 'Your animals',
     step4Title: 'Insurance',
-    step5Title: 'Appointment',
-    step6Title: 'Confirmation',
+    step5Title: 'Previous Records',
+    step5Sub: 'Upload existing reports, lab results, or veterinary letters (optional).',
+    step5Drag: 'Drag files here or click to browse',
+    step5Camera: 'Camera',
+    step5Formats: 'Images (JPG, PNG), PDF, Word – max 20 MB per file',
+    visitReasonLabel: 'Reason for your visit',
+    visitReasonPlaceholder: 'Optional – describe in your own words why you are coming to see us. The more detail, the better we can prepare.',
+    step6Title: 'Appointment',
+    step7Title: 'Confirmation',
     salutation: 'Salutation',
     firstName: 'First name *',
     lastName: 'Last name *',
@@ -172,9 +196,11 @@ const T: Record<string, Record<string, string>> = {
     vetName: 'Practice name',
     confirmData: 'I confirm the accuracy of my data and agree to the privacy policy',
     confirmFees: 'I accept the veterinary fee schedule and the terms & conditions',
-    confirmPayment: 'Payment is due immediately after treatment',
+    confirmPayment: 'Payment is due immediately after treatment or, if permitted by the pet insurance, billed directly through them',
+    confirmPaymentDirect: 'Payment is due immediately after treatment',
     thankYou: 'Thank you',
-    confirmationText: 'Your registration has been received.',
+    confirmationText: 'Your registration has been received. We look forward to meeting you and your furry friend!',
+    confirmationHint: 'You will receive a confirmation email shortly.',
     appointmentLabel: 'Your appointment',
     errorRequired: 'Please fill in all required fields.',
     errorEmailMatch: 'Email addresses do not match.',
@@ -198,8 +224,11 @@ const T: Record<string, Record<string, string>> = {
     other: 'Other',
     google: 'Google',
     recommendation: 'Recommendation',
+    referralVet: 'Referral (from vet)',
     socialMedia: 'Social Media',
     newspaper: 'Newspaper',
+    otherCustom: 'Other',
+    referralCustomLabel: 'Please specify',
   },
 };
 
@@ -219,6 +248,8 @@ function makeAnimal(): AnimalData {
     chipNumber: '',
     hasInsurance: '',
     insuranceCompany: '',
+    insuranceCustom: '',
+    insuranceType: '',
     insuranceNumber: '',
     wantsDirectBilling: '',
     wantsInsuranceInfo: false,
@@ -228,14 +259,16 @@ function makeAnimal(): AnimalData {
 }
 
 const timeSlots: string[] = [];
-for (let h = 8; h <= 18; h++) {
-  timeSlots.push(`${String(h).padStart(2, '0')}:00`);
-  if (h < 18) timeSlots.push(`${String(h).padStart(2, '0')}:30`);
+for (let h = 8; h < 20; h++) {
+  for (const m of ['00', '15', '30', '45']) {
+    timeSlots.push(`${String(h).padStart(2, '0')}:${m}`);
+  }
 }
+timeSlots.push('20:00');
 
 const insuranceProviders = [
   'Agila', 'Allianz', 'ARAG', 'Barmenia', 'DA Direkt', 'Deutsche Familienversicherung',
-  'Gothaer', 'HanseMerkur', 'Helvetia', 'Petplan', 'Uelzener', 'Sonstige',
+  'Gothaer', 'HanseMerkur', 'Helvetia', 'Lassie', 'Petolo', 'Petplan', 'Uelzener', 'Andere',
 ];
 
 // ── Styles ─────────────────────────────────────────────
@@ -332,6 +365,43 @@ const checkboxRow: CSSProperties = {
   lineHeight: '1.4',
 };
 
+// ── Reusable field components (outside render body to prevent focus loss) ──
+const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div>
+    <span style={labelStyle}>{label}</span>
+    {children}
+  </div>
+);
+
+const TextInput = ({
+  label, value, onChange, type = 'text', placeholder, autoComplete,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  type?: string; placeholder?: string; autoComplete?: string;
+}) => (
+  <Field label={label}>
+    <input
+      type={type} value={value}
+      onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+      placeholder={placeholder} autoComplete={autoComplete} style={inputStyle}
+    />
+  </Field>
+);
+
+const SelectField = ({
+  label, value, onChange, options, placeholder,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  options: { value: string; label: string }[]; placeholder?: string;
+}) => (
+  <Field label={label}>
+    <select value={value} onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)} style={inputStyle}>
+      <option value="">{placeholder || '-- Bitte wählen --'}</option>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  </Field>
+);
+
 // ── Component ──────────────────────────────────────────
 export default function RegistrierungPage() {
   const [lang, setLang] = useState<'de' | 'en'>('de');
@@ -367,9 +437,19 @@ export default function RegistrierungPage() {
     date: '',
     time: '',
     referralSource: '',
+    referralCustom: '',
+    visitReason: '',
     hasReferringVet: '',
     referringVetName: '',
   });
+
+  // Vorbefunde upload
+  type UploadedFile = { file: File; preview: string; uploaded: boolean; key?: string };
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadSessionId, setUploadSessionId] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const cameraInputRef = React.useRef<HTMLInputElement>(null);
 
   const [confirmData, setConfirmData] = useState(false);
   const [confirmFees, setConfirmFees] = useState(false);
@@ -399,6 +479,51 @@ export default function RegistrierungPage() {
     setAnimals((prev) => prev.map((a, i) => (i === idx ? { ...a, collapsed: !a.collapsed } : a)));
   };
 
+  // ── File upload helpers ────────────────────────────────
+  const addFiles = (files: FileList | File[]) => {
+    const newFiles: UploadedFile[] = Array.from(files).map((file) => ({
+      file,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+      uploaded: false,
+    }));
+    setUploadedFiles((prev) => [...prev, ...newFiles]);
+  };
+
+  const removeFile = (idx: number) => {
+    setUploadedFiles((prev) => {
+      const removed = prev[idx];
+      if (removed?.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  };
+
+  const uploadFiles = async () => {
+    const pending = uploadedFiles.filter((f) => !f.uploaded);
+    if (!pending.length) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      pending.forEach((f) => formData.append('files', f.file));
+      const res = await fetch('/api/registration/upload', { method: 'POST', body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setUploadSessionId(data.sessionId);
+        setUploadedFiles((prev) =>
+          prev.map((f) => {
+            const match = data.files?.find((r: { name: string }) => r.name === f.file.name);
+            return match ? { ...f, uploaded: true, key: match.key } : f;
+          }),
+        );
+      }
+    } catch { /* silent */ }
+    setUploading(false);
+  };
+
   // ── Validation ─────────────────────────────────────────
   const validateStep2 = () => {
     const { firstName, lastName, street, houseNumber, zip, city, birthDate, phone, email, emailConfirm, isAdult } = owner;
@@ -406,7 +531,6 @@ export default function RegistrierungPage() {
       return t('errorRequired');
     }
     if (email !== emailConfirm) return t('errorEmailMatch');
-    if (!isAdult) return t('errorAdult');
     return '';
   };
 
@@ -432,7 +556,11 @@ export default function RegistrierungPage() {
       const err = validateStep3();
       if (err) { setError(err); return; }
     }
-    setStep((s) => Math.min(s + 1, 6));
+    // Upload files when leaving step 5
+    if (step === 5 && uploadedFiles.some((f) => !f.uploaded)) {
+      uploadFiles();
+    }
+    setStep((s) => Math.min(s + 1, 7));
   };
 
   const goBack = () => {
@@ -473,7 +601,8 @@ export default function RegistrierungPage() {
           coatColor: a.coatColor,
           chipNumber: a.chipNumber,
           hasInsurance: a.hasInsurance === 'ja',
-          insuranceCompany: a.insuranceCompany,
+          insuranceCompany: a.insuranceCompany === 'Andere' ? a.insuranceCustom : a.insuranceCompany,
+          insuranceType: a.insuranceType || null,
           insuranceNumber: a.insuranceNumber,
           wantsDirectBilling: a.wantsDirectBilling === 'ja',
           wantsInsuranceInfo: a.wantsInsuranceInfo,
@@ -482,9 +611,14 @@ export default function RegistrierungPage() {
         appointment: {
           date: appointment.date,
           time: appointment.time,
-          referralSource: appointment.referralSource,
+          referralSource: appointment.referralSource === 'Andere' ? appointment.referralCustom : appointment.referralSource,
+          visitReason: appointment.visitReason || null,
           referringVetName: appointment.hasReferringVet === 'ja' ? appointment.referringVetName : null,
         },
+        documents: uploadSessionId ? {
+          sessionId: uploadSessionId,
+          files: uploadedFiles.filter((f) => f.uploaded).map((f) => ({ key: f.key, name: f.file.name, type: f.file.type })),
+        } : null,
         language: lang,
         website, // honeypot
       };
@@ -513,7 +647,7 @@ export default function RegistrierungPage() {
   // ── Progress dots ──────────────────────────────────────
   const ProgressDots = () => (
     <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '24px' }}>
-      {[1, 2, 3, 4, 5, 6].map((s) => (
+      {[1, 2, 3, 4, 5, 6, 7].map((s) => (
         <div
           key={s}
           style={{
@@ -551,64 +685,7 @@ export default function RegistrierungPage() {
     </div>
   );
 
-  // ── Field components ───────────────────────────────────
-  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div>
-      <span style={labelStyle}>{label}</span>
-      {children}
-    </div>
-  );
-
-  const TextInput = ({
-    label,
-    value,
-    onChange,
-    type = 'text',
-    placeholder,
-  }: {
-    label: string;
-    value: string;
-    onChange: (v: string) => void;
-    type?: string;
-    placeholder?: string;
-  }) => (
-    <Field label={label}>
-      <input
-        type={type}
-        value={value}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={inputStyle}
-      />
-    </Field>
-  );
-
-  const SelectField = ({
-    label,
-    value,
-    onChange,
-    options,
-    placeholder,
-  }: {
-    label: string;
-    value: string;
-    onChange: (v: string) => void;
-    options: { value: string; label: string }[];
-    placeholder?: string;
-  }) => (
-    <Field label={label}>
-      <select
-        value={value}
-        onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
-        style={inputStyle}
-      >
-        <option value="">{placeholder || '-- Bitte wählen --'}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    </Field>
-  );
+  // Field components moved outside render body – see top of file
 
   // ── Confirmation view ──────────────────────────────────
   if (submitted) {
@@ -620,11 +697,24 @@ export default function RegistrierungPage() {
               <Image src="/tzn-logo.jpg" alt="TZN" width={120} height={48} style={{ height: '48px', width: 'auto' }} />
             </div>
             <div style={{ ...bodyStyle, textAlign: 'center' }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>&#10003;</div>
+              <div style={{
+                width: '72px', height: '72px', borderRadius: '50%',
+                background: '#f0fdfa', border: `2px solid ${BRAND}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 20px', fontSize: '32px', color: BRAND,
+              }}>
+                &#10003;
+              </div>
               <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1f2937', marginBottom: '8px' }}>
-                {t('thankYou')}, {owner.firstName}!
+                {t('thankYou')}, {owner.salutation} {owner.lastName}!
               </h1>
-              <p style={{ color: '#64748b', marginBottom: '24px' }}>{t('confirmationText')}</p>
+              <p style={{ color: '#64748b', marginBottom: '8px', lineHeight: 1.6 }}>
+                {lang === 'de'
+                  ? `Ihre Anmeldung ist bei uns eingegangen. Wir freuen uns darauf, Sie und ${animals.length === 1 ? animals[0].name : animals.map((a) => a.name).join(', ')} kennenzulernen!`
+                  : `Your registration has been received. We look forward to meeting you and ${animals.length === 1 ? animals[0].name : animals.map((a) => a.name).join(', ')}!`
+                }
+              </p>
+              <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '24px' }}>{t('confirmationHint')}</p>
               {appointment.date && (
                 <div
                   style={{
@@ -640,15 +730,27 @@ export default function RegistrierungPage() {
                     {t('appointmentLabel')}
                   </div>
                   <div style={{ fontSize: '16px', color: '#1f2937' }}>
-                    {new Date(appointment.date + 'T00:00:00').toLocaleDateString('de-DE', {
-                      weekday: 'long',
-                      day: '2-digit',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
-                    {appointment.time ? ` um ${appointment.time} Uhr` : ''}
+                    {appointment.time === 'Notfallsprechstunde'
+                      ? 'Notfallsprechstunde (ohne Termin)'
+                      : (
+                        <>
+                          {new Date(appointment.date + 'T00:00:00').toLocaleDateString('de-DE', {
+                            weekday: 'long',
+                            day: '2-digit',
+                            month: 'long',
+                            year: 'numeric',
+                          })}
+                          {appointment.time ? ` um ${appointment.time} Uhr` : ''}
+                        </>
+                      )
+                    }
                   </div>
                 </div>
+              )}
+              {registrationId && (
+                <p style={{ color: '#94a3b8', fontSize: '12px', marginTop: '20px' }}>
+                  Registrierungs-Nr.: {registrationId}
+                </p>
               )}
             </div>
           </div>
@@ -737,34 +839,25 @@ export default function RegistrierungPage() {
               />
 
               <div style={rowStyle}>
-                <TextInput label={t('firstName')} value={owner.firstName} onChange={(v) => setOwnerField('firstName', v)} />
-                <TextInput label={t('lastName')} value={owner.lastName} onChange={(v) => setOwnerField('lastName', v)} />
+                <TextInput label={t('firstName')} value={owner.firstName} onChange={(v) => setOwnerField('firstName', v)} autoComplete="given-name" />
+                <TextInput label={t('lastName')} value={owner.lastName} onChange={(v) => setOwnerField('lastName', v)} autoComplete="family-name" />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px' }}>
-                <TextInput label={t('street')} value={owner.street} onChange={(v) => setOwnerField('street', v)} />
-                <TextInput label={t('houseNumber')} value={owner.houseNumber} onChange={(v) => setOwnerField('houseNumber', v)} />
+                <TextInput label={t('street')} value={owner.street} onChange={(v) => setOwnerField('street', v)} autoComplete="street-address" />
+                <TextInput label={t('houseNumber')} value={owner.houseNumber} onChange={(v) => setOwnerField('houseNumber', v)} autoComplete="address-line2" />
               </div>
 
               <div style={rowStyle}>
-                <TextInput label={t('zip')} value={owner.zip} onChange={(v) => setOwnerField('zip', v)} />
-                <TextInput label={t('city')} value={owner.city} onChange={(v) => setOwnerField('city', v)} />
+                <TextInput label={t('zip')} value={owner.zip} onChange={(v) => setOwnerField('zip', v)} autoComplete="postal-code" />
+                <TextInput label={t('city')} value={owner.city} onChange={(v) => setOwnerField('city', v)} autoComplete="address-level2" />
               </div>
 
-              <TextInput label={t('birthDate')} type="date" value={owner.birthDate} onChange={(v) => setOwnerField('birthDate', v)} />
-              <TextInput label={t('phone')} type="tel" value={owner.phone} onChange={(v) => setOwnerField('phone', v)} />
-              <TextInput label={t('email')} type="email" value={owner.email} onChange={(v) => setOwnerField('email', v)} />
-              <TextInput label={t('emailConfirm')} type="email" value={owner.emailConfirm} onChange={(v) => setOwnerField('emailConfirm', v)} />
+              <TextInput label={t('birthDate')} value={owner.birthDate} onChange={(v) => setOwnerField('birthDate', v)} autoComplete="bday" placeholder="TT.MM.JJJJ" />
+              <TextInput label={t('phone')} type="tel" value={owner.phone} onChange={(v) => setOwnerField('phone', v)} autoComplete="tel" />
+              <TextInput label={t('email')} type="email" value={owner.email} onChange={(v) => setOwnerField('email', v)} autoComplete="email" />
+              <TextInput label={t('emailConfirm')} type="email" value={owner.emailConfirm} onChange={(v) => setOwnerField('emailConfirm', v)} autoComplete="email" />
 
-              <label style={checkboxRow}>
-                <input
-                  type="checkbox"
-                  checked={owner.isAdult}
-                  onChange={(e) => setOwnerField('isAdult', e.target.checked)}
-                  style={{ marginTop: '3px', accentColor: BRAND }}
-                />
-                <span>{t('adultConfirm')}</span>
-              </label>
             </div>
 
             <NavButtons />
@@ -848,8 +941,22 @@ export default function RegistrierungPage() {
                       />
                       <TextInput label={t('animalName')} value={animal.name} onChange={(v) => setAnimalField(idx, 'name', v)} />
                       <div style={rowStyle}>
-                        <TextInput label={t('breed')} value={animal.breed} onChange={(v) => setAnimalField(idx, 'breed', v)} />
-                        <TextInput label={t('animalBirthDate')} type="date" value={animal.birthDate} onChange={(v) => setAnimalField(idx, 'birthDate', v)} />
+                        <Field label={t('breed')}>
+                          <input
+                            list={`breeds-${idx}`}
+                            value={animal.breed}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => setAnimalField(idx, 'breed', e.target.value)}
+                            placeholder="Rasse eingeben oder wählen..."
+                            style={inputStyle}
+                          />
+                          <datalist id={`breeds-${idx}`}>
+                            <option value="Mischling (klein)" />
+                            <option value="Mischling (mittel)" />
+                            <option value="Mischling (groß)" />
+                            {COMMON_BREEDS.map((b) => <option key={b} value={b} />)}
+                          </datalist>
+                        </Field>
+                        <TextInput label={t('animalBirthDate')} value={animal.birthDate} onChange={(v) => setAnimalField(idx, 'birthDate', v)} placeholder="TT.MM.JJJJ" />
                       </div>
                       <div style={rowStyle}>
                         <SelectField
@@ -944,10 +1051,23 @@ export default function RegistrierungPage() {
                           onChange={(v) => setAnimalField(idx, 'insuranceCompany', v)}
                           options={insuranceProviders.map((p) => ({ value: p, label: p }))}
                         />
-                        <TextInput
-                          label={t('insuranceNumber')}
-                          value={animal.insuranceNumber}
-                          onChange={(v) => setAnimalField(idx, 'insuranceNumber', v)}
+                        {animal.insuranceCompany === 'Andere' && (
+                          <TextInput
+                            label="Versicherungsname eingeben"
+                            value={animal.insuranceCustom}
+                            onChange={(v) => setAnimalField(idx, 'insuranceCustom', v)}
+                            placeholder="Name der Versicherung"
+                          />
+                        )}
+
+                        <SelectField
+                          label="Art der Versicherung"
+                          value={animal.insuranceType}
+                          onChange={(v) => setAnimalField(idx, 'insuranceType', v)}
+                          options={[
+                            { value: 'Vollversicherung', label: 'Vollversicherung' },
+                            { value: 'OP-Versicherung', label: 'OP-Versicherung' },
+                          ]}
                         />
 
                         <SelectField
@@ -961,33 +1081,42 @@ export default function RegistrierungPage() {
                         />
 
                         {animal.wantsDirectBilling === 'ja' && (
-                          <div>
-                            <div style={{ ...labelStyle, fontWeight: 600, color: '#1f2937', marginBottom: '10px' }}>
-                              {t('assignmentTitle')}
-                            </div>
-                            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', lineHeight: 1.5 }}>
-                              Hiermit trete ich meinen Erstattungsanspruch aus dem Versicherungsvertrag
-                              an das Tierärztezentrum Neuland ab. Die Abtretung gilt für die Behandlung
-                              des oben genannten Tieres.
-                            </p>
-                            <SignaturePad
-                              onSave={(dataUrl) => setAnimalField(idx, 'signatureData', dataUrl)}
-                              onClear={() => setAnimalField(idx, 'signatureData', '')}
+                          <>
+                            <TextInput
+                              label={t('insuranceNumber')}
+                              value={animal.insuranceNumber}
+                              onChange={(v) => setAnimalField(idx, 'insuranceNumber', v)}
                             />
-                          </div>
+                            <div>
+                              <div style={{ ...labelStyle, fontWeight: 600, color: '#1f2937', marginBottom: '10px' }}>
+                                {t('assignmentTitle')}
+                              </div>
+                              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', lineHeight: 1.5 }}>
+                                Hiermit trete ich meinen Erstattungsanspruch aus dem Versicherungsvertrag
+                                an das Tierärztezentrum Neuland ab. Die Abtretung gilt für die Behandlung
+                                des oben genannten Tieres.
+                              </p>
+                              <SignaturePad
+                                onSave={(dataUrl) => setAnimalField(idx, 'signatureData', dataUrl)}
+                                onClear={() => setAnimalField(idx, 'signatureData', '')}
+                              />
+                            </div>
+                          </>
                         )}
                       </>
                     )}
 
-                    <label style={checkboxRow}>
-                      <input
-                        type="checkbox"
-                        checked={animal.wantsInsuranceInfo}
-                        onChange={(e) => setAnimalField(idx, 'wantsInsuranceInfo', e.target.checked)}
-                        style={{ marginTop: '3px', accentColor: BRAND }}
-                      />
-                      <span>{t('insuranceInfo')}</span>
-                    </label>
+                    {animal.hasInsurance === 'nein' && (
+                      <label style={checkboxRow}>
+                        <input
+                          type="checkbox"
+                          checked={animal.wantsInsuranceInfo}
+                          onChange={(e) => setAnimalField(idx, 'wantsInsuranceInfo', e.target.checked)}
+                          style={{ marginTop: '3px', accentColor: BRAND }}
+                        />
+                        <span>{t('insuranceInfo')}</span>
+                      </label>
+                    )}
                   </div>
                 </div>
               ))}
@@ -997,12 +1126,132 @@ export default function RegistrierungPage() {
           </div>
         );
 
-      // ────── Step 5: Appointment ──────
+      // ────── Step 5: Vorbefunde Upload ──────
       case 5:
         return (
           <div style={bodyStyle}>
             <ProgressDots />
-            <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#1f2937', marginBottom: '20px' }}>{t('step5Title')}</h2>
+            <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#1f2937', marginBottom: '8px' }}>{t('step5Title')}</h2>
+            <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>{t('step5Sub')}</p>
+
+            {/* Drop zone */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: '2px dashed #d1d5db',
+                borderRadius: '12px',
+                padding: '32px 20px',
+                textAlign: 'center',
+                cursor: 'pointer',
+                background: '#fafbfc',
+                transition: 'border-color 0.2s',
+                marginBottom: '12px',
+              }}
+            >
+              <div style={{ fontSize: '36px', marginBottom: '8px', color: '#94a3b8' }}>&#128206;</div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>{t('step5Drag')}</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8' }}>{t('step5Formats')}</div>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,application/pdf,.doc,.docx"
+              onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
+              style={{ display: 'none' }}
+            />
+
+            {/* Camera button – only on touch devices (mobile) */}
+            {typeof window !== 'undefined' && 'ontouchstart' in window && (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  style={{ ...btnSecondary, fontSize: '13px', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  &#128247; {t('step5Camera')}
+                </button>
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
+                  style={{ display: 'none' }}
+                />
+              </div>
+            )}
+
+            {/* File list */}
+            {uploadedFiles.length > 0 && (
+              <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
+                {uploadedFiles.map((f, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      border: '1px solid #e5e7eb',
+                      background: f.uploaded ? '#f0fdf4' : '#fff',
+                    }}
+                  >
+                    {f.preview ? (
+                      <img src={f.preview} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 40, height: 40, borderRadius: '6px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>
+                        &#128196;
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.file.name}</div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>{(f.file.size / 1024).toFixed(0)} KB{f.uploaded ? ' · Hochgeladen' : ''}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                      style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+                <div style={{ fontSize: '12px', color: '#94a3b8' }}>{uploadedFiles.length} Datei(en)</div>
+              </div>
+            )}
+
+            {/* Termingrund */}
+            <div style={{ marginTop: '8px' }}>
+              <span style={labelStyle}>{t('visitReasonLabel')}</span>
+              <textarea
+                value={appointment.visitReason}
+                onChange={(e) => setAppointment((prev) => ({ ...prev, visitReason: e.target.value }))}
+                placeholder={t('visitReasonPlaceholder')}
+                rows={4}
+                style={{
+                  ...inputStyle,
+                  resize: 'vertical',
+                  minHeight: '80px',
+                  lineHeight: 1.5,
+                }}
+              />
+            </div>
+
+            <NavButtons />
+          </div>
+        );
+
+      // ────── Step 6: Appointment ──────
+      case 6:
+        return (
+          <div style={bodyStyle}>
+            <ProgressDots />
+            <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#1f2937', marginBottom: '20px' }}>{t('step6Title')}</h2>
 
             <div style={{ display: 'grid', gap: '14px' }}>
               <TextInput
@@ -1015,21 +1264,33 @@ export default function RegistrierungPage() {
                 label={t('appointmentTime')}
                 value={appointment.time}
                 onChange={(v) => setAppointment((prev) => ({ ...prev, time: v }))}
-                options={timeSlots.map((s) => ({ value: s, label: `${s} Uhr` }))}
+                options={[
+                  { value: 'Notfallsprechstunde', label: 'Notfallsprechstunde (ohne Termin)' },
+                  ...timeSlots.map((s) => ({ value: s, label: `${s} Uhr` })),
+                ]}
               />
 
               <SelectField
                 label={t('referral')}
                 value={appointment.referralSource}
-                onChange={(v) => setAppointment((prev) => ({ ...prev, referralSource: v }))}
+                onChange={(v) => setAppointment((prev) => ({ ...prev, referralSource: v, referralCustom: '' }))}
                 options={[
                   { value: 'Google', label: t('google') },
                   { value: 'Empfehlung', label: t('recommendation') },
+                  { value: 'Überweisung', label: t('referralVet') },
                   { value: 'Social Media', label: t('socialMedia') },
                   { value: 'Zeitung', label: t('newspaper') },
-                  { value: 'Sonstiges', label: t('other') },
+                  { value: 'Andere', label: t('otherCustom') },
                 ]}
               />
+              {appointment.referralSource === 'Andere' && (
+                <TextInput
+                  label={t('referralCustomLabel')}
+                  value={appointment.referralCustom}
+                  onChange={(v) => setAppointment((prev) => ({ ...prev, referralCustom: v }))}
+                  placeholder={lang === 'de' ? 'Bitte angeben...' : 'Please specify...'}
+                />
+              )}
 
               <SelectField
                 label={t('hasVet')}
@@ -1054,12 +1315,12 @@ export default function RegistrierungPage() {
           </div>
         );
 
-      // ────── Step 6: Confirm & Submit ──────
-      case 6:
+      // ────── Step 7: Confirm & Submit ──────
+      case 7:
         return (
           <div style={bodyStyle}>
             <ProgressDots />
-            <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#1f2937', marginBottom: '20px' }}>{t('step6Title')}</h2>
+            <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#1f2937', marginBottom: '20px' }}>{t('step7Title')}</h2>
             {error && <div style={errorBanner}>{error}</div>}
 
             <div style={{ display: 'grid', gap: '16px' }}>
@@ -1100,7 +1361,7 @@ export default function RegistrierungPage() {
                   onChange={(e) => setConfirmPayment(e.target.checked)}
                   style={{ marginTop: '3px', accentColor: BRAND }}
                 />
-                <span>{t('confirmPayment')}</span>
+                <span>{animals.some((a) => a.wantsDirectBilling === 'ja') ? t('confirmPayment') : t('confirmPaymentDirect')}</span>
               </label>
             </div>
 

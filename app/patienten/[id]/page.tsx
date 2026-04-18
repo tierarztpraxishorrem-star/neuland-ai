@@ -125,6 +125,20 @@ export default function PatientDetailPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [uploadAccept, setUploadAccept] = useState('');
+  const [vorbefundeAnalysis, setVorbefundeAnalysis] = useState('');
+  const [vorbefundeAnalyzing, setVorbefundeAnalyzing] = useState(false);
+
+  type StationStay = {
+    id: string;
+    box_number: string | null;
+    diagnosis: string | null;
+    admission_date: string;
+    discharge_date: string | null;
+    status: string;
+    station_day: number;
+    responsible_vet: string | null;
+  };
+  const [stationStays, setStationStays] = useState<StationStay[]>([]);
 
   const docsStorageKey = `patient_documents_${patientId}`;
 
@@ -143,14 +157,19 @@ export default function PatientDetailPage() {
       if (!patientId) return;
 
       setLoading(true);
-      const [patientRes, consultationsRes] = await Promise.all([
+      const [patientRes, consultationsRes, stationRes] = await Promise.all([
         supabase.from('patients').select('*').eq('id', patientId).maybeSingle(),
         supabase
           .from('cases')
           .select('id, title, result, transcript, created_at, duration_seconds, source')
           .eq('patient_id', patientId)
           .order('created_at', { ascending: false })
-          .limit(300)
+          .limit(300),
+        supabase
+          .from('station_patients')
+          .select('id, box_number, diagnosis, admission_date, discharge_date, status, station_day, responsible_vet')
+          .eq('patient_id', patientId)
+          .order('admission_date', { ascending: false }),
       ]);
 
       if (patientRes.error) {
@@ -175,6 +194,10 @@ export default function PatientDetailPage() {
         console.error(consultationsRes.error);
       } else {
         setConsultations((consultationsRes.data || []) as Consultation[]);
+      }
+
+      if (!stationRes.error) {
+        setStationStays((stationRes.data || []) as StationStay[]);
       }
 
       setLoading(false);
@@ -441,6 +464,57 @@ export default function PatientDetailPage() {
     }
   };
 
+  const analyzeVorbefunde = async () => {
+    if (documents.length === 0) return;
+    setVorbefundeAnalyzing(true);
+    try {
+      const docsContent = documents
+        .slice(0, 10)
+        .map((doc) => `Dokument: ${doc.name} (${getDocumentTypeLabel(doc.fileType)})\n${doc.text}`)
+        .join('\n\n---\n\n');
+
+      const prompt = `Du bist ein veterinärmedizinischer Assistent. Analysiere die folgenden Vorbefunde/Dokumente eines Tierpatienten.
+
+Patient: ${patient?.name || 'Unbekannt'}, ${patient?.tierart || ''} ${patient?.rasse || ''}, ${patient?.alter || ''}, ${patient?.geschlecht || ''}
+
+Erstelle eine strukturierte Vorbewertung:
+1. **Dokumenttypen**: Was wurde hochgeladen (Blutbild, Röntgen, OP-Bericht, Impfpass, etc.)?
+2. **Relevante Befunde**: Auffällige Werte, Diagnosen, Medikationen
+3. **Auffälligkeiten**: Was sollte der Tierarzt besonders beachten?
+4. **Zusammenfassung**: Kurze klinische Einordnung
+
+WICHTIG: Weise am Ende darauf hin: "Diese KI-Vorbewertung dient nur zur Orientierung. Die Befunde müssen vom Tierarzt persönlich gesichtet und bewertet werden."
+
+Antworte auf Deutsch. Sei knapp aber medizinisch präzise.
+
+DOKUMENTE:
+${docsContent}`;
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: prompt }],
+          context: 'Vorbefunde-Analyse',
+        }),
+      });
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += decoder.decode(value);
+        setVorbefundeAnalysis(fullText);
+      }
+    } catch {
+      setVorbefundeAnalysis('Fehler bei der Analyse. Bitte erneut versuchen.');
+    } finally {
+      setVorbefundeAnalyzing(false);
+    }
+  };
+
   return (
     <main
       style={{
@@ -591,6 +665,48 @@ export default function PatientDetailPage() {
             })()}
           </Section>
 
+          {stationStays.length > 0 && (
+            <Section title='Stationäre Aufenthalte'>
+              <div style={{ display: 'grid', gap: '10px' }}>
+                {stationStays.map((stay) => {
+                  const isActive = stay.status === 'active';
+                  const admDate = new Date(stay.admission_date + 'T00:00:00');
+                  const disDate = stay.discharge_date ? new Date(stay.discharge_date + 'T00:00:00') : null;
+                  return (
+                    <ListItem
+                      key={stay.id}
+                      onClick={() => router.push(`/station/${stay.id}`)}
+                      style={{
+                        cursor: 'pointer',
+                        borderLeft: isActive ? '3px solid #0f6b74' : '3px solid #d1d5db',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ fontWeight: 700 }}>
+                          {isActive ? 'Aktueller Aufenthalt' : 'Stationärer Aufenthalt'}
+                          {stay.box_number ? ` · Box ${stay.box_number}` : ''}
+                        </div>
+                        <Badge tone={isActive ? 'success' : 'accent'}>
+                          {isActive ? `Tag ${stay.station_day}` : 'Entlassen'}
+                        </Badge>
+                      </div>
+                      {stay.diagnosis && (
+                        <div style={{ fontSize: '13px', color: '#0f6b74', fontWeight: 600, marginTop: '4px' }}>
+                          Diagnose: {stay.diagnosis}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                        Aufnahme: {admDate.toLocaleDateString('de-DE')}
+                        {disDate ? ` — Entlassung: ${disDate.toLocaleDateString('de-DE')}` : ''}
+                        {stay.responsible_vet ? ` · Tierarzt: ${stay.responsible_vet}` : ''}
+                      </div>
+                    </ListItem>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
+
           <Section
             title='🧠 Letzter Verlauf'
             actions={(
@@ -620,7 +736,18 @@ export default function PatientDetailPage() {
             </div>
           </Section>
 
-          <Section title='Dokumente & Patientenhistorie'>
+          <Section
+            title='Dokumente & Patientenhistorie'
+            actions={documents.length > 0 ? (
+              <Button
+                variant='secondary'
+                onClick={analyzeVorbefunde}
+                disabled={vorbefundeAnalyzing}
+              >
+                {vorbefundeAnalyzing ? 'Analysiert...' : 'Vorbefunde KI-bewerten'}
+              </Button>
+            ) : undefined}
+          >
 
             <div
               onClick={() => !uploading && openUploadPicker('')}
@@ -732,6 +859,20 @@ export default function PatientDetailPage() {
                 </Button>
               </div>
             </div>
+
+            {vorbefundeAnalysis && (
+              <Card style={{ marginBottom: '12px', padding: '16px', background: '#f0fdfa', borderColor: '#99f6e4' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontWeight: 700, color: '#0f6b74', fontSize: '14px' }}>KI-Vorbewertung</div>
+                  <Button variant='ghost' size='sm' onClick={() => setVorbefundeAnalysis('')} style={{ fontSize: '14px', padding: '2px 8px' }}>
+                    ✕
+                  </Button>
+                </div>
+                <div style={{ fontSize: '13px', color: '#1f2937', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                  {vorbefundeAnalysis}
+                </div>
+              </Card>
+            )}
 
             <div style={{ display: 'grid', gap: '10px' }}>
               {documents.map((doc) => (

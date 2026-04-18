@@ -66,14 +66,14 @@ const composeTemplate = async (input: {
     'Nutzerantworten:',
     answersText,
     input.currentCompiledPrompt ? `Aktueller interner Prompt:\n${input.currentCompiledPrompt}` : '',
-    input.instruction ? `Aenderungswunsch: ${input.instruction}` : ''
+    input.instruction ? `Änderungswunsch: ${input.instruction}` : ''
   ]
     .filter(Boolean)
     .join('\n\n');
 
   const systemPrompt = [
-    'Du bist ein Prompt-Architekt fuer veterinärmedizinische Dokumentationsvorlagen.',
-    'Erzeuge ein robustes, alltagstaugliches Prompt-Design fuer nicht-prompt-affine Nutzer.',
+    'Du bist ein Prompt-Architekt für veterinärmedizinische Dokumentationsvorlagen.',
+    'Erzeuge ein robustes, alltagstaugliches Prompt-Design für nicht-prompt-affine Nutzer.',
     'Wichtig: Gib genau ein JSON-Objekt zurueck, ohne Markdown.',
     'JSON-Schema:',
     '{',
@@ -82,9 +82,9 @@ const composeTemplate = async (input: {
     '  "structure": { "untersuchung": ["string"] }',
     '}',
     'Regeln:',
-    '- compiledPrompt muss direkt fuer ein LLM nutzbar sein.',
+    '- compiledPrompt muss direkt für ein LLM nutzbar sein.',
     '- compiledPrompt soll klare Abschnitte, Regeln, Qualitaetskriterien enthalten.',
-    '- designBrief kurz (max 8 Saetze), fachlich.',
+    '- designBrief kurz (max 8 Sätze), fachlich.',
     '- structure.untersuchung nur falls sinnvoll, sonst leeres Array.'
   ].join('\n');
 
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
       if (!name) return Response.json({ error: 'Name fehlt.' }, { status: 400 });
 
       if (payload.scope === 'practice' && !payload.practiceId) {
-        return Response.json({ error: 'practiceId fehlt fuer Praxis-Scope.' }, { status: 400 });
+        return Response.json({ error: 'practiceId fehlt für Praxis-Scope.' }, { status: 400 });
       }
 
       const composed = await composeTemplate({
@@ -199,7 +199,7 @@ export async function POST(req: Request) {
 
     const instruction = payload.instruction?.trim();
     if (!instruction) {
-      return Response.json({ error: 'Aenderungswunsch fehlt.' }, { status: 400 });
+      return Response.json({ error: 'Änderungswunsch fehlt.' }, { status: 400 });
     }
 
     const { data: existingTemplate, error: existingTemplateError } = await supabase

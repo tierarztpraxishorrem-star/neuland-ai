@@ -11,10 +11,10 @@ type ChatMessage = {
 }
 
 const PRIVACY_NOTICE =
-	'Bitte geben Sie keine sensiblen personenbezogenen Daten ein. Die Inhalte koennen zur Verarbeitung an externe Dienste uebertragen werden.'
+	'Bitte geben Sie keine sensiblen personenbezogenen Daten ein. Die Inhalte können zur Verarbeitung an externe Dienste übertragen werden.'
 
 const UNCERTAINTY_NOTICE =
-	'Ich unterstuetze Sie bei Fragen rund um Ihr Tier und unsere Praxis. Bitte beachten Sie, dass einzelne Informationen unvollstaendig oder nicht ganz korrekt sein koennen.'
+	'Ich unterstuetze Sie bei Fragen rund um Ihr Tier und unsere Praxis. Bitte beachten Sie, dass einzelne Informationen unvollstaendig oder nicht ganz korrekt sein können.'
 
 const isUncertainReply = (text: string) => {
 	const value = text.toLowerCase()

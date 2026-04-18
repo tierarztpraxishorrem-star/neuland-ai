@@ -186,6 +186,13 @@ export default function StationSheetPage() {
   const [dailyTasksLoading, setDailyTasksLoading] = useState(false);
   const [newTaskLabel, setNewTaskLabel] = useState('');
 
+  // Inline-edit Diagnose & Diät
+  const [editingDiagnosis, setEditingDiagnosis] = useState(false);
+  const [diagnosisInput, setDiagnosisInput] = useState('');
+  const [editingDiet, setEditingDiet] = useState(false);
+  const [dietTypeInput, setDietTypeInput] = useState('');
+  const [dietNotesInput, setDietNotesInput] = useState('');
+
   // Handoff (Schichtübergabe)
   const [handoffs, setHandoffs] = useState<Array<{ id: string; shift_label: string | null; transcript: string; recorded_by: string | null; created_at: string }>>([]);
   const [handoffRecording, setHandoffRecording] = useState(false);
@@ -488,15 +495,22 @@ export default function StationSheetPage() {
         .split(',')
         .map(s => parseInt(s.trim()))
         .filter(n => !isNaN(n) && n >= 0 && n <= 23);
-      const { error } = await supabase.from('station_vital_params').insert({
+      const practiceId = (await supabase.from('station_patients').select('practice_id').eq('id', patientId).single()).data?.practice_id;
+      const { data: newParam, error } = await supabase.from('station_vital_params').insert({
         station_patient_id: patientId,
-        practice_id: (await supabase.from('station_patients').select('practice_id').eq('id', patientId).single()).data?.practice_id,
+        practice_id: practiceId,
         label: newParamLabel.trim(),
         unit: newParamUnit.trim() || null,
         is_required: newParamRequired,
         scheduled_hours: scheduledHours,
-      });
+      }).select('id').single();
       if (error) { showToast({ message: 'Fehler.', type: 'error' }); return; }
+
+      // Create schedule entry for circles if hours were specified
+      if (scheduledHours.length > 0 && newParam) {
+        await handleSetVitalSchedule(`custom_${newParam.id}`, scheduledHours);
+      }
+
       showToast({ message: 'Parameter hinzugefügt!', type: 'success' });
       setShowAddParam(false);
       setNewParamLabel('');
@@ -548,6 +562,36 @@ export default function StationSheetPage() {
       const res = await fetchWithAuth(`/api/station/patients/${patientId}`, { method: 'DELETE' });
       if (res.ok) { showToast({ message: 'Patient entlassen.', type: 'success' }); router.push('/station'); }
     } catch { showToast({ message: 'Fehler.', type: 'error' }); }
+  };
+
+  const patchPatientField = async (fields: Record<string, string | null>) => {
+    try {
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      });
+      if (res.ok) {
+        setPatient((prev) => prev ? { ...prev, ...fields } : prev);
+        showToast({ message: 'Gespeichert.', type: 'success' });
+        return true;
+      }
+      showToast({ message: 'Fehler beim Speichern.', type: 'error' });
+      return false;
+    } catch {
+      showToast({ message: 'Fehler beim Speichern.', type: 'error' });
+      return false;
+    }
+  };
+
+  const saveDiagnosis = async () => {
+    const ok = await patchPatientField({ diagnosis: diagnosisInput || null });
+    if (ok) setEditingDiagnosis(false);
+  };
+
+  const saveDiet = async () => {
+    const ok = await patchPatientField({ diet_type: dietTypeInput || null, diet_notes: dietNotesInput || null });
+    if (ok) setEditingDiet(false);
   };
 
   const handleDischargePdf = async () => {
@@ -759,16 +803,81 @@ export default function StationSheetPage() {
             {patient.birth_date && <span>{new Date(patient.birth_date).toLocaleDateString('de-DE')}</span>}
             {patient.owner_name && <span>Besitzer: {patient.owner_name}</span>}
           </div>
-          {patient.diagnosis && <div style={{ marginTop: '6px', fontSize: '14px', color: uiTokens.textPrimary }}>Diagnose: {patient.diagnosis}</div>}
-          {patient.diet_type && (
-            <div style={{ marginTop: '6px', padding: '8px 12px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '16px' }}>🍽️</span>
-              <div>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: '#92400e' }}>Diät: {patient.diet_type}</span>
-                {patient.diet_notes && <span style={{ fontSize: '12px', color: '#a16207', marginLeft: '8px' }}>{patient.diet_notes}</span>}
+          {/* Diagnose – inline edit */}
+          <div style={{ marginTop: '6px', fontSize: '14px', color: uiTokens.textPrimary }}>
+            {editingDiagnosis ? (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontWeight: 600, flexShrink: 0 }}>Diagnose:</span>
+                <input
+                  value={diagnosisInput}
+                  onChange={(e) => setDiagnosisInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveDiagnosis(); if (e.key === 'Escape') setEditingDiagnosis(false); }}
+                  autoFocus
+                  style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: '6px', padding: '4px 8px', fontSize: '14px' }}
+                />
+                <button type="button" onClick={saveDiagnosis} style={{ background: uiTokens.brand, color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', cursor: 'pointer', fontWeight: 600 }}>OK</button>
+                <button type="button" onClick={() => setEditingDiagnosis(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px' }}><X size={16} /></button>
               </div>
-            </div>
-          )}
+            ) : (
+              <span
+                onClick={() => { setDiagnosisInput(patient.diagnosis || ''); setEditingDiagnosis(true); }}
+                style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                title="Klicken zum Bearbeiten"
+              >
+                Diagnose: {patient.diagnosis || '–'}
+                <Pencil size={13} style={{ color: '#94a3b8' }} />
+              </span>
+            )}
+          </div>
+
+          {/* Diät – inline edit */}
+          <div style={{ marginTop: '6px' }}>
+            {editingDiet ? (
+              <div style={{ padding: '10px 12px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#92400e', flexShrink: 0 }}>Diät:</span>
+                  <input
+                    value={dietTypeInput}
+                    onChange={(e) => setDietTypeInput(e.target.value)}
+                    placeholder="z.B. Schonkost, NPO, Renal..."
+                    style={{ flex: 1, border: '1px solid #fde68a', borderRadius: '6px', padding: '4px 8px', fontSize: '13px', background: '#fff' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#a16207', flexShrink: 0 }}>Notiz:</span>
+                  <input
+                    value={dietNotesInput}
+                    onChange={(e) => setDietNotesInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveDiet(); if (e.key === 'Escape') setEditingDiet(false); }}
+                    placeholder="Details zur Diät..."
+                    style={{ flex: 1, border: '1px solid #fde68a', borderRadius: '6px', padding: '4px 8px', fontSize: '12px', background: '#fff' }}
+                  />
+                  <button type="button" onClick={saveDiet} style={{ background: '#92400e', color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '13px', cursor: 'pointer', fontWeight: 600 }}>OK</button>
+                  <button type="button" onClick={() => setEditingDiet(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={16} /></button>
+                </div>
+              </div>
+            ) : patient.diet_type ? (
+              <div
+                onClick={() => { setDietTypeInput(patient.diet_type || ''); setDietNotesInput(patient.diet_notes || ''); setEditingDiet(true); }}
+                style={{ padding: '8px 12px', borderRadius: '8px', background: '#fefce8', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                title="Klicken zum Bearbeiten"
+              >
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#92400e' }}>Diät: {patient.diet_type}</span>
+                  {patient.diet_notes && <span style={{ fontSize: '12px', color: '#a16207', marginLeft: '8px' }}>{patient.diet_notes}</span>}
+                </div>
+                <Pencil size={13} style={{ color: '#a16207', flexShrink: 0 }} />
+              </div>
+            ) : (
+              <span
+                onClick={() => { setDietTypeInput(''); setDietNotesInput(''); setEditingDiet(true); }}
+                style={{ fontSize: '13px', color: '#94a3b8', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                title="Diät hinzufügen"
+              >
+                Diät hinzufügen <Plus size={13} />
+              </span>
+            )}
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '8px' }}>
             {patient.cave && <span style={{ background: '#fef2f2', color: '#dc2626', fontSize: '12px', fontWeight: 700, padding: '3px 10px', borderRadius: '6px' }}>CAVE: {patient.cave_details || 'Ja'}</span>}
             {patient.has_collar && <span style={{ background: '#f0fdf4', color: '#16a34a', fontSize: '12px', padding: '3px 10px', borderRadius: '6px' }}>Halskragen</span>}
@@ -784,10 +893,10 @@ export default function StationSheetPage() {
             background: '#eff6ff',
           }}>
             <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e40af', marginBottom: '12px' }}>
-              💊 Medikamente fuer Tag {patient.station_day} bestaetigen
+              💊 Medikamente für Tag {patient.station_day} bestätigen
             </div>
             <div style={{ fontSize: '13px', color: '#475569', marginBottom: '16px' }}>
-              Folgende Medikamente werden von gestern uebernommen. Abwaehlen um abzusetzen.
+              Folgende Medikamente werden von gestern übernommen. Abwählen um abzusetzen.
             </div>
             <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
               {medications.filter(m => m.is_active).map((med) => (
@@ -1278,34 +1387,67 @@ export default function StationSheetPage() {
                     );
                   })}
                 </tr>
-                {/* Custom parameter rows */}
-                {customParams.map(cp => (
-                  <tr key={cp.id} style={{ borderTop: `1px solid ${cp.is_required ? '#fde68a' : '#f1f5f9'}`, background: cp.is_required ? '#fffbeb' : 'transparent' }}>
-                    <td style={{ padding: '8px 6px', fontWeight: 600, color: cp.is_required ? '#b45309' : uiTokens.textPrimary, fontSize: '12px' }}>
-                      {cp.label}{cp.unit ? ` (${cp.unit})` : ''}{cp.is_required ? ' *' : ''}
-                    </td>
-                    {HOURS.map(h => {
-                      const cv = customValues.find(v => v.param_id === cp.id && v.measured_hour === h);
-                      return (
-                        <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '11px' }}>
-                          {cv ? (
-                            <span style={{ color: uiTokens.textPrimary }}>{cv.value}</span>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                const val = prompt(`${cp.label} um ${String(h).padStart(2, '0')}:00:`);
-                                if (val) handleAddCustomValue(cp.id, h, val);
-                              }}
-                              style={{ color: cp.is_required ? '#eab308' : '#e5e7eb', background: 'none', border: 'none', cursor: 'pointer', fontSize: '10px' }}
-                            >
-                              {cp.is_required ? '!' : '–'}
-                            </button>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                {/* Custom parameter rows — mit Schedule-Kringeln */}
+                {customParams.map(cp => {
+                  const cpKey = `custom_${cp.id}`;
+                  const cpSchedule = vitalSchedules.find(s => s.param_key === cpKey);
+                  const cpHours = cpSchedule?.scheduled_hours || [];
+                  const cpHL = cpSchedule?.is_highlighted || false;
+                  return (
+                    <tr key={cp.id} style={{ borderTop: `1px solid ${cp.is_required ? '#fde68a' : '#f1f5f9'}`, background: cp.is_required ? '#fffbeb' : cpHL ? '#f0fdf4' : 'transparent' }}>
+                      <td
+                        style={{ padding: '8px 6px', fontWeight: 600, color: cp.is_required ? '#b45309' : cpHL ? '#0f6b74' : uiTokens.textPrimary, fontSize: '12px', cursor: 'pointer' }}
+                        onClick={() => { setScheduleEditing(scheduleEditing === cpKey ? null : cpKey); setScheduleHoursInput(cpHours.join(',')); }}
+                        title="Klicken um Mess-Zeiten zu setzen"
+                      >
+                        {cp.label}{cp.unit ? ` (${cp.unit})` : ''}{cp.is_required ? ' *' : ''}
+                        {cpHours.length > 0 && <span style={{ marginLeft: '4px', fontSize: '10px', color: '#0f6b74' }}>⏰</span>}
+                        {scheduleEditing === cpKey && (
+                          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: '4px' }}>
+                            <input value={scheduleHoursInput} onChange={(e) => setScheduleHoursInput(e.target.value)} placeholder="z.B. 8,12,16,20" style={{ width: '90px', padding: '3px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { const hrs = scheduleHoursInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23); handleSetVitalSchedule(cpKey, hrs); setScheduleEditing(null); } }} />
+                            <button type="button" onClick={() => { const hrs = scheduleHoursInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 0 && n <= 23); handleSetVitalSchedule(cpKey, hrs); setScheduleEditing(null); }} style={{ marginTop: '3px', fontSize: '9px', background: uiTokens.brand, color: '#fff', border: 'none', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}>OK</button>
+                          </div>
+                        )}
+                      </td>
+                      {HOURS.map(h => {
+                        const cv = customValues.find(v => v.param_id === cp.id && v.measured_hour === h);
+                        const isScheduled = cpHours.includes(h);
+                        const isOverdue = isScheduled && !cv && (isPastDay || (isToday && isHourPast(h, currentHour)));
+                        const quickEntry = () => {
+                          const val = prompt(`${cp.label} um ${String(h).padStart(2, '0')}:00:`);
+                          if (val) handleAddCustomValue(cp.id, h, val);
+                        };
+                        return (
+                          <td key={h} style={{ textAlign: 'center', padding: '4px 1px', fontSize: '11px' }}>
+                            {cv ? (
+                              <span style={{
+                                color: uiTokens.textPrimary,
+                                background: isScheduled ? '#dcfce7' : 'transparent',
+                                borderRadius: '50%',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '26px', height: '26px', fontWeight: isScheduled ? 700 : 400,
+                              }}>{cv.value}</span>
+                            ) : isScheduled ? (
+                              <button onClick={quickEntry} style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: '22px', height: '22px', borderRadius: '50%',
+                                border: `2px solid ${isOverdue ? '#ef4444' : '#0f6b74'}`,
+                                background: isOverdue ? '#fef2f2' : 'transparent',
+                                fontSize: '9px', color: isOverdue ? '#ef4444' : '#0f6b74',
+                                cursor: 'pointer', padding: 0,
+                              }}>{isOverdue ? '!' : ''}</button>
+                            ) : (
+                              <button onClick={quickEntry} style={{ color: cp.is_required ? '#eab308' : '#d1d5db', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', padding: '2px' }}>
+                                {cp.is_required ? '!' : '–'}
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

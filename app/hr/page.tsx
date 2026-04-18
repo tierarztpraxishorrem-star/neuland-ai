@@ -319,7 +319,7 @@ export default function HrPage() {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!isRunning) return;
       event.preventDefault();
-      event.returnValue = "Deine Arbeitszeit laeuft noch. Wirklich verlassen?";
+      event.returnValue = "Deine Arbeitszeit läuft noch. Wirklich verlassen?";
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);

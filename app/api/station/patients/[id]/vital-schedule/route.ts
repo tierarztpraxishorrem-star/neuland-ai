@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-const VALID_PARAM_KEYS = ['heart_rate', 'resp_rate', 'temperature_c', 'pain_score', 'feces', 'urine', 'notes'];
+const STANDARD_PARAM_KEYS = ['heart_rate', 'resp_rate', 'temperature_c', 'pain_score', 'feces', 'urine', 'notes'];
 
 // GET → Mess-Zeitpläne für Standard-Vitals dieses Patienten
 export async function GET(req: Request, ctx: Ctx) {
@@ -42,8 +42,9 @@ export async function PUT(req: Request, ctx: Ctx) {
     const hours = Array.isArray(body?.scheduled_hours) ? body.scheduled_hours.filter((h: unknown) => typeof h === 'number' && h >= 0 && h <= 23) : [];
     const isHighlighted = typeof body?.is_highlighted === 'boolean' ? body.is_highlighted : hours.length > 0;
 
-    if (!VALID_PARAM_KEYS.includes(paramKey)) {
-      return NextResponse.json({ error: `Ungültiger Parameter. Erlaubt: ${VALID_PARAM_KEYS.join(', ')}` }, { status: 400 });
+    const isValid = STANDARD_PARAM_KEYS.includes(paramKey) || paramKey.startsWith('custom_');
+    if (!paramKey || !isValid) {
+      return NextResponse.json({ error: 'Ungültiger Parameter.' }, { status: 400 });
     }
 
     // Upsert
