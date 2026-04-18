@@ -23,6 +23,7 @@ import {
   PanelLeftOpen,
   Briefcase,
   BedDouble,
+  ClipboardList,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -38,6 +39,23 @@ export default function Sidebar() {
   const diamondEnabled = isPersonalDiamondEnabled();
   const [hrRunning, setHrRunning] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState<{ whatsapp: number; slack: number; mail: number; total: number }>({ whatsapp: 0, slack: 0, mail: 0, total: 0 });
+  const [pendingRegistrations, setPendingRegistrations] = useState(0);
+
+  const loadPendingRegistrations = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+      const res = await fetch("/api/admin/registrations", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingRegistrations(data.pending_count || 0);
+      }
+    } catch {
+      // silently ignore
+    }
+  };
 
   const loadUnreadCounts = async () => {
     try {
@@ -111,6 +129,7 @@ export default function Sidebar() {
     const onFocus = () => {
       void loadHrStatus();
       void loadUnreadCounts();
+      void loadPendingRegistrations();
     };
 
     window.addEventListener("focus", onFocus);
@@ -123,7 +142,11 @@ export default function Sidebar() {
   // Load unread counts on mount and poll every 30s
   useEffect(() => {
     void loadUnreadCounts();
-    const interval = setInterval(() => void loadUnreadCounts(), 30000);
+    void loadPendingRegistrations();
+    const interval = setInterval(() => {
+      void loadUnreadCounts();
+      void loadPendingRegistrations();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -189,6 +212,7 @@ export default function Sidebar() {
       title: "ARBEITSBEREICH",
       links: [
         { name: "Admin", href: "/admin", icon: Settings },
+        { name: "Registrierungen", href: "/admin/registrierungen", icon: ClipboardList, badge: pendingRegistrations },
       ],
     },
   ];
