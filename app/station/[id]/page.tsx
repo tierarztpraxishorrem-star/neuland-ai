@@ -133,6 +133,10 @@ export default function StationSheetPage() {
   const [loading, setLoading] = useState(true);
   const [aiChecking, setAiChecking] = useState(false);
 
+  // Medikamenten-Bestätigung bei Tageswechsel
+  const [showMedConfirm, setShowMedConfirm] = useState(false);
+  const [medConfirmChecked, setMedConfirmChecked] = useState<Record<string, boolean>>({});
+
   // Add custom param
   const [showAddParam, setShowAddParam] = useState(false);
   const [newParamLabel, setNewParamLabel] = useState('');
@@ -239,6 +243,28 @@ export default function StationSheetPage() {
   }, [patientId]);
 
   useEffect(() => { loadData(); loadExtras(); }, [loadData, loadExtras]);
+
+  // Medikamenten-Bestätigung bei Tageswechsel (Tag 2+)
+  useEffect(() => {
+    if (!patient || !medications.length) return;
+    const stationDay = patient.station_day || 1;
+    if (stationDay <= 1) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (selectedDate !== today) return; // nur für den aktuellen Tag
+
+    const confirmKey = `station_med_confirm_${patientId}_${today}`;
+    const alreadyConfirmed = localStorage.getItem(confirmKey);
+    if (alreadyConfirmed) return;
+
+    const activeMeds = medications.filter(m => m.is_active);
+    if (activeMeds.length === 0) return;
+
+    // Alle standardmäßig angehakt
+    const initial: Record<string, boolean> = {};
+    activeMeds.forEach(m => { initial[m.id] = true; });
+    setMedConfirmChecked(initial);
+    setShowMedConfirm(true);
+  }, [patient, medications, selectedDate, patientId]);
 
   // Reload vitals + tasks + administrations when selectedDate changes
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -570,6 +596,26 @@ export default function StationSheetPage() {
     } catch { /* ignore */ }
   };
 
+  const confirmMedications = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    // Abgewählte Meds deaktivieren
+    const toDeactivate = Object.entries(medConfirmChecked).filter(([, v]) => !v).map(([id]) => id);
+    for (const medId of toDeactivate) {
+      try {
+        await fetchWithAuth(`/api/station/patients/${patientId}/medications/${medId}`, { method: 'DELETE' });
+      } catch { /* ignore */ }
+    }
+    // Bestätigung speichern
+    localStorage.setItem(`station_med_confirm_${patientId}_${today}`, '1');
+    setShowMedConfirm(false);
+    if (toDeactivate.length > 0) {
+      showToast({ message: `${toDeactivate.length} Medikament${toDeactivate.length > 1 ? 'e' : ''} abgesetzt.`, type: 'success' });
+      loadData();
+    } else {
+      showToast({ message: 'Alle Medikamente bestätigt.', type: 'success' });
+    }
+  };
+
   // Handoff voice handler
   const startHandoffRecording = async () => {
     try {
@@ -724,6 +770,71 @@ export default function StationSheetPage() {
             {patient.dnr && <span style={{ background: '#fef2f2', color: '#dc2626', fontSize: '12px', fontWeight: 700, padding: '3px 10px', borderRadius: '6px' }}>DNR</span>}
           </div>
         </Card>
+
+        {/* Medikamenten-Bestätigung bei Tageswechsel */}
+        {showMedConfirm && (
+          <Card style={{
+            marginBottom: '12px', padding: '20px', borderLeft: '4px solid #2563eb',
+            background: '#eff6ff',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e40af', marginBottom: '12px' }}>
+              💊 Medikamente fuer Tag {patient.station_day} bestaetigen
+            </div>
+            <div style={{ fontSize: '13px', color: '#475569', marginBottom: '16px' }}>
+              Folgende Medikamente werden von gestern uebernommen. Abwaehlen um abzusetzen.
+            </div>
+            <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
+              {medications.filter(m => m.is_active).map((med) => (
+                <label
+                  key={med.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px',
+                    background: medConfirmChecked[med.id] ? '#fff' : '#fef2f2',
+                    border: `1px solid ${medConfirmChecked[med.id] ? '#e2e8f0' : '#fecaca'}`,
+                    borderRadius: '10px', cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={medConfirmChecked[med.id] ?? true}
+                    onChange={() => setMedConfirmChecked(prev => ({ ...prev, [med.id]: !prev[med.id] }))}
+                    style={{ width: '18px', height: '18px', accentColor: '#2563eb' }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px', color: medConfirmChecked[med.id] ? '#1e293b' : '#b91c1c', textDecoration: medConfirmChecked[med.id] ? 'none' : 'line-through' }}>
+                      {med.name} {med.dose}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      {med.route} · {med.frequency_label || `${med.scheduled_hours?.length || 0}x/Tag`}
+                      {med.is_dti && ` · DTI ${med.dti_rate_ml_h} ml/h`}
+                      {med.notes && ` · ${med.notes}`}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={confirmMedications}
+                style={{
+                  padding: '10px 24px', borderRadius: '10px', fontSize: '14px', fontWeight: 700,
+                  background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer',
+                }}
+              >
+                Bestaetigen
+              </button>
+              <button
+                onClick={() => { setShowMedConfirm(false); localStorage.setItem(`station_med_confirm_${patientId}_${new Date().toISOString().slice(0, 10)}`, '1'); }}
+                style={{
+                  padding: '10px 24px', borderRadius: '10px', fontSize: '14px', fontWeight: 500,
+                  background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', cursor: 'pointer',
+                }}
+              >
+                Spaeter
+              </button>
+            </div>
+          </Card>
+        )}
 
         {/* AI check strip */}
         <Card style={{
