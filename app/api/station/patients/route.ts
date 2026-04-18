@@ -47,7 +47,21 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Fehler beim Laden der Stationspatienten.' }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, patients: data || [] });
+    // Dynamisch station_day berechnen: Tage seit Aufnahme, Tageswechsel um 6 Uhr
+    const patients = (data || []).map((p: Record<string, unknown>) => {
+      if (p.admission_date && p.status === 'active') {
+        const now = new Date();
+        const effectiveNow = new Date(now);
+        if (effectiveNow.getHours() < 6) effectiveNow.setDate(effectiveNow.getDate() - 1);
+        effectiveNow.setHours(12, 0, 0, 0);
+        const admission = new Date(p.admission_date + 'T12:00:00');
+        const diffDays = Math.floor((effectiveNow.getTime() - admission.getTime()) / (1000 * 60 * 60 * 24));
+        p.station_day = Math.max(1, diffDays + 1);
+      }
+      return p;
+    });
+
+    return NextResponse.json({ ok: true, patients });
   } catch (error) {
     console.error('[api/station/patients] GET Fehler:', error);
     return NextResponse.json({ error: 'Unbekannter Fehler.' }, { status: 500 });

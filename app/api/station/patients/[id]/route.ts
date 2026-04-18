@@ -76,6 +76,20 @@ export async function GET(req: Request, ctx: RouteContext) {
         .eq('measured_date', todayStr),
     ]);
 
+    // Dynamisch station_day berechnen: Tage seit Aufnahme, Tageswechsel um 6 Uhr
+    if (patient.admission_date && patient.status === 'active') {
+      const now = new Date();
+      // "Stationstag" wechselt um 6:00 Uhr morgens
+      const effectiveNow = new Date(now);
+      if (effectiveNow.getHours() < 6) effectiveNow.setDate(effectiveNow.getDate() - 1);
+      effectiveNow.setHours(12, 0, 0, 0); // normalize to noon
+
+      const admission = new Date(patient.admission_date + 'T12:00:00');
+      const diffMs = effectiveNow.getTime() - admission.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      patient.station_day = Math.max(1, diffDays + 1);
+    }
+
     return NextResponse.json({
       ok: true,
       patient,

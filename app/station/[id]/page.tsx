@@ -182,6 +182,8 @@ export default function StationSheetPage() {
   const handoffRecorderRef = useRef<MediaRecorder | null>(null);
   const handoffChunksRef = useRef<Blob[]>([]);
   const [handoffTranscribing, setHandoffTranscribing] = useState(false);
+  const [handoffText, setHandoffText] = useState('');
+  const [handoffSaving, setHandoffSaving] = useState(false);
 
   // Admin info popup
   const [adminInfo, setAdminInfo] = useState<Administration | null>(null);
@@ -567,6 +569,27 @@ export default function StationSheetPage() {
       showToast({ message: err instanceof Error ? err.message : 'Fehler.', type: 'error' });
     } finally {
       setHandoffTranscribing(false);
+    }
+  };
+
+  const saveHandoffText = async () => {
+    if (!handoffText.trim()) return;
+    setHandoffSaving(true);
+    try {
+      const initials = userDisplayName ? userDisplayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 4) : '';
+      const res = await fetchWithAuth(`/api/station/patients/${patientId}/handoff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: handoffText.trim(), recorded_by: initials }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Fehler'); }
+      showToast({ message: 'Übergabe-Notiz gespeichert.', type: 'success' });
+      setHandoffText('');
+      loadExtras();
+    } catch (err) {
+      showToast({ message: err instanceof Error ? err.message : 'Fehler.', type: 'error' });
+    } finally {
+      setHandoffSaving(false);
     }
   };
 
@@ -1186,9 +1209,32 @@ export default function StationSheetPage() {
             {handoffTranscribing ? '⏳ Transkribiert...' : handoffRecording ? '⏹ Stopp' : '🎤 Übergabe aufnehmen'}
           </button>
         }>
-          {handoffs.length === 0 ? (
-            <div style={{ fontSize: '13px', color: uiTokens.textSecondary }}>Noch keine Übergabe-Notizen. Mikrofon drücken, Übergabe sprechen, fertig.</div>
-          ) : (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: handoffs.length > 0 ? '12px' : '0' }}>
+            <textarea
+              value={handoffText}
+              onChange={(e) => setHandoffText(e.target.value)}
+              placeholder="Übergabe-Notiz schreiben oder einkopieren..."
+              style={{
+                flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db',
+                fontSize: '13px', resize: 'vertical', minHeight: '60px', fontFamily: 'inherit',
+              }}
+            />
+            <button
+              onClick={saveHandoffText}
+              disabled={!handoffText.trim() || handoffSaving}
+              style={{
+                padding: '8px 16px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+                background: handoffText.trim() ? uiTokens.brand : '#d1d5db',
+                color: '#fff', border: 'none', cursor: handoffText.trim() ? 'pointer' : 'default',
+                alignSelf: 'flex-end', whiteSpace: 'nowrap',
+              }}
+            >
+              {handoffSaving ? '...' : '💾 Speichern'}
+            </button>
+          </div>
+          {handoffs.length === 0 && !handoffText ? (
+            <div style={{ fontSize: '13px', color: uiTokens.textSecondary, marginTop: '8px' }}>Noch keine Übergabe-Notizen. Mikrofon oder Texteingabe nutzen.</div>
+          ) : handoffs.length === 0 ? null : (
             <div style={{ display: 'grid', gap: '8px' }}>
               {handoffs.map((h) => (
                 <div key={h.id} style={{ padding: '12px', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e5e7eb' }}>
